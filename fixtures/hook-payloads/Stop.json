@@ -1,0 +1,15 @@
+{
+  "session_id": "4c2c3535-edec-4bb7-90b7-38049912db27",
+  "transcript_path": "C:\\Users\\user\\.claude\\projects\\C--STUFF-Project-Graphite-beacon-spikes-out-work\\4c2c3535-edec-4bb7-90b7-38049912db27.jsonl",
+  "cwd": "C:\\STUFF\\Project-Graphite\\beacon\\spikes\\out\\work",
+  "prompt_id": "4c16a4c4-dd5c-4646-a044-dbbc89c5fd5a",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "beacon-spike-ok",
+  "background_tasks": [],
+  "session_crons": []
+}

@@ -1,0 +1,9 @@
+{
+  "session_id": "4c2c3535-edec-4bb7-90b7-38049912db27",
+  "transcript_path": "C:\\Users\\user\\.claude\\projects\\C--STUFF-Project-Graphite-beacon-spikes-out-work\\4c2c3535-edec-4bb7-90b7-38049912db27.jsonl",
+  "cwd": "C:\\STUFF\\Project-Graphite\\beacon\\spikes\\out\\work",
+  "hook_event_name": "InstructionsLoaded",
+  "file_path": "C:\\Users\\user\\.claude\\CLAUDE.md",
+  "memory_type": "User",
+  "load_reason": "session_start"
+}

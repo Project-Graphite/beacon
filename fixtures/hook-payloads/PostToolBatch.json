@@ -1,0 +1,22 @@
+{
+  "session_id": "4c2c3535-edec-4bb7-90b7-38049912db27",
+  "transcript_path": "C:\\Users\\user\\.claude\\projects\\C--STUFF-Project-Graphite-beacon-spikes-out-work\\4c2c3535-edec-4bb7-90b7-38049912db27.jsonl",
+  "cwd": "C:\\STUFF\\Project-Graphite\\beacon\\spikes\\out\\work",
+  "prompt_id": "4c16a4c4-dd5c-4646-a044-dbbc89c5fd5a",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolBatch",
+  "tool_calls": [
+    {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "node -e \"console.log('beacon-spike-ok')\"",
+        "description": "Run node one-liner printing beacon-spike-ok"
+      },
+      "tool_use_id": "toolu_01QQmzYEo3yJo3twgzeTbi3n",
+      "tool_response": "beacon-spike-ok"
+    }
+  ]
+}

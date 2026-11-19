@@ -1,0 +1,16 @@
+{
+  "session_id": "7f60c25b-314d-427f-8256-1bd8e5ac1085",
+  "transcript_path": "C:\\Users\\user\\.claude\\projects\\C--STUFF-Project-Graphite-beacon-spikes-out-work\\7f60c25b-314d-427f-8256-1bd8e5ac1085.jsonl",
+  "cwd": "C:\\STUFF\\Project-Graphite\\beacon\\spikes\\out\\work",
+  "prompt_id": "4461e5b8-0240-4722-8c02-0be589dc3b9b",
+  "hook_event_name": "PostModelSwitch",
+  "from_model": "claude-sonnet-5-5",
+  "to_model": "claude-haiku-5-5",
+  "requested_model": null,
+  "source": "auto",
+  "context_tokens": 50275,
+  "prompt_cache_warm": true,
+  "cache_ttl": "1h",
+  "estimated_cache_write_usd": 0.0101,
+  "pricing": "catalog"
+}
