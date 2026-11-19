@@ -1,0 +1,193 @@
+mod args;
+mod diff;
+mod doctor;
+mod installer;
+mod platform;
+mod settings;
+mod status;
+#[cfg(test)]
+mod test_support;
+
+use args::Command;
+use beacon_core::{
+    ClaudeAgentsLister, Config, ControlClient, Core, CoreOptions, Reply, Request, home_dir,
+};
+use installer::Paths;
+use std::fmt::Display;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::sync::OnceLock;
+
+static DAEMON_HOME: OnceLock<PathBuf> = OnceLock::new();
+
+pub trait Context<T> {
+    fn context(self, what: impl Display) -> Result<T, String>;
+}
+
+impl<T, E: Display> Context<T> for Result<T, E> {
+    fn context(self, what: impl Display) -> Result<T, String> {
+        self.map_err(|error| format!("{what}: {error}"))
+    }
+}
+
+fn main() -> ExitCode {
+    let parsed = std::env::args_os()
+        .skip(1)
+        .map(|arg| {
+            arg.into_string()
+                .map_err(|arg| format!("argument is not valid Unicode: {}", arg.to_string_lossy()))
+        })
+        .collect::<Result<Vec<String>, String>>()
+        .and_then(|args| args::parse(&args));
+    let command = match parsed {
+        Ok(command) => command,
+        Err(message) => {
+            eprintln!("beacon: {message}\n\n{}", args::USAGE);
+            return ExitCode::FAILURE;
+        }
+    };
+    match run(command) {
+        Ok(code) => code,
+        Err(message) => {
+            eprintln!("beacon: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(command: Command) -> Result<ExitCode, String> {
+    match command {
+        Command::Help => {
+            print!("{}", args::USAGE);
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Daemon => daemon(),
+        Command::Stop => {
+            request(&beacon_home()?, &Request::Shutdown)?;
+            println!("Beacon core stopped.");
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Status { watch, json } => status::run(&beacon_home()?, watch, json),
+        Command::Decide { id, decision } => {
+            request(&beacon_home()?, &Request::Decide { id, decision })?;
+            println!("Decision {id} sent.");
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Ack { session } => acknowledge(&beacon_home()?, &session),
+        Command::Install { settings, yes } => {
+            print!("{}", installer::install(&Paths::resolve(settings)?, yes)?);
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Uninstall { settings, yes } => {
+            print!("{}", installer::uninstall(&Paths::resolve(settings)?, yes)?);
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Doctor { settings } => {
+            let (report, healthy) = doctor::run(&Paths::resolve(settings)?);
+            print!("{report}");
+            Ok(if healthy {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
+    }
+}
+
+fn beacon_home() -> Result<PathBuf, String> {
+    home_dir()
+        .ok_or_else(|| "cannot locate the Beacon home: set BEACON_HOME or LOCALAPPDATA".to_string())
+}
+
+pub fn connect(home: &Path) -> Result<ControlClient, String> {
+    ControlClient::connect(home).map_err(|error| {
+        format!(
+            "no Beacon core is running for {} ({error}); start one with `beacon daemon`",
+            home.display()
+        )
+    })
+}
+
+fn request(home: &Path, request: &Request) -> Result<Reply, String> {
+    let reply = connect(home)?
+        .request(request)
+        .context("the Beacon core did not answer")?;
+    if !reply.ok {
+        return Err(reply
+            .error
+            .unwrap_or_else(|| "the Beacon core refused the request".to_string()));
+    }
+    Ok(reply)
+}
+
+fn acknowledge(home: &Path, prefix: &str) -> Result<ExitCode, String> {
+    let snapshot = request(home, &Request::Snapshot)?
+        .snapshot
+        .ok_or("the Beacon core sent no snapshot")?;
+    let ids: Vec<&str> = snapshot
+        .sessions
+        .iter()
+        .map(|session| session.session_id.as_str())
+        .collect();
+    let matching: Vec<&str> = match ids.iter().find(|id| **id == prefix) {
+        Some(exact) => vec![*exact],
+        None => ids
+            .into_iter()
+            .filter(|id| id.starts_with(prefix))
+            .collect(),
+    };
+    let session_id = match matching.as_slice() {
+        [session_id] => session_id.to_string(),
+        [] => return Err(format!("no session id starts with {prefix}")),
+        several => {
+            return Err(format!(
+                "{prefix} matches {} sessions: {}",
+                several.len(),
+                several.join(", ")
+            ));
+        }
+    };
+    request(
+        home,
+        &Request::Acknowledge {
+            session_id: session_id.clone(),
+        },
+    )?;
+    println!("Session {session_id} acknowledged.");
+    Ok(ExitCode::SUCCESS)
+}
+
+fn daemon() -> Result<ExitCode, String> {
+    let home = beacon_home()?;
+    let config = Config::load(&home).context("cannot read the Beacon config")?;
+    DAEMON_HOME
+        .set(home.clone())
+        .map_err(|_| "the daemon was started twice".to_string())?;
+    platform::on_console_interrupt(request_shutdown)
+        .context("cannot install the Ctrl+C handler")?;
+    let core = match Core::start(CoreOptions {
+        home: home.clone(),
+        lister: Box::new(ClaudeAgentsLister),
+        config,
+    }) {
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Err(error.to_string()),
+        started => started.context("cannot start the Beacon core")?,
+    };
+    println!(
+        "Beacon core running for {} on {}. Press Ctrl+C to stop.",
+        home.display(),
+        core.endpoint().pipe_name
+    );
+    core.wait().context("the Beacon core failed")?;
+    println!("Beacon core stopped.");
+    Ok(ExitCode::SUCCESS)
+}
+
+fn request_shutdown() -> bool {
+    DAEMON_HOME.get().is_some_and(|home| {
+        ControlClient::connect(home)
+            .and_then(|mut client| client.request(&Request::Shutdown))
+            .is_ok_and(|reply| reply.ok)
+    })
+}

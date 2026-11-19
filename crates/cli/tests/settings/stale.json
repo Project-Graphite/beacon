@@ -1,0 +1,49 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\tools\\guard.exe"
+          },
+          {
+            "type": "command",
+            "command": "C:\\Old\\Beacon\\bin\\beacon-hook.exe",
+            "args": [
+              "PreToolUse"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\Old\\Beacon\\bin\\BEACON-HOOK.EXE",
+            "args": [
+              "Stop"
+            ]
+          }
+        ]
+      }
+    ],
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "D:/beacon/beacon-hook.exe",
+            "args": [
+              "WorktreeCreate"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

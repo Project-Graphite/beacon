@@ -1,0 +1,759 @@
+use crate::config::Config;
+use crate::control::{
+    Decision, PendingDecision, Reply, Request, Resolution, ResolvedDecision, Snapshot,
+};
+use crate::events::{self, Common, Event, Meta, ToolUse};
+use crate::lister::ListedSession;
+use crate::log::{Logger, now_ms};
+use crate::platform::{ProcessWatch, process_alive};
+use crate::session::{Session, activity_line};
+use crate::state::{AgentStatus, Input, PermissionKind, SessionState, StartSource, ToolEvent};
+use beacon_protocol::{DOCTOR_EVENT, HookReply, is_waiting_event};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::io;
+use tokio::sync::{mpsc, oneshot, watch};
+
+const RECENT_TOOL_USES: usize = 16;
+const RESOLVED_KEPT: usize = 32;
+const DOCTOR_REPLY: &[u8] = br#"{"beacon":"ok"}"#;
+const ENDED_KEPT_MS: u64 = 24 * 60 * 60 * 1000;
+
+pub type ProcessExit = (String, u32);
+
+pub enum HookOutcome {
+    Done,
+    Reply(HookReply),
+    Wait(u64, oneshot::Receiver<HookReply>),
+}
+
+struct Pending {
+    view: PendingDecision,
+    reply: oneshot::Sender<HookReply>,
+}
+
+struct RecentToolUse {
+    agent_id: Option<String>,
+    tool_name: String,
+    tool_input: Value,
+    tool_use_id: String,
+}
+
+#[derive(Default)]
+struct Runtime {
+    recent_tool_uses: VecDeque<RecentToolUse>,
+    watched_pid: Option<u32>,
+    watch: Option<ProcessWatch>,
+    transcript_len: Option<u64>,
+    quiet_since_ms: u64,
+}
+
+enum Followup {
+    Nothing,
+    ToolUsed(ToolUse),
+    ToolRan(Option<String>),
+    BatchFinished(Vec<String>),
+    PermissionAsked {
+        tool_name: String,
+        tool_input: Value,
+        permission_suggestions: Value,
+    },
+}
+
+#[derive(Serialize, Deserialize)]
+struct PersistedState {
+    sessions: Vec<Session>,
+}
+
+pub struct Engine {
+    config: Config,
+    pub log: Logger,
+    sessions: BTreeMap<String, Session>,
+    runtime: HashMap<String, Runtime>,
+    pending: BTreeMap<u64, Pending>,
+    resolved: VecDeque<ResolvedDecision>,
+    next_id: u64,
+    changes: watch::Sender<u64>,
+    process_exits: mpsc::UnboundedSender<ProcessExit>,
+}
+
+impl Engine {
+    pub fn new(
+        config: Config,
+        log: Logger,
+        sessions: Vec<Session>,
+    ) -> (Engine, mpsc::UnboundedReceiver<ProcessExit>) {
+        let (process_exits, exits) = mpsc::unbounded_channel();
+        let mut engine = Engine {
+            config,
+            log,
+            sessions: sessions
+                .into_iter()
+                .map(|session| (session.session_id.clone(), session))
+                .collect(),
+            runtime: HashMap::new(),
+            pending: BTreeMap::new(),
+            resolved: VecDeque::new(),
+            next_id: 1,
+            changes: watch::channel(0).0,
+            process_exits,
+        };
+        engine.prune_ended(now_ms());
+        let live: Vec<ProcessExit> = engine
+            .sessions
+            .values()
+            .filter(|session| session.state != SessionState::Ended)
+            .filter_map(|session| Some((session.session_id.clone(), session.claude_pid?)))
+            .collect();
+        for (session_id, pid) in live {
+            engine.watch_process(&session_id, pid);
+        }
+        (engine, exits)
+    }
+
+    pub fn load_sessions(bytes: &[u8]) -> io::Result<Vec<Session>> {
+        Ok(serde_json::from_slice::<PersistedState>(bytes)?.sessions)
+    }
+
+    pub fn persisted_state(&self) -> io::Result<Vec<u8>> {
+        Ok(serde_json::to_vec_pretty(&PersistedState {
+            sessions: self.sessions.values().cloned().collect(),
+        })?)
+    }
+
+    pub fn watch_changes(&self) -> watch::Receiver<u64> {
+        self.changes.subscribe()
+    }
+
+    pub fn has_live_sessions(&self) -> bool {
+        self.sessions
+            .values()
+            .any(|session| session.state != SessionState::Ended)
+    }
+
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            sessions: self.sessions.values().cloned().collect(),
+            pending: self
+                .pending
+                .values()
+                .map(|pending| pending.view.clone())
+                .collect(),
+            resolved: self.resolved.iter().cloned().collect(),
+        }
+    }
+
+    pub fn control(&mut self, request: Request) -> Reply {
+        let result = match request {
+            Request::Snapshot | Request::Subscribe => return Reply::with_snapshot(self.snapshot()),
+            Request::Decide { id, decision } => self.decide(id, decision),
+            Request::Acknowledge { session_id } => self.acknowledge(&session_id),
+            Request::Shutdown => Ok(()),
+        };
+        result.map_or_else(Reply::failed, |()| Reply::ok())
+    }
+
+    pub fn handle_hook(&mut self, meta: &[u8], payload: &[u8]) -> HookOutcome {
+        let meta: Meta = match serde_json::from_slice(meta) {
+            Ok(meta) => meta,
+            Err(error) => {
+                self.log
+                    .warn("dropping a hook request with unreadable meta");
+                self.log.debug(format_args!("unreadable meta: {error}"));
+                return HookOutcome::Done;
+            }
+        };
+        if meta.event == DOCTOR_EVENT {
+            return HookOutcome::Reply(HookReply::Stdout(DOCTOR_REPLY.to_vec()));
+        }
+        let outcome = match events::parse(payload) {
+            Ok(parsed) => {
+                self.log.debug(format_args!(
+                    "{} for session {}",
+                    parsed.common.hook_event_name, parsed.common.session_id
+                ));
+                let session_id = parsed.common.session_id.clone();
+                let outcome = self.apply_event(&meta, parsed.common, parsed.event);
+                self.changed();
+                outcome.or_else(|| {
+                    (meta.event == "Stop").then(|| HookOutcome::Reply(self.stop_reply(&session_id)))
+                })
+            }
+            Err(rejected) => {
+                self.log.warn(format_args!(
+                    "dropping a {} hook payload: {}",
+                    meta.event, rejected.reason
+                ));
+                if let Some(detail) = rejected.detail {
+                    self.log
+                        .debug(format_args!("{} payload detail: {detail}", meta.event));
+                }
+                None
+            }
+        };
+        outcome.unwrap_or(if is_waiting_event(&meta.event) {
+            HookOutcome::Reply(HookReply::NoDecision)
+        } else {
+            HookOutcome::Done
+        })
+    }
+
+    pub fn stop_reply(&self, _session_id: &str) -> HookReply {
+        HookReply::NoDecision
+    }
+
+    fn apply_event(&mut self, meta: &Meta, common: Common, event: Event) -> Option<HookOutcome> {
+        let now = now_ms();
+        let session_id = common.session_id;
+        let session = self
+            .sessions
+            .entry(session_id.clone())
+            .or_insert_with(|| Session::new(&session_id, now));
+        session.limited = false;
+        session.last_event_ms = now;
+        session.event_count += 1;
+        if let Some(cwd) = &common.cwd {
+            session.set_location(cwd, meta.env("CLAUDE_PROJECT_DIR"));
+        }
+        if common.transcript_path.is_some() {
+            session.transcript_path = common.transcript_path;
+        }
+        if common.permission_mode.is_some() {
+            session.permission_mode = common.permission_mode;
+        }
+        if let Some(entrypoint) = meta.env("CLAUDE_CODE_ENTRYPOINT") {
+            session.entrypoint = Some(entrypoint.to_string());
+        }
+        if let Some(attended) = meta.env("CLAUDE_CODE_SESSION_ATTENDED") {
+            session.attended = Some(attended != "0");
+        }
+        let pid = meta
+            .env("CLAUDE_PID")
+            .and_then(|pid| pid.parse::<u32>().ok());
+        if pid.is_some() {
+            session.claude_pid = pid;
+        }
+        let (input, followup) = match event {
+            Event::SessionStart {
+                source,
+                model,
+                session_title,
+            } => {
+                session.model = model.or(session.model.take());
+                session.title = session_title.or(session.title.take());
+                (
+                    start_source(source.as_deref()).map(Input::SessionStarted),
+                    Followup::Nothing,
+                )
+            }
+            Event::UserPromptSubmit { session_title } => {
+                session.title = session_title.or(session.title.take());
+                session.turn_started_ms = Some(now);
+                (Some(Input::PromptSubmitted), Followup::Nothing)
+            }
+            Event::PreToolUse(tool_use) => {
+                session.activity = Some(activity_line(
+                    &tool_use.tool_name,
+                    tool_use.tool_input.as_ref(),
+                    session.cwd.as_deref(),
+                ));
+                (
+                    Some(Input::ToolActivity(ToolEvent::Tool)),
+                    Followup::ToolUsed(tool_use),
+                )
+            }
+            Event::PostToolUse(tool_use) | Event::PostToolUseFailure(tool_use) => {
+                session.activity = Some(activity_line(
+                    &tool_use.tool_name,
+                    tool_use.tool_input.as_ref(),
+                    session.cwd.as_deref(),
+                ));
+                (
+                    Some(Input::ToolActivity(ToolEvent::Tool)),
+                    Followup::ToolRan(tool_use.tool_use_id),
+                )
+            }
+            Event::PostToolBatch { tool_calls } => (
+                Some(Input::ToolActivity(ToolEvent::Tool)),
+                Followup::BatchFinished(
+                    tool_calls
+                        .into_iter()
+                        .filter_map(|call| call.tool_use_id)
+                        .collect(),
+                ),
+            ),
+            Event::SubagentStart => (
+                Some(Input::ToolActivity(ToolEvent::SubagentStarted)),
+                Followup::Nothing,
+            ),
+            Event::SubagentStop => (
+                Some(Input::ToolActivity(ToolEvent::SubagentStopped)),
+                Followup::Nothing,
+            ),
+            Event::TaskCreated => {
+                session.tasks_created += 1;
+                (
+                    Some(Input::ToolActivity(ToolEvent::Task)),
+                    Followup::Nothing,
+                )
+            }
+            Event::TaskCompleted => {
+                session.tasks_completed += 1;
+                (
+                    Some(Input::ToolActivity(ToolEvent::Task)),
+                    Followup::Nothing,
+                )
+            }
+            Event::PermissionRequest {
+                tool_name,
+                tool_input,
+                permission_suggestions,
+            } if meta.event == "PermissionRequest" => (
+                None,
+                Followup::PermissionAsked {
+                    tool_name,
+                    tool_input: tool_input.unwrap_or(Value::Null),
+                    permission_suggestions: permission_suggestions.unwrap_or(Value::Null),
+                },
+            ),
+            Event::Stop {
+                last_assistant_message,
+                background_tasks,
+            } => {
+                if let Some(message) = &last_assistant_message {
+                    session.set_preview(message);
+                }
+                let background_tasks = background_tasks.map_or(0, |tasks| tasks.len() as u32);
+                (Some(Input::Stopped { background_tasks }), Followup::Nothing)
+            }
+            Event::StopFailure { error } => {
+                session.last_error = error;
+                (Some(Input::StopFailed), Followup::Nothing)
+            }
+            Event::SessionEnd => (Some(Input::SessionEnded), Followup::Nothing),
+            Event::Notification { notification_type } => (
+                match notification_type.as_deref() {
+                    Some("elicitation_dialog") => Some(Input::ElicitationRequested),
+                    Some("elicitation_response") => Some(Input::ElicitationResolved),
+                    _ => None,
+                },
+                Followup::Nothing,
+            ),
+            Event::Elicitation => (Some(Input::ElicitationRequested), Followup::Nothing),
+            Event::ElicitationResult => (Some(Input::ElicitationResolved), Followup::Nothing),
+            Event::CwdChanged { new_cwd } => {
+                if let Some(new_cwd) = &new_cwd {
+                    session.set_location(new_cwd, meta.env("CLAUDE_PROJECT_DIR"));
+                }
+                (None, Followup::Nothing)
+            }
+            Event::PostModelSwitch { to_model } => {
+                session.model = to_model.or(session.model.take());
+                (None, Followup::Nothing)
+            }
+            Event::PreCompact => (Some(Input::CompactStarted), Followup::Nothing),
+            Event::PostCompact => (Some(Input::CompactFinished), Followup::Nothing),
+            Event::PermissionRequest { .. } | Event::Other => (None, Followup::Nothing),
+        };
+        if let Some(input) = input {
+            session.apply(input, now);
+        }
+        if let Some(pid) = pid {
+            self.watch_process(&session_id, pid);
+        }
+        match followup {
+            Followup::Nothing | Followup::ToolRan(None) => None,
+            Followup::ToolUsed(tool_use) => {
+                self.note_tool_use(&session_id, common.agent_id, tool_use);
+                None
+            }
+            Followup::ToolRan(Some(tool_use_id)) => {
+                self.resolve_elsewhere(&session_id, &tool_use_id, Resolution::AllowedInSession);
+                None
+            }
+            Followup::BatchFinished(tool_use_ids) => {
+                for tool_use_id in tool_use_ids {
+                    self.resolve_elsewhere(&session_id, &tool_use_id, Resolution::DeniedInSession);
+                }
+                None
+            }
+            Followup::PermissionAsked {
+                tool_name,
+                tool_input,
+                permission_suggestions,
+            } => Some(self.ask_permission(
+                meta,
+                PendingDecision {
+                    id: 0,
+                    kind: permission_kind(&tool_name),
+                    session_id,
+                    agent_id: common.agent_id,
+                    tool_name,
+                    tool_input,
+                    permission_suggestions,
+                    created_ms: now,
+                    tool_use_id: None,
+                },
+            )),
+        }
+    }
+
+    fn ask_permission(&mut self, meta: &Meta, mut view: PendingDecision) -> HookOutcome {
+        if meta.unattended() && !self.config.answer_unattended {
+            self.log.info(format_args!(
+                "not holding {} for unattended session {}",
+                view.tool_name, view.session_id
+            ));
+            return HookOutcome::Reply(HookReply::NoDecision);
+        }
+        view.id = self.next_id;
+        self.next_id += 1;
+        view.tool_use_id = self.claim_recent_tool_use(&view);
+        self.log.info(format_args!(
+            "decision {} pending: {} in session {}",
+            view.id, view.tool_name, view.session_id
+        ));
+        let (id, kind, session_id) = (view.id, view.kind, view.session_id.clone());
+        let (reply, receiver) = oneshot::channel();
+        self.pending.insert(id, Pending { view, reply });
+        self.apply(&session_id, Input::PermissionRequested(kind));
+        HookOutcome::Wait(id, receiver)
+    }
+
+    fn claim_recent_tool_use(&mut self, view: &PendingDecision) -> Option<String> {
+        let recent = &mut self.runtime.get_mut(&view.session_id)?.recent_tool_uses;
+        let index = recent.iter().rposition(|tool_use| {
+            tool_use.agent_id == view.agent_id
+                && tool_use.tool_name == view.tool_name
+                && tool_use.tool_input == view.tool_input
+        })?;
+        recent.remove(index).map(|tool_use| tool_use.tool_use_id)
+    }
+
+    fn note_tool_use(&mut self, session_id: &str, agent_id: Option<String>, tool_use: ToolUse) {
+        let Some(tool_use_id) = tool_use.tool_use_id else {
+            return;
+        };
+        let tool_input = tool_use.tool_input.unwrap_or(Value::Null);
+        let unjoined = self.pending.values_mut().find(|pending| {
+            pending.view.session_id == session_id
+                && pending.view.tool_use_id.is_none()
+                && pending.view.agent_id == agent_id
+                && pending.view.tool_name == tool_use.tool_name
+                && pending.view.tool_input == tool_input
+        });
+        if let Some(pending) = unjoined {
+            pending.view.tool_use_id = Some(tool_use_id);
+            return;
+        }
+        let recent = &mut self
+            .runtime
+            .entry(session_id.to_string())
+            .or_default()
+            .recent_tool_uses;
+        if recent.len() == RECENT_TOOL_USES {
+            recent.pop_front();
+        }
+        recent.push_back(RecentToolUse {
+            agent_id,
+            tool_name: tool_use.tool_name,
+            tool_input,
+            tool_use_id,
+        });
+    }
+
+    fn resolve_elsewhere(&mut self, session_id: &str, tool_use_id: &str, resolution: Resolution) {
+        let joined = self.pending.iter().find(|(_, pending)| {
+            pending.view.session_id == session_id
+                && pending.view.tool_use_id.as_deref() == Some(tool_use_id)
+        });
+        if let Some(id) = joined.map(|(id, _)| *id) {
+            self.finish(id, resolution, Some(HookReply::NoDecision));
+        }
+    }
+
+    pub fn decide(&mut self, id: u64, decision: Decision) -> Result<(), String> {
+        let pending = self
+            .pending
+            .get(&id)
+            .ok_or_else(|| format!("no pending decision {id}"))?;
+        if matches!(decision, Decision::Answer { .. })
+            && pending.view.kind != PermissionKind::Question
+        {
+            return Err(format!("decision {id} is not a question"));
+        }
+        let output = hook_output(&decision, &pending.view.tool_input);
+        let session_id = pending.view.session_id.clone();
+        if !self.finish(id, Resolution::Decided, Some(HookReply::Stdout(output))) {
+            self.changed();
+            return Err(format!("decision {id} expired before it was delivered"));
+        }
+        if matches!(decision, Decision::DenyAndStop { .. }) {
+            self.apply(&session_id, Input::Interrupted);
+        }
+        self.changed();
+        Ok(())
+    }
+
+    pub fn helper_gone(&mut self, id: u64) {
+        self.finish(id, Resolution::Expired, None);
+        self.changed();
+    }
+
+    fn finish(&mut self, id: u64, resolution: Resolution, reply: Option<HookReply>) -> bool {
+        let Some(pending) = self.pending.remove(&id) else {
+            return false;
+        };
+        let delivered = reply.is_some_and(|reply| pending.reply.send(reply).is_ok());
+        let resolution = match (resolution, delivered) {
+            (Resolution::Decided, false) => Resolution::Expired,
+            (resolution, _) => resolution,
+        };
+        self.log
+            .info(format_args!("decision {id} resolved: {resolution:?}"));
+        if self.resolved.len() == RESOLVED_KEPT {
+            self.resolved.pop_front();
+        }
+        let session_id = pending.view.session_id;
+        self.resolved.push_back(ResolvedDecision {
+            id,
+            session_id: session_id.clone(),
+            tool_name: pending.view.tool_name,
+            resolution,
+            resolved_ms: now_ms(),
+        });
+        if !self
+            .pending
+            .values()
+            .any(|other| other.view.session_id == session_id)
+        {
+            self.apply(&session_id, Input::PermissionResolved);
+        }
+        delivered
+    }
+
+    pub fn acknowledge(&mut self, session_id: &str) -> Result<(), String> {
+        if !self.sessions.contains_key(session_id) {
+            return Err(format!("no session {session_id}"));
+        }
+        self.apply(session_id, Input::Acknowledged);
+        self.changed();
+        Ok(())
+    }
+
+    pub fn process_exited(&mut self, session_id: &str, pid: u32) {
+        if let Some(session) = self.sessions.get_mut(session_id)
+            && session.claude_pid == Some(pid)
+        {
+            self.log.info(format_args!(
+                "process {pid} of session {session_id} is gone"
+            ));
+            session.apply(Input::ProcessGone, now_ms());
+            self.changed();
+        }
+    }
+
+    pub fn reconcile(&mut self, listed: Vec<ListedSession>) {
+        let now = now_ms();
+        let listed_ids: HashSet<String> = listed
+            .iter()
+            .map(|entry| entry.session_id.clone())
+            .collect();
+        let mut watches = Vec::new();
+        for entry in listed {
+            let session = self
+                .sessions
+                .entry(entry.session_id.clone())
+                .or_insert_with(|| Session {
+                    limited: true,
+                    ..Session::new(&entry.session_id, now)
+                });
+            if session.limited {
+                if let Some(cwd) = &entry.cwd {
+                    session.set_location(cwd, None);
+                }
+                session.claude_pid = entry.pid.or(session.claude_pid);
+            } else {
+                session.claude_pid = session.claude_pid.or(entry.pid);
+            }
+            session.listed_name = entry.name;
+            if let Some(status) = agent_status(entry.status.as_deref()) {
+                session.apply(Input::Reconciled(status), now);
+            }
+            if let Some(pid) = session
+                .claude_pid
+                .filter(|_| session.state != SessionState::Ended)
+            {
+                watches.push((entry.session_id, pid));
+            }
+        }
+        for (session_id, pid) in watches {
+            self.watch_process(&session_id, pid);
+        }
+        let gone: Vec<String> = self
+            .sessions
+            .values()
+            .filter(|session| {
+                !session.limited
+                    && session.state != SessionState::Ended
+                    && !listed_ids.contains(&session.session_id)
+                    && !session.claude_pid.is_some_and(process_alive)
+            })
+            .map(|session| session.session_id.clone())
+            .collect();
+        for session_id in gone {
+            self.log.info(format_args!(
+                "session {session_id} is no longer listed and its process is gone"
+            ));
+            self.apply(&session_id, Input::ProcessGone);
+        }
+        self.changed();
+    }
+
+    pub fn check_stalls(&mut self, now: u64) {
+        let stall_ms = self.config.stall_minutes.saturating_mul(60_000);
+        let mut stalled = Vec::new();
+        for session in self
+            .sessions
+            .values()
+            .filter(|session| session.state == SessionState::Working)
+        {
+            let runtime = self.runtime.entry(session.session_id.clone()).or_default();
+            let transcript_len = session
+                .transcript_path
+                .as_ref()
+                .and_then(|path| std::fs::metadata(path).ok())
+                .map(|metadata| metadata.len());
+            if transcript_len != runtime.transcript_len {
+                runtime.transcript_len = transcript_len;
+                runtime.quiet_since_ms = now;
+            } else if now.saturating_sub(runtime.quiet_since_ms.max(session.last_event_ms))
+                >= stall_ms
+            {
+                stalled.push(session.session_id.clone());
+            }
+        }
+        for session_id in &stalled {
+            self.log.info(format_args!("session {session_id} stalled"));
+            self.apply(session_id, Input::StallTimeout);
+        }
+        if self.prune_ended(now) || !stalled.is_empty() {
+            self.changed();
+        }
+    }
+
+    fn prune_ended(&mut self, now: u64) -> bool {
+        let expired: Vec<String> = self
+            .sessions
+            .values()
+            .filter(|session| {
+                session.state == SessionState::Ended
+                    && now.saturating_sub(session.last_event_ms) > ENDED_KEPT_MS
+            })
+            .map(|session| session.session_id.clone())
+            .collect();
+        for session_id in &expired {
+            self.sessions.remove(session_id);
+            self.runtime.remove(session_id);
+        }
+        !expired.is_empty()
+    }
+
+    fn watch_process(&mut self, session_id: &str, pid: u32) {
+        let runtime = self.runtime.entry(session_id.to_string()).or_default();
+        if runtime.watched_pid == Some(pid) {
+            return;
+        }
+        runtime.watched_pid = Some(pid);
+        runtime.watch = None;
+        let exits = self.process_exits.clone();
+        let watched_session = session_id.to_string();
+        let on_exit = Box::new(move || {
+            let _ = exits.send((watched_session.clone(), pid));
+        });
+        match ProcessWatch::start(pid, on_exit) {
+            Ok(Some(watch)) => runtime.watch = Some(watch),
+            Ok(None) => {
+                let _ = self.process_exits.send((session_id.to_string(), pid));
+            }
+            Err(error) => self.log.warn(format_args!(
+                "cannot watch process {pid} of session {session_id}: {error}"
+            )),
+        }
+    }
+
+    fn apply(&mut self, session_id: &str, input: Input) {
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            session.apply(input, now_ms());
+        }
+    }
+
+    fn changed(&self) {
+        self.changes.send_modify(|version| *version += 1);
+    }
+}
+
+fn start_source(source: Option<&str>) -> Option<StartSource> {
+    match source? {
+        "startup" => Some(StartSource::Startup),
+        "resume" => Some(StartSource::Resume),
+        "fork" => Some(StartSource::Fork),
+        "clear" => Some(StartSource::Clear),
+        "compact" => Some(StartSource::Compact),
+        _ => None,
+    }
+}
+
+fn agent_status(status: Option<&str>) -> Option<AgentStatus> {
+    match status? {
+        "busy" => Some(AgentStatus::Busy),
+        "idle" => Some(AgentStatus::Idle),
+        "waiting" => Some(AgentStatus::Waiting),
+        _ => None,
+    }
+}
+
+fn permission_kind(tool_name: &str) -> PermissionKind {
+    match tool_name {
+        "AskUserQuestion" => PermissionKind::Question,
+        "ExitPlanMode" => PermissionKind::Plan,
+        _ => PermissionKind::Tool,
+    }
+}
+
+pub fn hook_output(decision: &Decision, tool_input: &Value) -> Vec<u8> {
+    let decision = match decision {
+        Decision::Allow => json!({"behavior": "allow"}),
+        Decision::AllowWithInput { input } => json!({"behavior": "allow", "updatedInput": input}),
+        Decision::AllowAlways { permissions } => {
+            json!({"behavior": "allow", "updatedPermissions": permissions})
+        }
+        Decision::Answer { answers } => json!({
+            "behavior": "allow",
+            "updatedInput": {
+                "questions": tool_input.get("questions").cloned().unwrap_or(Value::Null),
+                "answers": answers,
+            },
+        }),
+        Decision::Deny { message } => deny(message.as_deref(), false),
+        Decision::DenyAndStop { message } => deny(message.as_deref(), true),
+    };
+    json!({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
+        .to_string()
+        .into_bytes()
+}
+
+fn deny(message: Option<&str>, interrupt: bool) -> Value {
+    let mut decision = json!({"behavior": "deny"});
+    if let Some(message) = message {
+        decision["message"] = json!(message);
+    }
+    if interrupt {
+        decision["interrupt"] = json!(true);
+    }
+    decision
+}
+
+#[cfg(test)]
+mod tests;

@@ -3,6 +3,77 @@
 Decisions taken while building Beacon, newest phase first. Evidence for the phase 0 entries is in
 [SPIKES.md](SPIKES.md). An entry marked **needs Amr** is a proposal until he answers.
 
+## M1: helper, core, installer and CLI (2026-11-19)
+
+### Shape
+
+- Four crates: `protocol` (wire format, no external crates), `hook` (the helper `beacon-hook.exe`, no
+  external crates), `core` (registry, state machine, decision broker, pipe server, control channel)
+  and `cli` (the `beacon` binary). External crates are `serde`, `serde_json`, `tokio` and
+  `windows-sys` only.
+- Until the M2 app hosts the core, `beacon daemon` does. One core per Beacon home, enforced with a
+  named mutex.
+- The core writes `endpoint` (pipe name and a 256-bit token) into the Beacon home at start and removes
+  it on a clean stop. The pipe has a random name, rejects remote clients and grants access to the
+  current user only. A connection with a bad token is closed.
+- The same pipe carries a control channel (newline-delimited JSON: `snapshot`, `subscribe`, `decide`,
+  `acknowledge`, `shutdown`) that the CLI uses now and the UI will use later.
+
+### Helper
+
+- It exits 0 on every path, including a panic, and writes to stdout only the bytes of a decision the
+  core sent. It forwards the raw payload untouched and an allowlist of 18 environment variables; no
+  other variable leaves the session.
+- A watchdog ends it if the request is not sent within 2 s, or if a turn-end reply does not arrive
+  within 1 s, so a hung core cannot hold a session. Permission requests and MCP input wait without a
+  deadline, because the wait is for the person.
+- **The 15 ms budget is not met: an event costs about 30 ms.** That is process creation on this
+  machine; an empty run of the helper takes 31 ms and `whoami.exe` 34 ms. It delays a session only on
+  the five blocking events below. HTTP hooks would avoid the process, but they show a hook error in
+  every session while the core is down and cannot report the session's environment, so the helper
+  stays.
+
+### Hook registration
+
+Twenty-two events, kept in one constant that install, uninstall, doctor and the tests share.
+
+- Blocking: `PermissionRequest` and `Elicitation` (`timeout` 3600), `Stop` (`timeout` 10),
+  `SessionEnd` and `StopFailure` (blocking because Claude Code kills async hooks at teardown, and
+  these are the last events of a run).
+- `async: true`: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+  `PostToolUseFailure`, `PostToolBatch`, `PermissionDenied`, `Notification`, `SubagentStart`,
+  `SubagentStop`, `TaskCreated`, `TaskCompleted`, `PreCompact`, `PostCompact`, `CwdChanged`,
+  `PostModelSwitch`, `ElicitationResult`.
+- Async hooks race each other, so the core accepts a `PreToolUse` on either side of its
+  `PermissionRequest`.
+
+### Installer
+
+- `install` and `uninstall` print a plan with a diff and change nothing until they are run with
+  `--yes`. Both back up the settings file first.
+- Install removes any Beacon handler it finds, then adds the current set, so it is also the repair.
+  Everything else keeps its order.
+- Uninstall restores the original bytes when the file is unchanged since install, which is what makes
+  install then uninstall byte-identical. If the file changed in between, it removes Beacon's handlers
+  structurally and drops only the empty containers install created.
+- A structural write re-serializes the file. Indentation, line ending, BOM and trailing newline are
+  kept, but spellings `serde_json` writes differently (`é`, `1e3`, inline arrays) are normalized.
+  Claude Code writes the file in the same style, so real files are unaffected.
+- A file that is not a JSON object is refused and left untouched.
+- A helper that is still running cannot be deleted on Windows, so it is renamed aside and removed
+  later.
+- Doctor does not read the registry-delivered managed policy and says so.
+
+### Behaviour worth knowing
+
+- A malformed `state.json` or `config.json` stops the core with an error instead of being discarded.
+- Ended sessions are dropped from the registry 24 hours after their last event.
+- A session known only from `claude agents --json` is marked limited and has no surface until one of
+  its hooks fires. Inferring the surface from the process image is left to M4.
+- The end-to-end check ran against a real `claude -p` session with a temporary settings file: allow
+  from `beacon decide` ran the tool, deny returned the message to Claude, and uninstall restored the
+  file byte for byte.
+
 ## Phase 0 (2026-11-19)
 
 ### Where the brief was wrong or incomplete

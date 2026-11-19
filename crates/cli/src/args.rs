@@ -1,0 +1,283 @@
+use beacon_core::Decision;
+use serde_json::{Map, Value};
+use std::path::PathBuf;
+
+pub const USAGE: &str = "\
+Usage:
+  beacon daemon
+  beacon stop
+  beacon status [--watch] [--json]
+  beacon decide <id> allow
+  beacon decide <id> deny [--message <text>] [--stop]
+  beacon decide <id> answer \"<question>=<label>\" ...
+  beacon ack <session-id-or-unique-prefix>
+  beacon install [--settings <path>] [--yes]
+  beacon uninstall [--settings <path>] [--yes]
+  beacon doctor [--settings <path>]
+  beacon help
+";
+
+#[derive(Debug, PartialEq)]
+pub enum Command {
+    Help,
+    Daemon,
+    Stop,
+    Status {
+        watch: bool,
+        json: bool,
+    },
+    Decide {
+        id: u64,
+        decision: Decision,
+    },
+    Ack {
+        session: String,
+    },
+    Install {
+        settings: Option<PathBuf>,
+        yes: bool,
+    },
+    Uninstall {
+        settings: Option<PathBuf>,
+        yes: bool,
+    },
+    Doctor {
+        settings: Option<PathBuf>,
+    },
+}
+
+#[derive(Default)]
+struct Options {
+    switches: Vec<String>,
+    values: Vec<(String, String)>,
+}
+
+impl Options {
+    fn parse(args: &[String], switches: &[&str], valued: &[&str]) -> Result<Options, String> {
+        let mut options = Options::default();
+        let mut args = args.iter();
+        while let Some(arg) = args.next() {
+            if switches.contains(&arg.as_str()) {
+                options.switches.push(arg.clone());
+            } else if valued.contains(&arg.as_str()) {
+                let value = args.next().ok_or_else(|| format!("{arg} needs a value"))?;
+                options.values.push((arg.clone(), value.clone()));
+            } else {
+                return Err(format!("unexpected argument: {arg}"));
+            }
+        }
+        Ok(options)
+    }
+
+    fn has(&self, switch: &str) -> bool {
+        self.switches.iter().any(|given| given == switch)
+    }
+
+    fn value(&self, name: &str) -> Option<String> {
+        self.values
+            .iter()
+            .rev()
+            .find(|(given, _)| given == name)
+            .map(|(_, value)| value.clone())
+    }
+}
+
+pub fn parse(args: &[String]) -> Result<Command, String> {
+    let Some((command, rest)) = args.split_first() else {
+        return Ok(Command::Help);
+    };
+    match (command.as_str(), rest) {
+        ("help" | "--help" | "-h", []) => Ok(Command::Help),
+        ("daemon", []) => Ok(Command::Daemon),
+        ("stop", []) => Ok(Command::Stop),
+        ("status", _) => {
+            let options = Options::parse(rest, &["--watch", "--json"], &[])?;
+            Ok(Command::Status {
+                watch: options.has("--watch"),
+                json: options.has("--json"),
+            })
+        }
+        ("decide", _) => parse_decide(rest),
+        ("ack", [session]) => Ok(Command::Ack {
+            session: session.clone(),
+        }),
+        ("install" | "uninstall", _) => {
+            let options = Options::parse(rest, &["--yes"], &["--settings"])?;
+            let settings = options.value("--settings").map(PathBuf::from);
+            let yes = options.has("--yes");
+            Ok(if command == "install" {
+                Command::Install { settings, yes }
+            } else {
+                Command::Uninstall { settings, yes }
+            })
+        }
+        ("doctor", _) => Ok(Command::Doctor {
+            settings: Options::parse(rest, &[], &["--settings"])?
+                .value("--settings")
+                .map(PathBuf::from),
+        }),
+        _ => Err(format!("unknown command: {}", args.join(" "))),
+    }
+}
+
+fn parse_decide(args: &[String]) -> Result<Command, String> {
+    let [id, verb, rest @ ..] = args else {
+        return Err("decide needs a decision id and allow, deny or answer".to_string());
+    };
+    let id = id
+        .parse::<u64>()
+        .map_err(|_| format!("not a decision id: {id}"))?;
+    let decision = match (verb.as_str(), rest) {
+        ("allow", []) => Decision::Allow,
+        ("deny", _) => {
+            let options = Options::parse(rest, &["--stop"], &["--message"])?;
+            let message = options.value("--message");
+            if options.has("--stop") {
+                Decision::DenyAndStop { message }
+            } else {
+                Decision::Deny { message }
+            }
+        }
+        ("answer", [_, ..]) => Decision::Answer {
+            answers: rest
+                .iter()
+                .map(|pair| answer(pair))
+                .collect::<Result<Map<String, Value>, String>>()?,
+        },
+        _ => return Err(format!("unknown decision: {}", args[1..].join(" "))),
+    };
+    Ok(Command::Decide { id, decision })
+}
+
+fn answer(pair: &str) -> Result<(String, Value), String> {
+    match pair.rsplit_once('=') {
+        Some((question, label)) if !question.is_empty() && !label.is_empty() => {
+            Ok((question.to_string(), Value::String(label.to_string())))
+        }
+        _ => Err(format!("expected \"<question>=<label>\", got: {pair}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn parsed(line: &[&str]) -> Result<Command, String> {
+        parse(&line.iter().map(|arg| arg.to_string()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn simple_commands_parse() {
+        assert_eq!(parsed(&[]), Ok(Command::Help));
+        assert_eq!(parsed(&["help"]), Ok(Command::Help));
+        assert_eq!(parsed(&["daemon"]), Ok(Command::Daemon));
+        assert_eq!(parsed(&["stop"]), Ok(Command::Stop));
+        assert_eq!(
+            parsed(&["status"]),
+            Ok(Command::Status {
+                watch: false,
+                json: false
+            })
+        );
+        assert_eq!(
+            parsed(&["status", "--json", "--watch"]),
+            Ok(Command::Status {
+                watch: true,
+                json: true
+            })
+        );
+        assert_eq!(
+            parsed(&["ack", "4c2c"]),
+            Ok(Command::Ack {
+                session: "4c2c".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn decisions_parse() {
+        assert_eq!(
+            parsed(&["decide", "7", "allow"]),
+            Ok(Command::Decide {
+                id: 7,
+                decision: Decision::Allow
+            })
+        );
+        assert_eq!(
+            parsed(&["decide", "7", "deny"]),
+            Ok(Command::Decide {
+                id: 7,
+                decision: Decision::Deny { message: None }
+            })
+        );
+        assert_eq!(
+            parsed(&["decide", "7", "deny", "--stop", "--message", "not now"]),
+            Ok(Command::Decide {
+                id: 7,
+                decision: Decision::DenyAndStop {
+                    message: Some("not now".to_string())
+                }
+            })
+        );
+        let Ok(Command::Decide {
+            decision: Decision::Answer { answers },
+            ..
+        }) = parsed(&["decide", "2", "answer", "Which db?=Postgres", "a=b=c"])
+        else {
+            panic!("expected answers");
+        };
+        assert_eq!(
+            Value::Object(answers),
+            json!({"Which db?": "Postgres", "a=b": "c"})
+        );
+    }
+
+    #[test]
+    fn installer_commands_parse() {
+        assert_eq!(
+            parsed(&["install"]),
+            Ok(Command::Install {
+                settings: None,
+                yes: false
+            })
+        );
+        assert_eq!(
+            parsed(&["uninstall", "--yes", "--settings", r"C:\t\s.json"]),
+            Ok(Command::Uninstall {
+                settings: Some(PathBuf::from(r"C:\t\s.json")),
+                yes: true
+            })
+        );
+        assert_eq!(
+            parsed(&["doctor", "--settings", "s.json"]),
+            Ok(Command::Doctor {
+                settings: Some(PathBuf::from("s.json"))
+            })
+        );
+    }
+
+    #[test]
+    fn bad_input_is_refused() {
+        for line in [
+            &["frobnicate"][..],
+            &["daemon", "now"],
+            &["stop", "--force"],
+            &["status", "--colour"],
+            &["decide"],
+            &["decide", "x", "allow"],
+            &["decide", "1", "allow", "extra"],
+            &["decide", "1", "maybe"],
+            &["decide", "1", "answer"],
+            &["decide", "1", "answer", "no-equals"],
+            &["decide", "1", "deny", "--message"],
+            &["ack"],
+            &["ack", "a", "b"],
+            &["install", "--force"],
+            &["doctor", "--yes"],
+            &["help", "me"],
+        ] {
+            assert!(parsed(line).is_err(), "{line:?}");
+        }
+    }
+}

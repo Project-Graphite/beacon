@@ -1,0 +1,13 @@
+{
+  "env": {
+    "GREETING": "héllo wörld",
+    "JAPANESE": "日本語のテキスト",
+    "QUOTED": "say \"hi\" to C:\\Users\\example",
+    "MULTILINE": "line one\nline two\ttabbed",
+    "CONTROL": "bell\u0007 unit\u001f"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "echo \"ünïcödé\""
+  }
+}

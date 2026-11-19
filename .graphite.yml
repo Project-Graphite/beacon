@@ -1,0 +1,15 @@
+projects:
+  - slug: beacon
+    kind: project
+    name: Beacon
+    summary: >
+      A tray app and overlay that shows the state of every running Claude session on the machine and
+      lets you answer permission prompts and send prompts from one place.
+    tags: [rust, claude-code]
+    owner: amrmscll
+    authors: [AmrMsCLL]
+    status: wip
+    listed: false
+    releases: manual
+    deploy:
+      kind: none

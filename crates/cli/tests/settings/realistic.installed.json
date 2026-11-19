@@ -1,0 +1,348 @@
+{
+  "env": {
+    "EXAMPLE_FLAG": "1",
+    "EXAMPLE_LEVEL": "debug"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm run lint)",
+      "Read(./docs/**)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  },
+  "model": "example-model",
+  "skillOverrides": {
+    "example-skill": {
+      "enabled": false
+    }
+  },
+  "enableArtifact": true,
+  "enabledPlugins": {
+    "example-plugin@example-marketplace": true
+  },
+  "extraKnownMarketplaces": {
+    "example-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "example/marketplace"
+      }
+    }
+  },
+  "modelSettings": {
+    "example-model": {
+      "effort": "high"
+    }
+  },
+  "autoUpdatesChannel": "stable",
+  "autoMemoryEnabled": false,
+  "switchModelsOnFlag": true,
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "SessionStart"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "UserPromptSubmit"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "PreToolUse"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "PostToolUse"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "PostToolUseFailure"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "PostToolBatch"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "PermissionDenied"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "Notification"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "SubagentStart"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "SubagentStop"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "TaskCreated": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "TaskCreated"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "TaskCompleted"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "PreCompact"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "PostCompact"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "CwdChanged"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostModelSwitch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "PostModelSwitch"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "ElicitationResult": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "ElicitationResult"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "PermissionRequest"
+            ],
+            "timeout": 3600
+          }
+        ]
+      }
+    ],
+    "Elicitation": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "Elicitation"
+            ],
+            "timeout": 3600
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "Stop"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "SessionEnd"
+            ]
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "StopFailure"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "model": "example-model",
+  "hooks": {
+    "InstructionsLoaded": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node C:\\tools\\log-instructions.js"
+          }
+        ]
+      }
+    ],
+    "FileChanged": [
+      {
+        "matcher": "*.md",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo changed",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

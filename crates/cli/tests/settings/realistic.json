@@ -1,0 +1,40 @@
+{
+  "env": {
+    "EXAMPLE_FLAG": "1",
+    "EXAMPLE_LEVEL": "debug"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm run lint)",
+      "Read(./docs/**)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  },
+  "model": "example-model",
+  "skillOverrides": {
+    "example-skill": {
+      "enabled": false
+    }
+  },
+  "enableArtifact": true,
+  "enabledPlugins": {
+    "example-plugin@example-marketplace": true
+  },
+  "extraKnownMarketplaces": {
+    "example-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "example/marketplace"
+      }
+    }
+  },
+  "modelSettings": {
+    "example-model": {
+      "effort": "high"
+    }
+  },
+  "autoUpdatesChannel": "stable",
+  "autoMemoryEnabled": false,
+  "switchModelsOnFlag": true
+}
