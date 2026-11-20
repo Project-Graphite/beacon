@@ -71,6 +71,15 @@ edge-reveal form, toast action buttons and the test-matrix document are all out 
 - The single-instance lock is skipped when `BEACON_HOME` is set, so a test instance can run beside
   the real one. The core still allows one instance per home.
 
+### Settings and Windows integration
+
+- The panel has a settings view: hook install, repair and uninstall (the plan and its diff are shown
+  before anything is written), headless answering, the stall time, notifications, the shortcut and
+  start at sign-in.
+- There is no installer. At start the app registers its notification identity under
+  `HKCU\Software\Classes\AppUserModelId`, so Windows attributes toasts to Beacon, and start at
+  sign-in is a `Run` value under `HKCU`. A build run from `target\` skips the registration.
+
 ### Build
 
 `[profile.fast]` (no link-time optimisation) is for day-to-day and verification builds. The app must
@@ -135,13 +144,12 @@ idle budget for as long as that lasts.
 
 - The first snapshot after start is a baseline. Sessions that start alerting or finish within 2 s of
   each other become one toast. Snoozed sessions produce none.
-- Until the app is packaged (M7), Windows attributes the toasts to Windows PowerShell.
 - Toasts have no action buttons; those need the packaged app identity.
 
 ### Hotkey
 
 `Ctrl+Alt+Space` is already registered by another program on this machine, so it never fired. The
-accelerator is read from an optional `hotkey` in `ui.json`. **Needs Amr:** the default.
+accelerator is read from `hotkey` in `ui.json` and can be changed in the settings view.
 
 ### Usage, as built
 
@@ -160,8 +168,7 @@ accelerator is read from an optional `hotkey` in `ui.json`. **Needs Amr:** the d
   unknown until a hook fires.
 - The one-line preview of a pending request and the activity line are redacted in the core, so no
   front end sees the raw text.
-- Deferred: the edge-reveal form and the settings screen (M7). A light theme is not planned, because
-  Graphite is dark only.
+- A light theme is not planned, because Graphite is dark only.
 
 ## M1: helper, core, installer and CLI (2026-11-19)
 
