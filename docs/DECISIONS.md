@@ -3,6 +3,31 @@
 Decisions taken while building Beacon, newest phase first. Evidence for the phase 0 entries is in
 [SPIKES.md](SPIKES.md). An entry marked **needs Amr** is a proposal until he answers.
 
+## Edge tab, compact panel and motion (2026-11-20)
+
+Changed on Amr's feedback after using v1.
+
+- **The panel never holds itself open.** The brief wanted it to refuse to go away while something
+  was waiting; in use that got in the way of other work. An alert no longer opens it, and it closes
+  on a press anywhere outside it, on the cursor leaving it, or on losing focus. A low-level mouse
+  hook sees the outside press and exists only while the panel does.
+- **An edge tab is the default native form.** A strip 4 px thick and 72 px long sits flush against
+  a screen edge; hovering opens the panel against that edge and a click keeps it open. The pill
+  remains as a second style. A display's default edge is the first one that touches no other
+  display, so moving between monitors does not brush it.
+- **Attention is the tab's colour and a pulse.** Sessions that started alerting since the panel was
+  last opened are "unseen". While any is unseen the tab pulses in bursts: 0.9 s every 3 s for two
+  minutes, then every 10 s. A continuous pulse would animate for hours while the user is away.
+- **Compact rows.** A session is one 32 px row, with a second 28 px row carrying Allow and Deny when
+  it is waiting. Everything else is behind expanding the row. The panel is 340 px wide and 18
+  sessions fit where 6 did.
+- **Motion follows the display.** In the panel only `transform`, `opacity` and grid-row heights
+  animate, as CSS or Web Animations, so the compositor paces them at the refresh rate; measured at
+  238 Hz with no slow frames on expand, reorder and view switch. The native tab is paced by a
+  high-resolution timer at its display's refresh rate, computed from elapsed time, and the timer is
+  parked when nothing moves: 0.00 CPU seconds over 60 s idle and 0.2 while pulsing.
+- The list reserves a scrollbar gutter on both sides so its margins stay equal.
+
 ## M3 to M5 and display targeting (2026-11-20)
 
 ### Scope cut for v1
@@ -102,8 +127,7 @@ Measured on this machine with a release build, 60 s of sampling after a 60 s war
 A live WebView2 window costs about 160 MB whether it is shown or hidden, against an idle budget of
 80 MB, so the collapsed pill is a Win32 layered window painted by Beacon's own rasterizer. The panel
 window is created when it opens and destroyed when it closes, never hidden. Opening it from cold
-takes about 0.3 s. While a session needs the user the panel is pinned open, and the app is over the
-idle budget for as long as that lasts.
+takes about 0.3 s. The app is over the idle budget only while the panel is open.
 
 ### Pill
 
@@ -120,11 +144,10 @@ idle budget for as long as that lasts.
 
 ### Panel
 
-- Three modes. Hover closes 400 ms after the cursor leaves the pill and the panel. Sticky (a click,
-  the hotkey, the tray, a second launch) stays until dismissed. Pinned applies while any session is
-  alerting and cannot be dismissed; when alerting ends the panel returns to the mode it was opened
-  in.
-- Hover and alert opens do not take focus.
+- Two modes. Hover closes 400 ms after the cursor leaves the tab or pill and the panel. Sticky (a
+  click, the hotkey, the tray, a second launch) stays until dismissed. The pinned mode this
+  milestone shipped with was removed; see "Edge tab, compact panel and motion".
+- A hover open does not take focus.
 - The page can call a fixed list of commands and nothing else, restricted to the panel window by a
   capability file. The CSP is `default-src 'self'` plus the `connect-src` Tauri's own IPC needs.
 - Everything from a session is rendered as text nodes. The last message goes through a hand-written
@@ -133,8 +156,8 @@ idle budget for as long as that lasts.
 
 ### Attention, acknowledge and snooze
 
-- `alerting` means in an attention state and not snoozed. The pill count, the pinned panel, the tray
-  icon and toasts all follow it.
+- `alerting` means in an attention state and not snoozed. The tab's colour and pulse, the pill count,
+  the tray icon and toasts all follow it.
 - Acknowledge clears `done`, `error` and `stalled`. The brief had it only for `done`, which would
   leave an API error pinning the panel until the next prompt.
 - Snooze is per session or global, for 5 or 15 minutes, held in the core so the CLI and the app

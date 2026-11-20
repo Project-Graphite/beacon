@@ -22,7 +22,7 @@ npm install
 npx tauri build --no-bundle -- --profile fast
 ```
 
-The binaries land in `target\fast\`: `beacon-app.exe` (tray, pill and panel), `beacon.exe` (the
+The binaries land in `target\fast\`: `beacon-app.exe` (tray, edge tab and panel), `beacon.exe` (the
 CLI) and `beacon-hook.exe` (the helper the hooks run). Keep the three in one folder: installing the
 hooks copies the helper from next to the running executable.
 
@@ -31,7 +31,7 @@ the development server instead of the bundled front end.
 
 Start `beacon-app.exe`. It hosts the core itself; if a `beacon daemon` is already running for the
 same Beacon home, it connects to that one instead. `--open-panel` opens the panel at start and
-`--tray-only` starts without the pill.
+`--tray-only` starts without the edge tab or pill.
 
 ## Install the hooks
 
@@ -50,10 +50,18 @@ Running sessions pick up hook changes without a restart.
 
 ## Using it
 
+### The edge tab
+
+The edge tab is the default native form: a strip 4 px thick and 72 px long, flush against a screen
+edge and coloured by the overall state. When a session starts needing you or finishes, the tab
+pulses in bursts until the panel is next opened. Hovering the tab opens the panel against that edge
+and a click keeps it open. A display's default edge is the first one that touches no other display.
+
 ### The pill
 
-The pill is a small always-on-top strip with one mark per session, at most ten and then `+N`,
-followed by the number of sessions that need you. Each state has its own shape as well as colour:
+The pill is the alternative style, chosen from `Style` in the tray menu. It is a small always-on-top
+strip with one mark per session, at most ten and then `+N`, followed by the number of sessions that
+need you. Each state has its own shape as well as colour:
 
 | Mark | Meaning |
 |---|---|
@@ -69,15 +77,17 @@ and remembers its position per monitor layout.
 
 ### The panel
 
-The panel has three modes:
+The panel has two modes:
 
-- Hover: opens when the cursor rests on the pill and closes 400 ms after it leaves both.
-- Sticky: opened with a click on the pill, the hotkey, the tray or a second launch; it stays until
-  you close it with Escape or the same action.
-- Pinned: while any session needs you, the panel stays open and cannot be dismissed. When nothing
-  needs you any more it returns to the mode it was opened in.
+- Hover: opens when the cursor rests on the tab or pill and closes 400 ms after it leaves both.
+- Sticky: opened with a click on the tab or pill, the hotkey, the tray or a second launch.
 
-Sessions are grouped by state. Arrow keys select a session, Enter expands it, `a` acknowledges, `s`
+The panel never opens by itself and never stays open. It closes on a press outside it, when the
+cursor leaves it (hover), on Escape, or when a sticky panel loses focus.
+
+The panel is compact: one row per session, and a second row with `Allow` and `Deny` for a session
+that is waiting. The branch, usage, last message, timeline, prompt box and the full request view are
+behind expanding the row. Sessions are grouped by state. Arrow keys select a session, Enter expands it, `a` acknowledges, `s`
 snoozes it for 5 minutes, `j` jumps to its window and `/` opens the prompt box.
 
 ### Answering requests
@@ -119,7 +129,7 @@ A queued prompt shows `queued`, `delivered`, `acknowledged` or `failed`, and sur
 ### Snooze and acknowledge
 
 Snooze silences one session, or all of them from the bell in the header or the tray, for 5 or 15
-minutes: no pinned panel, no count on the pill and no notification. Acknowledge clears a `done`,
+minutes: no pulse on the tab, no count on the pill and no notification. Acknowledge clears a `done`,
 `error` or `stalled` session. Bringing a finished session's window to the front acknowledges it
 when that window holds exactly one session.
 
@@ -138,9 +148,11 @@ Beacon home and its logs folder.
 
 ### Tray menu
 
-`Open panel`, `Snooze all for 5 minutes`, `Snooze all for 15 minutes`, `Clear snooze`, `Hide pill`
-or `Show pill`, `Show on` (the display the pill and panel use), `Never show on` (displays to
-avoid), `Position` (move the pill to a corner) and `Quit`.
+`Open panel`, `Snooze all for 5 minutes`, `Snooze all for 15 minutes`, `Clear snooze`, the hide or
+show item named after the current style (`Hide edge tab`, `Show pill` and so on), `Style` (`Edge
+tab` or `Pill`), `Show on` (the display the tab or pill and the panel use), `Never show on`
+(displays to avoid), `Position` (one of the four edges in tab style, one of the four corners in pill
+style) and `Quit`.
 
 ### CLI
 
@@ -224,7 +236,7 @@ What is stored where:
 
 | Place | Contents |
 |---|---|
-| `%LOCALAPPDATA%\Beacon` (or `BEACON_HOME`) | `endpoint` (pipe name and token, removed on a clean stop), `state.json` (sessions, snoozes, queued prompts), `config.json`, `ui.json` (pill positions, displays, shortcut, notification choices), `install.json`, `bin\beacon-hook.exe`, `backups\` (copies of the settings file), `logs\core.log`, `icon.png` |
+| `%LOCALAPPDATA%\Beacon` (or `BEACON_HOME`) | `endpoint` (pipe name and token, removed on a clean stop), `state.json` (sessions, snoozes, queued prompts), `config.json`, `ui.json` (style, tab placement, pill positions, displays, shortcut, notification choices), `install.json`, `bin\beacon-hook.exe`, `backups\` (copies of the settings file), `logs\core.log`, `icon.png` |
 | Claude Code `settings.json` | The Beacon hook handlers |
 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `Beacon` | Only while `Start Beacon when I sign in` is on |
 | `HKCU\Software\Classes\AppUserModelId\com.project-graphite.beacon` | The name and icon Windows shows on Beacon's notifications |
