@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { getDetail, type Session, type SessionDetail } from '../beacon';
-import { clockTimeWithSeconds, formatTokens } from '../lib/format.ts';
+import type { Session, SessionDetail } from '../beacon';
+import { formatTokens } from '../lib/format.ts';
 import type { JumpReport } from '../lib/jump.ts';
 import { textLines } from '../lib/lines.ts';
 import { LineClamp } from './LineClamp';
@@ -9,33 +8,15 @@ import { PromptBox } from './PromptBox';
 
 interface SessionDetailsProps {
   session: Session;
-  expanded: boolean;
+  detail: SessionDetail | null;
   onJumpReport: (report: JumpReport) => void;
 }
 
-export function SessionDetails({ session, expanded, onJumpReport }: SessionDetailsProps) {
-  const [detail, setDetail] = useState<SessionDetail | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
-  const loadedAt = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!expanded || loadedAt.current === session.event_count) return;
-    loadedAt.current = session.event_count;
-    getDetail(session.session_id).then(
-      (loaded) => {
-        setDetail(loaded);
-        setFailure(null);
-      },
-      (error) => setFailure(String(error)),
-    );
-  }, [expanded, session.session_id, session.event_count]);
-
+export function SessionDetails({ session, detail, onJumpReport }: SessionDetailsProps) {
   const usage = session.usage;
-  const timeline = [...(detail?.timeline ?? [])].sort((a, b) => b.t_ms - a.t_ms);
-
   return (
-    <div className="space-y-3 border-t border-line-soft pt-2.5 pr-2.5 pb-3 pl-8">
-      {failure && <p className="text-micro text-danger">Cannot load details: {failure}</p>}
+    <>
+      <PromptBox session={session} onJumpReport={onJumpReport} />
       {detail?.last_message && (
         <section>
           <h3 className="mb-1 text-micro text-faint">Last message</h3>
@@ -74,26 +55,6 @@ export function SessionDetails({ session, expanded, onJumpReport }: SessionDetai
       {usage?.status === 'unrecognized' && (
         <p className="text-micro text-muted">Usage unavailable: transcript format not recognised</p>
       )}
-      <PromptBox session={session} onJumpReport={onJumpReport} />
-      {timeline.length > 0 && (
-        <section>
-          <h3 className="mb-1 text-micro text-faint">Timeline</h3>
-          <LineClamp lines={timeline}>
-            {(shown) => (
-              <ol className="space-y-0.5">
-                {shown.map((entry, index) => (
-                  <li key={index} className="flex items-baseline gap-2 text-secondary">
-                    <span className="shrink-0 font-mono text-micro text-faint tabular-nums">
-                      {clockTimeWithSeconds(entry.t_ms)}
-                    </span>
-                    <span className="min-w-0 truncate text-muted">{entry.label}</span>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </LineClamp>
-        </section>
-      )}
-    </div>
+    </>
   );
 }

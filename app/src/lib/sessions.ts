@@ -3,6 +3,13 @@ import { formatDuration, formatTokens, shortModel } from './format.ts';
 import { queuedPrompts } from './prompts.ts';
 
 export type Tone = 'wip' | 'live' | 'danger' | 'muted';
+
+export const TONE_CLASSES: Record<Tone, string> = {
+  wip: 'text-wip',
+  live: 'text-live',
+  danger: 'text-danger',
+  muted: 'text-muted',
+};
 export type SurfaceIcon = 'terminal' | 'headless' | 'editor' | 'desktop' | 'unknown';
 
 export interface SessionGroup {
@@ -21,14 +28,12 @@ export interface SummaryPart {
   text: string;
 }
 
-export type RowPhrase =
-  | { kind: 'command'; text: string }
-  | { kind: 'activity'; text: string }
+export type RowLine =
+  | { kind: 'tasks'; count: string; text: string | null }
+  | { kind: 'step'; text: string }
   | { kind: 'state'; text: string; tone: Tone };
 
 export const cardId = (sessionId: string) => `session-${sessionId}`;
-
-const RUNNING = 'Running ';
 
 const GROUP_LABELS =['Needs you', 'Snoozed', 'Working', 'Idle'];
 
@@ -57,14 +62,39 @@ const newestFirst = (sessions: Session[]) =>
   [...sessions].sort((a, b) => b.last_event_ms - a.last_event_ms);
 
 export function groupSessions(sessions: Session[]): { groups: SessionGroup[]; ended: Session[] } {
-  const live = newestFirst(sessions.filter((session) => session.state !== 'ended'));
+  const listed = sessions.filter((session) => !session.dismissed);
+  const live = newestFirst(listed.filter((session) => session.state !== 'ended'));
   return {
     groups: GROUP_LABELS.map((label, index) => ({
       label,
       sessions: live.filter((session) => groupIndex(session) === index),
     })).filter((group) => group.sessions.length > 0),
-    ended: newestFirst(sessions.filter((session) => session.state === 'ended')),
+    ended: newestFirst(listed.filter((session) => session.state === 'ended')),
   };
+}
+
+export function crossedOff(sessions: Session[]): Session[] {
+  return newestFirst(sessions.filter((session) => session.dismissed));
+}
+
+export function sessionTitle(session: Session): string {
+  return session.title ?? session.listed_name ?? session.project ?? session.session_id.slice(0, 8);
+}
+
+export function taskProgress(session: Session): number {
+  return session.tasks_created === 0 ? 0 : session.tasks_completed / session.tasks_created;
+}
+
+export function sessionTabs(listOrder: Session[], currentId: string): Session[] {
+  return listOrder.filter(
+    (session) => session.session_id === currentId || (session.state !== 'ended' && !session.dismissed),
+  );
+}
+
+export function stepTab(tabs: Session[], currentId: string, step: 1 | -1): string | null {
+  if (tabs.length === 0) return null;
+  const index = tabs.findIndex((session) => session.session_id === currentId);
+  return tabs[(index + step + tabs.length) % tabs.length].session_id;
 }
 
 export function summaryParts(sessions: Session[]): SummaryPart[] {
@@ -80,10 +110,12 @@ export function summary(sessions: Session[]): string {
   return summaryParts(sessions).map(({ count, text }) => `${count} ${text}`).join(' · ') || 'All quiet';
 }
 
-export function rowPhrase(session: Session): RowPhrase {
-  const activity = session.state === 'working' ? session.activity : null;
-  if (activity?.startsWith(RUNNING)) return { kind: 'command', text: activity.slice(RUNNING.length) };
-  if (activity) return { kind: 'activity', text: activity };
+export function rowLine(session: Session): RowLine {
+  if (needsInput(session)) return { kind: 'state', ...statePhrase(session) };
+  if (session.tasks_created > 0) {
+    return { kind: 'tasks', count: `${session.tasks_completed}/${session.tasks_created}`, text: session.task_current };
+  }
+  if (session.step_current) return { kind: 'step', text: session.step_current.label };
   return { kind: 'state', ...statePhrase(session) };
 }
 
@@ -142,7 +174,6 @@ export function metaItems(session: Session): MetaItem[] {
     queued > 0 && { text: `${queued} queued` },
     model && { text: shortModel(model) },
     session.permission_mode && session.permission_mode !== 'default' && { text: session.permission_mode },
-    session.tasks_created > 0 && { text: `tasks ${session.tasks_completed}/${session.tasks_created}` },
     subagents > 0 && { text: `sub ${subagents}` },
     background_tasks > 0 && { text: `bg ${background_tasks}` },
     compacting && { text: 'compacting' },

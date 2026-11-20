@@ -11,12 +11,24 @@ interface HeaderProps {
   accountUsage: AccountUsage | null;
   snoozedUntil: number | null;
   queue: { position: number; total: number } | null;
+  soundsEnabled: boolean | null;
   settingsOpen: boolean;
+  onToggleSounds: () => void;
   onToggleSettings: () => void;
   run: (action: Promise<unknown>) => void;
 }
 
-export function Header({ sessions, accountUsage, snoozedUntil, queue, settingsOpen, onToggleSettings, run }: HeaderProps) {
+export function Header({
+  sessions,
+  accountUsage,
+  snoozedUntil,
+  queue,
+  soundsEnabled,
+  settingsOpen,
+  onToggleSounds,
+  onToggleSettings,
+  run,
+}: HeaderProps) {
   const parts = summaryParts(sessions);
   return (
     <header className="relative z-20 flex h-8 shrink-0 items-center gap-1.5 border-b border-line-soft px-2.5">
@@ -43,6 +55,17 @@ export function Header({ sessions, accountUsage, snoozedUntil, queue, settingsOp
           </span>
         )}
         {accountUsage && <UsageButton usage={accountUsage} />}
+        <button
+          type="button"
+          aria-label="Sounds"
+          aria-pressed={soundsEnabled ?? false}
+          disabled={soundsEnabled === null}
+          title="Play a sound when a session needs you or finishes"
+          onClick={onToggleSounds}
+          className={`press grid size-6 place-items-center rounded-field hover:bg-surface hover:text-ink ${soundsEnabled ? 'text-ink' : 'text-muted'}`}
+        >
+          <Icon name={soundsEnabled ? 'sound-on' : 'sound-off'} />
+        </button>
         <SnoozeMenu snoozedUntil={snoozedUntil} run={run} />
         <button
           type="button"

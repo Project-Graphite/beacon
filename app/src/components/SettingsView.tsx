@@ -2,11 +2,9 @@ import { useEffect, useState } from 'react';
 import {
   appInfo,
   getLoginStart,
-  getUiSettings,
   openLogsFolder,
   setConfig,
   setLoginStart,
-  setUiSettings,
   type AppInfo,
   type LiveConfig,
   type UiSettings,
@@ -23,9 +21,14 @@ type Section = 'behaviour' | 'notifications' | 'shortcut' | 'windows' | 'about';
 const FIELD =
   'h-6 rounded-field border border-line bg-paper px-2 font-mono text-secondary text-ink placeholder:text-faint focus:border-muted focus:outline-none';
 
-export function SettingsView({ config }: { config: LiveConfig | null }) {
-  const [ui, setUi] = useState<UiSettings | null>(null);
-  const [hotkey, setHotkey] = useState('');
+interface SettingsViewProps {
+  config: LiveConfig | null;
+  ui: UiSettings | null;
+  onChangeUi: (change: Partial<UiSettings>) => Promise<UiSettings>;
+}
+
+export function SettingsView({ config, ui, onChangeUi }: SettingsViewProps) {
+  const [editedHotkey, setEditedHotkey] = useState<string | null>(null);
   const [loginStart, setLoginStartShown] = useState<boolean | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [stallText, setStallText] = useState<string | null>(null);
@@ -40,13 +43,9 @@ export function SettingsView({ config }: { config: LiveConfig | null }) {
       (error) => setErrors((current) => ({ ...current, [section]: String(error) })),
     );
 
-  const showUi = (settings: UiSettings) => {
-    setUi(settings);
-    setHotkey(settings.hotkey);
-  };
+  const hotkey = editedHotkey ?? ui?.hotkey ?? '';
 
   useEffect(() => {
-    attempt('notifications', getUiSettings(), showUi);
     attempt('windows', getLoginStart(), setLoginStartShown);
     attempt('about', appInfo(), setInfo);
   }, []);
@@ -61,7 +60,7 @@ export function SettingsView({ config }: { config: LiveConfig | null }) {
     attempt('behaviour', setConfig({ stall_minutes: minutes }), () => setStallText(null));
   };
 
-  const applyHotkey = () => attempt('shortcut', setUiSettings({ hotkey: hotkey.trim() }), showUi);
+  const applyHotkey = () => attempt('shortcut', onChangeUi({ hotkey: hotkey.trim() }), () => setEditedHotkey(null));
 
   return (
     <div>
@@ -95,13 +94,19 @@ export function SettingsView({ config }: { config: LiveConfig | null }) {
           label="Show notifications"
           checked={ui?.toasts_enabled ?? true}
           disabled={!ui}
-          onChange={(checked) => attempt('notifications', setUiSettings({ toasts_enabled: checked }), showUi)}
+          onChange={(checked) => attempt('notifications', onChangeUi({ toasts_enabled: checked }))}
         />
         <CheckboxField
           label="Also when a session finishes"
           checked={ui?.toast_on_finished ?? true}
           disabled={!ui?.toasts_enabled}
-          onChange={(checked) => attempt('notifications', setUiSettings({ toast_on_finished: checked }), showUi)}
+          onChange={(checked) => attempt('notifications', onChangeUi({ toast_on_finished: checked }))}
+        />
+        <CheckboxField
+          label="Play a sound when a session needs you or finishes"
+          checked={ui?.sounds_enabled ?? false}
+          disabled={!ui}
+          onChange={(checked) => attempt('notifications', onChangeUi({ sounds_enabled: checked }))}
         />
       </SettingsSection>
       <SettingsSection label="Shortcut" error={errors.shortcut}>
@@ -111,7 +116,7 @@ export function SettingsView({ config }: { config: LiveConfig | null }) {
             placeholder="Ctrl+Alt+B"
             value={hotkey}
             disabled={!ui}
-            onChange={(event) => setHotkey(event.target.value)}
+            onChange={(event) => setEditedHotkey(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && hotkey.trim()) applyHotkey();
             }}

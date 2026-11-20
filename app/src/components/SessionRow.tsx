@@ -1,0 +1,103 @@
+import type { MouseEvent } from 'react';
+import type { PendingDecision, Session } from '../beacon';
+import type { ResolutionNotice } from '../lib/queue.ts';
+import { cardId, needsInput, rowLine, sessionTitle, taskProgress, TONE_CLASSES, turnTime } from '../lib/sessions.ts';
+import { Avatar } from './Avatar';
+import { ProgressBar } from './ProgressBar';
+import { RequestRow } from './RequestRow';
+import { SessionActions } from './SessionActions';
+import { StepLabel } from './StepLabel';
+
+interface SessionRowProps {
+  session: Session;
+  pending: PendingDecision[];
+  notices: ResolutionNotice[];
+  currentId: number | null;
+  queueSize: number;
+  keys: Map<number, (key: string) => void> | null;
+  now: number;
+  selected: boolean;
+  crossedOff: boolean;
+  onOpen: () => void;
+  onJump: () => void;
+  onCrossOff: () => void;
+}
+
+export function SessionRow({
+  session,
+  pending,
+  notices,
+  currentId,
+  queueSize,
+  keys,
+  now,
+  selected,
+  crossedOff,
+  onOpen,
+  onJump,
+  onCrossOff,
+}: SessionRowProps) {
+  const line = rowLine(session);
+  const time = turnTime(session, now);
+  const alert = needsInput(session);
+  const open = (event: MouseEvent) => {
+    if (!crossedOff && !(event.target instanceof Element && event.target.closest('button'))) onOpen();
+  };
+
+  return (
+    <li
+      id={cardId(session.session_id)}
+      data-motion={session.session_id}
+      aria-current={selected || undefined}
+      className={`relative ${selected ? 'before:absolute before:inset-y-0 before:left-0 before:z-10 before:w-0.5 before:bg-ink' : ''}`}
+    >
+      <div
+        onClick={open}
+        className={`relative transition-colors duration-120 ease-settle ${crossedOff ? 'opacity-45' : 'hover:bg-surface'} ${selected ? 'bg-surface' : ''} ${alert ? 'outline-1 -outline-offset-1 outline-wip/50' : ''}`}
+      >
+        <span data-flash aria-hidden="true" className="pointer-events-none absolute inset-0 bg-ink/8 opacity-0" />
+        <div className="relative flex h-10 items-center gap-2.5 px-2.5">
+          <Avatar session={session} size="row" />
+          <div className="min-w-0 flex-1">
+            <p className="flex items-baseline gap-2">
+              <span className="min-w-0 flex-1 truncate font-semibold text-ink">{sessionTitle(session)}</span>
+              {time && <span className="shrink-0 font-mono text-micro text-faint tabular-nums">{time}</span>}
+            </p>
+            <p className={`truncate text-micro ${line.kind === 'state' ? TONE_CLASSES[line.tone] : 'text-muted'}`}>
+              {line.kind === 'tasks' ? (
+                <>
+                  <span className="font-mono tabular-nums">{line.count}</span> {line.text}
+                </>
+              ) : line.kind === 'step' ? (
+                <StepLabel label={line.text} />
+              ) : (
+                line.text
+              )}
+            </p>
+          </div>
+          {!crossedOff && (
+            <SessionActions requestPending={pending.length > 0} onJump={onJump} onCrossOff={onCrossOff} />
+          )}
+          {session.tasks_created > 0 && (
+            <ProgressBar fraction={taskProgress(session)} alert={alert} className="absolute inset-x-0 bottom-0 h-0.5" />
+          )}
+        </div>
+        {pending.map((request) => (
+          <RequestRow
+            key={request.id}
+            request={request}
+            marked={queueSize > 1 && request.id === currentId}
+            currentId={currentId}
+            keys={keys}
+            onOpen={onOpen}
+          />
+        ))}
+        {notices.map((notice) => (
+          <p key={notice.id} className="origin-top-left animate-appear pr-2.5 pb-1.5 pl-10 text-micro text-muted">
+            {notice.text}
+          </p>
+        ))}
+      </div>
+    </li>
+  );
+}

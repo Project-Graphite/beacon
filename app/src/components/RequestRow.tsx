@@ -14,10 +14,10 @@ interface RequestRowProps {
   marked: boolean;
   currentId: number | null;
   keys: Map<number, (key: string) => void> | null;
-  onExpand: () => void;
+  onOpen: () => void;
 }
 
-export function RequestRow({ request, marked, currentId, keys, onExpand }: RequestRowProps) {
+export function RequestRow({ request, marked, currentId, keys, onOpen }: RequestRowProps) {
   const [outcome, setOutcome] = useState<'check' | 'cross' | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [armed, setArmed] = useArmed(currentId);
@@ -43,7 +43,7 @@ export function RequestRow({ request, marked, currentId, keys, onExpand }: Reque
       if (request.kind === 'tool' && key === 'a') allow();
       else if (request.kind === 'tool' && key === 'd') send({ type: 'deny' });
       else {
-        onExpand();
+        onOpen();
         window.setTimeout(() => keys.get(request.id)?.(key));
       }
     });
@@ -54,9 +54,9 @@ export function RequestRow({ request, marked, currentId, keys, onExpand }: Reque
     <div
       id={keys ? requestId(request.id) : undefined}
       data-motion={`request:${request.id}`}
-      className="relative flex h-7 scroll-my-2 items-center gap-2 pr-2.5 pl-8"
+      className="relative flex h-7 scroll-my-2 items-center gap-2 pr-2.5 pl-10"
     >
-      {marked && <span aria-hidden="true" className="absolute inset-y-1.5 left-[26px] w-0.5 rounded-full bg-wip" />}
+      {marked && <span aria-hidden="true" className="absolute inset-y-1.5 left-[34px] w-0.5 rounded-full bg-wip" />}
       {destructive && (
         <span role="img" aria-label={`Looks destructive: ${destructive}`} title={`Looks destructive: ${destructive}`} className="size-1.5 shrink-0 rounded-full bg-danger" />
       )}
@@ -81,7 +81,7 @@ export function RequestRow({ request, marked, currentId, keys, onExpand }: Reque
               </OutlineButton>
             </>
           ) : (
-            <OutlineButton compact onClick={onExpand}>
+            <OutlineButton compact onClick={onOpen}>
               {request.kind === 'question' ? 'Answer' : 'Review'}
             </OutlineButton>
           )}

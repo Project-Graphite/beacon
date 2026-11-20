@@ -4,14 +4,19 @@ import type { Session } from '../beacon';
 import {
   canAcknowledge,
   canSnooze,
+  crossedOff,
   groupSessions,
   metaItems,
   needsInput,
-  rowPhrase,
+  rowLine,
+  sessionTabs,
+  sessionTitle,
   statePhrase,
+  stepTab,
   summary,
   summaryParts,
   surface,
+  taskProgress,
   turnRunning,
   turnTime,
 } from './sessions.ts';
@@ -48,6 +53,11 @@ const session = (fields: Partial<Session>): Session => ({
   usage: null,
   mcp_request: null,
   prompts: [],
+  tasks: [],
+  task_current: null,
+  step_current: null,
+  command_current: null,
+  dismissed: false,
   ...fields,
 });
 
@@ -99,21 +109,77 @@ test('summary parts keep their kind so each count can roll on its own', () => {
   assert.deepEqual(summaryParts([session({})]), []);
 });
 
-test('a collapsed row shows the activity of a working session, else its state phrase', () => {
-  const row = (fields: Partial<Session>) => rowPhrase(session(fields));
-  assert.deepEqual(row({ state: 'working', activity: 'Running npm test' }), { kind: 'command', text: 'npm test' });
-  assert.deepEqual(row({ state: 'working', activity: 'Reading App.tsx' }), { kind: 'activity', text: 'Reading App.tsx' });
+test('a row line shows tasks, else the running step, else the state, and always the state when input is needed', () => {
+  const row = (fields: Partial<Session>) => rowLine(session(fields));
+  const step = { kind: 'run' as const, label: 'Running npm test' };
+  assert.deepEqual(
+    row({ state: 'working', tasks_created: 7, tasks_completed: 3, task_current: 'Animations', step_current: step }),
+    { kind: 'tasks', count: '3/7', text: 'Animations' },
+  );
+  assert.deepEqual(row({ state: 'done', tasks_created: 2, tasks_completed: 2 }), { kind: 'tasks', count: '2/2', text: null });
+  assert.deepEqual(row({ state: 'working', step_current: step }), { kind: 'step', text: 'Running npm test' });
   assert.deepEqual(row({ state: 'working' }), { kind: 'state', text: 'working', tone: 'muted' });
-  assert.deepEqual(row({ state: 'needs_permission', activity: 'Running rm -rf dist' }), {
-    kind: 'state',
-    text: 'needs permission',
-    tone: 'wip',
-  });
+  for (const state of ['needs_permission', 'needs_answer', 'needs_plan_approval', 'needs_mcp_input'] as const) {
+    const line = row({ state, tasks_created: 4, tasks_completed: 1, task_current: 'Fix', step_current: step });
+    assert.equal(line.kind, 'state');
+    assert.equal(line.kind === 'state' && line.tone, 'wip');
+  }
+  assert.deepEqual(row({ state: 'needs_permission' }), { kind: 'state', text: 'needs permission', tone: 'wip' });
   assert.deepEqual(row({ state: 'error', last_error: 'overloaded' }), {
     kind: 'state',
     text: 'API error: overloaded',
     tone: 'danger',
   });
+});
+
+test('a row is titled by its title, else its listed name, else its project, else its id', () => {
+  assert.equal(sessionTitle(session({ session_id: 'abcdef123456', title: 'Fix', listed_name: 'n', project: 'p' })), 'Fix');
+  assert.equal(sessionTitle(session({ session_id: 'abcdef123456', listed_name: 'n', project: 'p' })), 'n');
+  assert.equal(sessionTitle(session({ session_id: 'abcdef123456', project: 'p' })), 'p');
+  assert.equal(sessionTitle(session({ session_id: 'abcdef123456' })), 'abcdef12');
+});
+
+test('task progress is the done fraction, and zero without tasks', () => {
+  assert.equal(taskProgress(session({})), 0);
+  assert.equal(taskProgress(session({ tasks_created: 4, tasks_completed: 1 })), 0.25);
+  assert.equal(taskProgress(session({ tasks_created: 3, tasks_completed: 3 })), 1);
+});
+
+test('crossed off sessions leave the groups and the ended list for their own, newest first', () => {
+  const sessions = [
+    session({ session_id: 'work', state: 'working', last_event_ms: 5 }),
+    session({ session_id: 'crossed-idle', state: 'idle', dismissed: true, last_event_ms: 1 }),
+    session({ session_id: 'crossed-done', state: 'done', attention: true, dismissed: true, last_event_ms: 3 }),
+    session({ session_id: 'crossed-ended', state: 'ended', dismissed: true, last_event_ms: 2 }),
+    session({ session_id: 'gone', state: 'ended', last_event_ms: 4 }),
+  ];
+  const { groups, ended } = groupSessions(sessions);
+  assert.deepEqual(
+    groups.map((group) => [group.label, ids(group.sessions)]),
+    [['Working', ['work']]],
+  );
+  assert.deepEqual(ids(ended), ['gone']);
+  assert.deepEqual(ids(crossedOff(sessions)), ['crossed-done', 'crossed-ended', 'crossed-idle']);
+  assert.deepEqual(crossedOff([session({})]), []);
+});
+
+test('tabs keep list order, skip ended and crossed off sessions but keep the open one, and wrap', () => {
+  const listOrder = [
+    session({ session_id: 'a', state: 'needs_permission' }),
+    session({ session_id: 'b', state: 'working' }),
+    session({ session_id: 'c', state: 'idle', dismissed: true }),
+    session({ session_id: 'd', state: 'idle' }),
+    session({ session_id: 'e', state: 'ended' }),
+  ];
+  assert.deepEqual(ids(sessionTabs(listOrder, 'b')), ['a', 'b', 'd']);
+  assert.deepEqual(ids(sessionTabs(listOrder, 'e')), ['a', 'b', 'd', 'e']);
+  const tabs = sessionTabs(listOrder, 'a');
+  assert.equal(stepTab(tabs, 'a', 1), 'b');
+  assert.equal(stepTab(tabs, 'd', 1), 'a');
+  assert.equal(stepTab(tabs, 'a', -1), 'd');
+  assert.equal(stepTab(tabs, 'b', -1), 'a');
+  assert.equal(stepTab([listOrder[1]], 'b', 1), 'b');
+  assert.equal(stepTab([], 'b', 1), null);
 });
 
 test('surfaces map entrypoints to labels and icons', () => {
@@ -207,7 +273,6 @@ test('meta items list only what is present', () => {
     [
       { text: 'opus-5-5' },
       { text: 'acceptEdits' },
-      { text: 'tasks 3/7' },
       { text: 'sub 2' },
       { text: 'bg 1' },
       { text: 'compacting' },

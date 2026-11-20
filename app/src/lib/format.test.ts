@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   clockTime,
-  clockTimeWithSeconds,
   formatDuration,
+  formatStepDuration,
   formatTokens,
   resetTime,
   shortModel,
@@ -35,8 +35,15 @@ test('token counts use k and M suffixes', () => {
 test('clock times are local and zero padded', () => {
   const afternoon = new Date(2026, 10, 20, 14, 32, 5).getTime();
   assert.equal(clockTime(afternoon), '14:32');
-  assert.equal(clockTimeWithSeconds(afternoon), '14:32:05');
-  assert.equal(clockTimeWithSeconds(new Date(2026, 10, 20, 9, 3, 0).getTime()), '09:03:00');
+});
+
+test('step durations show tenths under ten seconds, then the turn duration format, and nothing while unknown', () => {
+  assert.equal(formatStepDuration(null), '');
+  assert.equal(formatStepDuration(0), '0.0s');
+  assert.equal(formatStepDuration(437), '0.4s');
+  assert.equal(formatStepDuration(9_990), '9.9s');
+  assert.equal(formatStepDuration(12_400), '12s');
+  assert.equal(formatStepDuration(125_000), '2m05s');
 });
 
 test('reset times show the weekday only when not today', () => {

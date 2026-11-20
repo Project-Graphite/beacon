@@ -1,17 +1,31 @@
 import type { ReactNode } from 'react';
 import type { Session } from '../beacon';
 import type { SessionGroup } from '../lib/sessions.ts';
-import { Icon } from './Icon';
+import { FoldedGroup } from './FoldedGroup';
 
 interface SessionListProps {
   groups: SessionGroup[];
   ended: Session[];
+  crossed: Session[];
   endedOpen: boolean;
+  crossedOpen: boolean;
   onToggleEnded: () => void;
-  renderCard: (session: Session) => ReactNode;
+  onToggleCrossed: () => void;
+  renderRow: (session: Session) => ReactNode;
+  renderCrossedRow: (session: Session) => ReactNode;
 }
 
-export function SessionList({ groups, ended, endedOpen, onToggleEnded, renderCard }: SessionListProps) {
+export function SessionList({
+  groups,
+  ended,
+  crossed,
+  endedOpen,
+  crossedOpen,
+  onToggleEnded,
+  onToggleCrossed,
+  renderRow,
+  renderCrossedRow,
+}: SessionListProps) {
   return (
     <ul aria-label="Sessions" className="session-list">
       {groups.flatMap((group) => [
@@ -20,25 +34,24 @@ export function SessionList({ groups, ended, endedOpen, onToggleEnded, renderCar
             <h2 className="text-micro text-faint">{group.label}</h2>
           </li>
         ),
-        ...group.sessions.map(renderCard),
+        ...group.sessions.map(renderRow),
       ])}
       {ended.length > 0 && (
-        <li key="ended" data-motion="ended">
-          <button
-            type="button"
-            aria-expanded={endedOpen}
-            onClick={onToggleEnded}
-            className="flex h-6 w-full items-center gap-1.5 px-2.5 text-micro text-faint transition-colors duration-120 ease-settle -outline-offset-2 hover:bg-surface hover:text-muted"
-          >
-            <Icon
-              name="chevron"
-              className={`size-3 transition-transform duration-200 ease-settle ${endedOpen ? 'rotate-90' : ''}`}
-            />
-            Ended ({ended.length})
-          </button>
-        </li>
+        <FoldedGroup key="ended" motionId="ended" label={`Ended (${ended.length})`} open={endedOpen} onToggle={onToggleEnded}>
+          {ended.map(renderRow)}
+        </FoldedGroup>
       )}
-      {endedOpen && ended.map(renderCard)}
+      {crossed.length > 0 && (
+        <FoldedGroup
+          key="crossed"
+          motionId="crossed"
+          label={`Crossed off (${crossed.length})`}
+          open={crossedOpen}
+          onToggle={onToggleCrossed}
+        >
+          {crossed.map(renderCrossedRow)}
+        </FoldedGroup>
+      )}
     </ul>
   );
 }

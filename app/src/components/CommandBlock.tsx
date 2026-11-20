@@ -1,3 +1,4 @@
+import { useOffscreenPause } from '../hooks/useOffscreenPause.ts';
 import { tokenizeCommand, type TokenKind } from '../lib/command.ts';
 import { textLines } from '../lib/lines.ts';
 import { LineClamp } from './LineClamp';
@@ -13,16 +14,24 @@ const TOKEN_CLASSES: Record<TokenKind, string | undefined> = {
   space: undefined,
 };
 
-export function CommandBlock({ command }: { command: string }) {
+export function CommandBlock({ command, live }: { command: string; live?: boolean }) {
+  const watched = useOffscreenPause<HTMLPreElement>();
   return (
     <LineClamp lines={textLines(command)}>
       {(shown) => (
-        <pre className="mt-1 rounded-field bg-surface px-2 py-1.5 font-mono text-secondary whitespace-pre-wrap [overflow-wrap:anywhere]">
+        <pre
+          ref={watched}
+          className="mt-1 rounded-field bg-surface px-2 py-1.5 font-mono text-secondary whitespace-pre-wrap [overflow-wrap:anywhere]"
+        >
+          {live && <span className="text-faint">$ </span>}
           {tokenizeCommand(shown.join('\n')).map((token, index) => (
             <span key={index} className={TOKEN_CLASSES[token.kind]}>
               {token.text}
             </span>
           ))}
+          {live && (
+            <span aria-hidden="true" className="ml-0.5 inline-block h-[1.1em] w-[0.5em] animate-caret bg-ink/70 align-[-0.2em]" />
+          )}
         </pre>
       )}
     </LineClamp>

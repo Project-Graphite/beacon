@@ -10,6 +10,11 @@ export function formatDuration(ms: number): string {
   return `${Math.floor(seconds / 86_400)}d${pad(Math.floor(seconds / 3600) % 24)}h`;
 }
 
+export function formatStepDuration(ms: number | null): string {
+  if (ms === null) return '';
+  return ms < 10_000 ? `${(Math.floor(ms / 100) / 10).toFixed(1)}s` : formatDuration(ms);
+}
+
 export function formatTokens(count: number): string {
   const scaled = (value: number, suffix: string) =>
     `${value < 9.95 ? String(Number(value.toFixed(1))) : Math.round(value)}${suffix}`;
@@ -21,10 +26,6 @@ export function formatTokens(count: number): string {
 export function clockTime(ms: number): string {
   const date = new Date(ms);
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-export function clockTimeWithSeconds(ms: number): string {
-  return `${clockTime(ms)}:${pad(new Date(ms).getSeconds())}`;
 }
 
 export function resetTime(iso: string, now: number): string {

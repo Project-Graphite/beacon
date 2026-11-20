@@ -18,6 +18,12 @@ export type SessionState =
 
 export type PermissionKind = 'tool' | 'question' | 'plan';
 
+export type StepKind = 'prompt' | 'read' | 'edit' | 'run' | 'search' | 'web' | 'agent' | 'task' | 'mcp' | 'permission' | 'question' | 'plan' | 'notice' | 'finish' | 'error';
+export type StepStatus = 'running' | 'done' | 'failed' | 'stopped';
+export interface Task { id: string; subject: string; done: boolean; }
+export interface CurrentStep { kind: StepKind; label: string; }
+export interface Step { id: number; t_ms: number; kind: StepKind; label: string; status: StepStatus; duration_ms: number | null; }
+
 export interface Overlays {
   compacting: boolean;
   subagents: number;
@@ -70,6 +76,11 @@ export interface Session {
   mcp_request: McpRequest | null;
   host?: SessionHost | null;
   prompts: Prompt[];
+  tasks: Task[];
+  task_current: string | null;
+  step_current: CurrentStep | null;
+  command_current: string | null;
+  dismissed: boolean;
 }
 
 export type PromptStatus = 'queued' | 'delivered' | 'acknowledged' | 'failed';
@@ -179,6 +190,8 @@ export interface SessionDetail {
   session_id: string;
   timeline: TimelineEntry[];
   last_message: string | null;
+  steps: Step[];
+  tasks: Task[];
 }
 
 export type Decision =
@@ -214,6 +227,7 @@ export interface UiSettings {
   hotkey: string;
   toasts_enabled: boolean;
   toast_on_finished: boolean;
+  sounds_enabled: boolean;
 }
 
 export interface AppInfo {
@@ -224,6 +238,7 @@ export interface AppInfo {
 export const getSnapshot = () => invoke<Snapshot>('get_snapshot');
 export const getDetail = (sessionId: string) => invoke<SessionDetail>('get_detail', { sessionId });
 export const acknowledge = (sessionId: string) => invoke<void>('acknowledge', { sessionId });
+export const dismiss = (sessionId: string) => invoke<void>('dismiss', { sessionId });
 export const decide = (id: number, decision: Decision) => invoke<void>('decide', { id, decision });
 export const snooze = (sessionId: string | null, minutes: number) =>
   invoke<void>('snooze', { sessionId, minutes });

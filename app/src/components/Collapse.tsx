@@ -1,20 +1,31 @@
-import type { ReactNode } from 'react';
+import { useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { PanelFit } from '../hooks/usePanelHeight.ts';
 
-interface CollapseProps {
-  open: boolean;
-  appear?: boolean;
-  children: ReactNode;
-}
+export function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+  const fit = useContext(PanelFit);
+  const inner = useRef<HTMLDivElement>(null);
+  const [fitted, setFitted] = useState(open);
+  if (!open && fitted) setFitted(false);
+  const shown = open && fitted;
 
-export function Collapse({ open, appear, children }: CollapseProps) {
+  useEffect(() => {
+    if (!open || fitted) return;
+    let current = true;
+    void fit(inner.current?.offsetHeight ?? 0).then(() => current && setFitted(true));
+    return () => {
+      current = false;
+    };
+  }, [open, fitted, fit]);
+
   return (
     <div
-      inert={!open}
-      className={`grid transition-[grid-template-rows] duration-200 ease-settle ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'} ${appear ? 'starting:grid-rows-[0fr]' : ''}`}
+      inert={!shown}
+      className={`grid transition-[grid-template-rows] duration-200 ease-settle ${shown ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
     >
       <div className="min-h-0 overflow-hidden">
         <div
-          className={`transition-[opacity,translate] duration-200 ease-settle ${open ? '' : '-translate-y-1 opacity-0'} ${appear ? 'starting:-translate-y-1 starting:opacity-0' : ''}`}
+          ref={inner}
+          className={`transition-[opacity,translate] duration-200 ease-settle ${shown ? '' : '-translate-y-1 opacity-0'}`}
         >
           {children}
         </div>

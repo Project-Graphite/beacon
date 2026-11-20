@@ -56,10 +56,8 @@ function shape(state: SessionState) {
 const glyph = (state: SessionState) => (
   <svg
     viewBox="0 0 16 16"
-    width="14"
-    height="14"
     aria-hidden="true"
-    className={`absolute inset-0 ${state === 'working' ? 'animate-turn' : ''}`}
+    className={`absolute inset-0 size-full ${state === 'working' ? 'animate-turn' : ''}`}
   >
     {shape(state)}
   </svg>
@@ -70,7 +68,7 @@ export function StateMark({ state, snoozed }: { state: SessionState; snoozed: bo
   if (marks.state !== state) setMarks({ state, previous: marks.state });
   const watched = useOffscreenPause<HTMLSpanElement>();
   return (
-    <span ref={watched} className={`relative size-3.5 shrink-0 ${snoozed ? 'opacity-45' : ''}`}>
+    <span ref={watched} className={`relative block size-2.5 shrink-0 ${snoozed ? 'opacity-45' : ''}`}>
       {marks.previous && (
         <span
           key={`${marks.previous}-${marks.state}`}
@@ -84,7 +82,7 @@ export function StateMark({ state, snoozed }: { state: SessionState; snoozed: bo
         {glyph(state)}
       </span>
       {state.startsWith('needs_') && !snoozed && (
-        <span className="absolute inset-[3px] animate-halo rounded-full border border-wip motion-reduce:hidden" />
+        <span className="absolute inset-[2px] animate-halo rounded-full border border-wip motion-reduce:hidden" />
       )}
     </span>
   );
