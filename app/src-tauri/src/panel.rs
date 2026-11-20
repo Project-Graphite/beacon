@@ -144,6 +144,6 @@ pub async fn close_panel(app: AppHandle) {
 }
 
 #[tauri::command]
-pub async fn set_panel_height(app: AppHandle, height: f64) {
+pub fn set_panel_height(app: AppHandle, height: f64) {
     shell::post(&app, Action::PanelHeight(height));
 }

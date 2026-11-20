@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { getDetail, type Session, type SessionDetail } from '../beacon';
 import { clockTimeWithSeconds, formatTokens } from '../lib/format.ts';
 import type { JumpReport } from '../lib/jump.ts';
+import { textLines } from '../lib/lines.ts';
+import { LineClamp } from './LineClamp';
 import { Markdown } from './Markdown';
 import { PromptBox } from './PromptBox';
-
-const TIMELINE_LIMIT = 12;
 
 interface SessionDetailsProps {
   session: Session;
@@ -16,7 +16,6 @@ interface SessionDetailsProps {
 export function SessionDetails({ session, expanded, onJumpReport }: SessionDetailsProps) {
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  const [showAll, setShowAll] = useState(false);
   const loadedAt = useRef<number | null>(null);
 
   useEffect(() => {
@@ -40,9 +39,9 @@ export function SessionDetails({ session, expanded, onJumpReport }: SessionDetai
       {detail?.last_message && (
         <section>
           <h3 className="mb-1 text-micro text-faint">Last message</h3>
-          <div className="scroll-thin max-h-60 overflow-y-auto pr-1">
-            <Markdown source={detail.last_message} />
-          </div>
+          <LineClamp lines={textLines(detail.last_message)}>
+            {(shown) => <Markdown source={shown.join('\n')} />}
+          </LineClamp>
         </section>
       )}
       {usage?.status === 'ok' && (
@@ -79,25 +78,20 @@ export function SessionDetails({ session, expanded, onJumpReport }: SessionDetai
       {timeline.length > 0 && (
         <section>
           <h3 className="mb-1 text-micro text-faint">Timeline</h3>
-          <ol className="space-y-0.5">
-            {(showAll ? timeline : timeline.slice(0, TIMELINE_LIMIT)).map((entry, index) => (
-              <li key={index} className="flex items-baseline gap-2 text-secondary">
-                <span className="shrink-0 font-mono text-micro text-faint tabular-nums">
-                  {clockTimeWithSeconds(entry.t_ms)}
-                </span>
-                <span className="min-w-0 truncate text-muted">{entry.label}</span>
-              </li>
-            ))}
-          </ol>
-          {!showAll && timeline.length > TIMELINE_LIMIT && (
-            <button
-              type="button"
-              className="press mt-1 rounded-field text-micro text-muted hover:text-ink"
-              onClick={() => setShowAll(true)}
-            >
-              Show all
-            </button>
-          )}
+          <LineClamp lines={timeline}>
+            {(shown) => (
+              <ol className="space-y-0.5">
+                {shown.map((entry, index) => (
+                  <li key={index} className="flex items-baseline gap-2 text-secondary">
+                    <span className="shrink-0 font-mono text-micro text-faint tabular-nums">
+                      {clockTimeWithSeconds(entry.t_ms)}
+                    </span>
+                    <span className="min-w-0 truncate text-muted">{entry.label}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </LineClamp>
         </section>
       )}
     </div>

@@ -59,7 +59,7 @@ export function HooksSection() {
                   </p>
                 ))}
               </div>
-              {shownPlan.diff.length > 0 && <DiffBlock lines={shownPlan.diff} heightClass="max-h-[200px]" />}
+              {shownPlan.diff.length > 0 && <DiffBlock lines={shownPlan.diff} />}
               <div className="mt-2 flex items-center gap-1.5">
                 <FilledButton
                   autoFocus

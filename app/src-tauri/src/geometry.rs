@@ -5,7 +5,6 @@ const SNAP_DISTANCE: f64 = 16.0;
 const PANEL_GAP: f64 = 8.0;
 const PANEL_WIDTH: f64 = 340.0;
 const PANEL_MIN_HEIGHT: f64 = 120.0;
-const PANEL_MAX_HEIGHT: f64 = 640.0;
 const PANEL_SCREEN_ALLOWANCE: f64 = 24.0;
 const TAB_LENGTH: f64 = 72.0;
 const DOCK_DISTANCE: f64 = 80.0;
@@ -208,7 +207,7 @@ pub fn resize_anchored(rect: Rect, width: i32, height: i32, work: &Rect) -> Rect
 
 fn panel_size(monitor: &Monitor, content_height: f64) -> (i32, i32) {
     let (work, scale) = (monitor.work, monitor.scale);
-    let tallest = PANEL_MAX_HEIGHT.min(f64::from(work.height()) / scale - PANEL_SCREEN_ALLOWANCE);
+    let tallest = f64::from(work.height()) / scale - PANEL_SCREEN_ALLOWANCE;
     (
         px(PANEL_WIDTH, scale),
         px(
@@ -569,7 +568,7 @@ pub(crate) mod tests {
         assert_eq!(scale, 1.5);
         assert_eq!(panel, Rect::sized(1390, 72, 510, 180));
         let (tall, _) = place_panel(Some(Rect::sized(0, 18, 100, 42)), &main, 2000.0);
-        assert_eq!(tall.height(), 960);
+        assert_eq!(tall.height(), 996);
         let (short, _) = place_panel(
             Some(Rect::sized(0, 18, 100, 42)),
             &monitor("small", Rect::sized(0, 0, 800, 400), 0, 1.0, true),
@@ -740,6 +739,50 @@ pub(crate) mod tests {
             place(Edge::Bottom, 1.0),
             Rect::sized(2560 - 340, 1392 - 300, 340, 300)
         );
+    }
+
+    #[test]
+    fn the_panel_grows_to_the_work_area_and_stays_attached_to_the_tab_edge() {
+        let oled = monitor("oled", Rect::sized(0, 0, 2560, 1440), 48, 1.0, true);
+        let place = |edge, offset, content_height| {
+            place_panel_on_edge(
+                tab_rect(&oled.bounds, at(edge, offset), 8.0, 1.0),
+                edge,
+                &oled,
+                content_height,
+            )
+            .0
+        };
+        let tallest = 1392 - 24;
+        assert_eq!(
+            place(Edge::Right, 0.5, 1000.0),
+            Rect::sized(2560 - 8 - 340, 720 - 500, 340, 1000)
+        );
+        assert_eq!(
+            place(Edge::Right, 0.1, 1000.0),
+            Rect::sized(2560 - 8 - 340, 0, 340, 1000)
+        );
+        assert_eq!(
+            place(Edge::Left, 0.5, 3000.0),
+            Rect::sized(8, 1392 - tallest, 340, tallest)
+        );
+        assert_eq!(
+            place(Edge::Top, 0.5, 3000.0),
+            Rect::sized(1280 - 170, 8, 340, tallest)
+        );
+        assert_eq!(
+            place(Edge::Bottom, 0.5, 3000.0),
+            Rect::sized(1280 - 170, 1392 - tallest, 340, tallest)
+        );
+        let bar = &owner_desk()[2];
+        let on_bar = place_panel_on_edge(
+            tab_rect(&bar.bounds, at(Edge::Left, 0.5), 8.0, 1.0),
+            Edge::Left,
+            bar,
+            3000.0,
+        )
+        .0;
+        assert_eq!(on_bar, Rect::sized(-3000 + 8, 12, 340, 464 - 24));
     }
 
     #[test]

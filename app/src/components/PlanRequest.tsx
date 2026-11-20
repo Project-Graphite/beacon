@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { Decision, PendingDecision } from '../beacon';
+import { textLines } from '../lib/lines.ts';
 import { FilledButton } from './FilledButton';
 import { JumpButton } from './JumpButton';
 import { KeyHint } from './KeyHint';
+import { LineClamp } from './LineClamp';
 import { Markdown } from './Markdown';
 import { MessageField } from './MessageField';
 import { OutlineButton } from './OutlineButton';
@@ -45,9 +47,13 @@ export function PlanRequest({ request, sending, keys, send, onJump }: PlanReques
   return (
     <>
       {request.plan !== null ? (
-        <div className="scroll-thin mt-1 max-h-80 overflow-y-auto rounded-field bg-surface px-2 py-1.5">
-          <Markdown source={request.plan} />
-        </div>
+        <LineClamp lines={textLines(request.plan)}>
+          {(shown) => (
+            <div className="mt-1 rounded-field bg-surface px-2 py-1.5">
+              <Markdown source={shown.join('\n')} />
+            </div>
+          )}
+        </LineClamp>
       ) : (
         <p className="mt-1 text-secondary text-muted">
           {gaveUp ? 'The plan text is not available here; read it in the session window.' : 'Loading the plan…'}

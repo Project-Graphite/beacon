@@ -22,6 +22,7 @@ import { useListMotion } from './hooks/useListMotion.ts';
 import { jumpReport, type JumpReport } from './lib/jump.ts';
 import { entryOffset } from './lib/panel.ts';
 import { promptBoxId, promptPath } from './lib/prompts.ts';
+import { thumbFraction } from './lib/scroll.ts';
 import {
   currentRequest,
   firstRequestOf,
@@ -35,6 +36,7 @@ import { canAcknowledge, canSnooze, cardId, groupSessions, turnRunning } from '.
 import { flashRow } from './motion.ts';
 
 const NOTICE_MS = 4000;
+const SCROLL_IDLE_MS = 800;
 
 const isTextField = (target: EventTarget | null) =>
   target instanceof HTMLTextAreaElement ||
@@ -57,6 +59,7 @@ export function App() {
   const [closing, setClosing] = useState(false);
   const [entrance, setEntrance] = useState(0);
   const panel = useRef<HTMLElement>(null);
+  const scrollArea = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const ghosts = useRef<HTMLDivElement>(null);
@@ -110,12 +113,51 @@ export function App() {
   useEffect(() => {
     const [section, list, inner] = [panel.current, scroller.current, content.current];
     if (!listening || !section || !list || !inner) return;
-    const observer = new ResizeObserver(() =>
-      run(setPanelHeight(section.offsetHeight - list.clientHeight + inner.offsetHeight)),
-    );
+    let frame = 0;
+    let reported = 0;
+    const report = () => {
+      frame = 0;
+      const height = section.offsetHeight - list.clientHeight + inner.offsetHeight;
+      if (height === reported) return;
+      reported = height;
+      run(setPanelHeight(height));
+    };
+    const observer = new ResizeObserver(() => {
+      if (frame === 0) frame = requestAnimationFrame(report);
+    });
     observer.observe(inner);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [listening, run]);
+
+  useEffect(() => {
+    const [area, list, inner] = [scrollArea.current, scroller.current, content.current];
+    if (!area || !list || !inner) return;
+    const observer = new ResizeObserver(() => {
+      area.style.setProperty('--thumb', String(thumbFraction(list.clientHeight, list.scrollHeight)));
+      area.toggleAttribute('data-overflowing', list.scrollHeight > list.clientHeight);
+    });
+    let idle = 0;
+    const startScrolling = () => {
+      window.clearTimeout(idle);
+      area.toggleAttribute('data-scrolling', true);
+    };
+    const stopScrolling = () => {
+      idle = window.setTimeout(() => area.toggleAttribute('data-scrolling', false), SCROLL_IDLE_MS);
+    };
+    observer.observe(list);
+    observer.observe(inner);
+    list.addEventListener('scroll', startScrolling);
+    list.addEventListener('scrollend', stopScrolling);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(idle);
+      list.removeEventListener('scroll', startScrolling);
+      list.removeEventListener('scrollend', stopScrolling);
+    };
+  }, []);
 
   const sessions = snapshot?.sessions ?? [];
   const { groups, ended } = groupSessions(sessions);
@@ -261,65 +303,68 @@ export function App() {
         onToggleSettings={() => showSettings(!settingsOpen)}
         run={run}
       />
-      <div ref={scroller} className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable_both-edges]">
-        <div ref={content} className="relative">
-          {failure && (
-            <p title={failure} className="truncate border-b border-line-soft px-2.5 py-1.5 text-micro text-danger">
-              {failure}
-            </p>
-          )}
-          <div
-            key={settingsOpen ? 'settings' : 'list'}
-            style={{ '--view-from': settingsOpen ? '24px' : '-24px' } as CSSProperties}
-            className={viewSwitched ? 'animate-view-in' : undefined}
-          >
-            {settingsOpen ? (
-              <SettingsView config={snapshot?.config ?? null} />
-            ) : (
-              <>
-                {snapshot === null && (
-                  <EmptyState title="Not connected to the Beacon core." detail="Sessions appear once it is running." />
-                )}
-                {snapshot?.sessions.length === 0 && (
-                  <EmptyState title="No Claude sessions running." detail="Sessions appear here when Claude Code starts." />
-                )}
-                <SessionList
-                  groups={groups}
-                  ended={ended}
-                  endedOpen={endedOpen}
-                  onToggleEnded={() => setEndedOpen(!endedOpen)}
-                  renderCard={(session) => (
-                    <SessionCard
-                      key={session.session_id}
-                      session={session}
-                      pending={queue.filter((request) => request.session_id === session.session_id)}
-                      notices={notices.filter((notice) => notice.sessionId === session.session_id)}
-                      currentId={current?.id ?? null}
-                      queueSize={queue.length}
-                      keys={requestKeys.current}
-                      now={now}
-                      selected={session.session_id === selectedId}
-                      expanded={session.session_id === expandedId}
-                      globalSnoozedUntil={snapshot?.snoozed_until_ms ?? null}
-                      onActivate={() => {
-                        setSelectedId(session.session_id);
-                        toggle(session.session_id);
-                      }}
-                      onExpand={() => {
-                        setSelectedId(session.session_id);
-                        setExpandedId(session.session_id);
-                      }}
-                      onJump={() => jumpTo(session.session_id)}
-                      onJumpReport={(report) => reportJump(session.session_id, report)}
-                      run={run}
-                    />
-                  )}
-                />
-              </>
+      <div ref={scrollArea} className="scroll-area relative flex min-h-0 flex-1 flex-col">
+        <div ref={scroller} className="scroll-list min-h-0 flex-1 scroll-py-4 overflow-x-hidden overflow-y-auto">
+          <div ref={content} className="relative">
+            {failure && (
+              <p title={failure} className="truncate border-b border-line-soft px-2.5 py-1.5 text-micro text-danger">
+                {failure}
+              </p>
             )}
+            <div
+              key={settingsOpen ? 'settings' : 'list'}
+              style={{ '--view-from': settingsOpen ? '24px' : '-24px' } as CSSProperties}
+              className={viewSwitched ? 'animate-view-in' : undefined}
+            >
+              {settingsOpen ? (
+                <SettingsView config={snapshot?.config ?? null} />
+              ) : (
+                <>
+                  {snapshot === null && (
+                    <EmptyState title="Not connected to the Beacon core." detail="Sessions appear once it is running." />
+                  )}
+                  {snapshot?.sessions.length === 0 && (
+                    <EmptyState title="No Claude sessions running." detail="Sessions appear here when Claude Code starts." />
+                  )}
+                  <SessionList
+                    groups={groups}
+                    ended={ended}
+                    endedOpen={endedOpen}
+                    onToggleEnded={() => setEndedOpen(!endedOpen)}
+                    renderCard={(session) => (
+                      <SessionCard
+                        key={session.session_id}
+                        session={session}
+                        pending={queue.filter((request) => request.session_id === session.session_id)}
+                        notices={notices.filter((notice) => notice.sessionId === session.session_id)}
+                        currentId={current?.id ?? null}
+                        queueSize={queue.length}
+                        keys={requestKeys.current}
+                        now={now}
+                        selected={session.session_id === selectedId}
+                        expanded={session.session_id === expandedId}
+                        globalSnoozedUntil={snapshot?.snoozed_until_ms ?? null}
+                        onActivate={() => {
+                          setSelectedId(session.session_id);
+                          toggle(session.session_id);
+                        }}
+                        onExpand={() => {
+                          setSelectedId(session.session_id);
+                          setExpandedId(session.session_id);
+                        }}
+                        onJump={() => jumpTo(session.session_id)}
+                        onJumpReport={(report) => reportJump(session.session_id, report)}
+                        run={run}
+                      />
+                    )}
+                  />
+                </>
+              )}
+            </div>
+            <div ref={ghosts} aria-hidden="true" className="pointer-events-none absolute inset-0" />
           </div>
-          <div ref={ghosts} aria-hidden="true" className="pointer-events-none absolute inset-0" />
         </div>
+        <div aria-hidden="true" className="scroll-thumb" />
       </div>
     </section>
   );

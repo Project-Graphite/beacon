@@ -139,27 +139,90 @@
   }
 }
 
-.scroll-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+* {
+  scrollbar-width: none;
 }
 
-.scroll-thin::-webkit-scrollbar-track {
-  background: transparent;
+::-webkit-scrollbar {
+  display: none;
 }
 
-.scroll-thin::-webkit-scrollbar-thumb {
-  border: 1px solid transparent;
-  border-radius: 3px;
-  background: var(--color-line) padding-box;
+@property --fade-top {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
 }
 
-.scroll-thin::-webkit-scrollbar-thumb:hover {
-  background: var(--color-muted) padding-box;
+@property --fade-bottom {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
 }
 
-.scroll-thin::-webkit-scrollbar-corner {
-  background: transparent;
+@keyframes fade-top {
+  to {
+    --fade-top: 16px;
+  }
+}
+
+@keyframes fade-bottom {
+  from {
+    --fade-bottom: 16px;
+  }
+}
+
+@keyframes thumb-travel {
+  to {
+    translate: 0 calc(100% * (1 - var(--thumb)) / var(--thumb));
+  }
+}
+
+.scroll-thumb {
+  display: none;
+}
+
+@supports (animation-timeline: scroll()) {
+  .scroll-area {
+    timeline-scope: --list;
+  }
+
+  .scroll-list {
+    scroll-timeline: --list y;
+    animation:
+      fade-top linear both,
+      fade-bottom linear both;
+    animation-timeline: --list, --list;
+    animation-range:
+      0 16px,
+      calc(100% - 16px) 100%;
+    mask-image: linear-gradient(
+      transparent,
+      #000 var(--fade-top),
+      #000 calc(100% - var(--fade-bottom)),
+      transparent
+    );
+  }
+
+  .scroll-thumb {
+    display: block;
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 3px;
+    height: calc(var(--thumb) * (100% - 6px));
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--color-muted) 60%, transparent);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 200ms var(--ease-settle);
+    animation: thumb-travel linear both;
+    animation-timeline: --list;
+  }
+
+  :root:hover .scroll-area[data-overflowing] > .scroll-thumb,
+  .scroll-area[data-overflowing][data-scrolling] > .scroll-thumb {
+    opacity: 1;
+  }
 }
 
 .session-list > li:not(:first-child, [data-group] + li) {
@@ -181,5 +244,9 @@
 
   .press:active {
     scale: none;
+  }
+
+  .scroll-thumb {
+    display: none;
   }
 }
