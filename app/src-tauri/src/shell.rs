@@ -342,9 +342,14 @@ impl Shell {
     }
 
     fn flush_toasts(&mut self) {
+        let preferences = positions::ui_settings(&self.feed.home);
+        if !preferences.toast_on_finished {
+            self.toaster.drop_finished();
+        }
         let Some(toast) = self
             .toaster
             .flush_unless_focused(jump::focused_session(self.snapshot.as_ref()).as_deref())
+            .filter(|_| preferences.toasts_enabled)
         else {
             return;
         };

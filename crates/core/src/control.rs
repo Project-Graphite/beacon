@@ -1,4 +1,5 @@
 use crate::account::AccountUsage;
+use crate::config::LiveConfig;
 use crate::platform;
 use crate::session::Session;
 use crate::state::PermissionKind;
@@ -40,6 +41,12 @@ pub enum Request {
         id: u64,
     },
     RefreshUsage,
+    SetConfig {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stall_minutes: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answer_unattended: Option<bool>,
+    },
     Shutdown,
 }
 
@@ -110,6 +117,7 @@ pub struct Snapshot {
     pub resolved: Vec<ResolvedDecision>,
     pub snoozed_until_ms: Option<u64>,
     pub account_usage: Option<AccountUsage>,
+    pub config: LiveConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -303,6 +311,20 @@ mod tests {
                 r#"{"op":"detail","session_id":"s"}"#,
             ),
             (Request::RefreshUsage, r#"{"op":"refresh_usage"}"#),
+            (
+                Request::SetConfig {
+                    stall_minutes: Some(15),
+                    answer_unattended: None,
+                },
+                r#"{"op":"set_config","stall_minutes":15}"#,
+            ),
+            (
+                Request::SetConfig {
+                    stall_minutes: None,
+                    answer_unattended: Some(true),
+                },
+                r#"{"op":"set_config","answer_unattended":true}"#,
+            ),
             (
                 Request::QueuePrompt {
                     session_id: "s".to_string(),

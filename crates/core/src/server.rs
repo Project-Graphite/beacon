@@ -102,6 +102,7 @@ fn join(thread: JoinHandle<io::Result<()>>) -> io::Result<()> {
 
 struct Shared {
     engine: RefCell<Engine>,
+    home: PathBuf,
     token: [u8; TOKEN_LEN],
     pipe_name: String,
     security: PipeSecurity,
@@ -222,6 +223,7 @@ fn start(
     Ok(Started {
         shared: Rc::new(Shared {
             engine: RefCell::new(engine),
+            home: options.home.clone(),
             token,
             pipe_name: endpoint.pipe_name.clone(),
             security,
@@ -251,7 +253,7 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let temporary = path.with_extension("tmp");
     std::fs::write(&temporary, bytes)?;
     std::fs::rename(&temporary, path)
@@ -370,6 +372,14 @@ async fn serve_control(shared: &Shared, pipe: NamedPipeServer) -> io::Result<()>
                 return Ok(());
             }
             Ok(Request::RefreshUsage) => refresh_usage(shared).await,
+            Ok(Request::SetConfig {
+                stall_minutes,
+                answer_unattended,
+            }) => shared
+                .engine
+                .borrow_mut()
+                .set_config(&shared.home, stall_minutes, answer_unattended)
+                .map_or_else(Reply::failed, |()| Reply::ok()),
             Ok(request) => shared.engine.borrow_mut().control(request),
             Err(error) => Reply::failed(format!("bad request: {error}")),
         };

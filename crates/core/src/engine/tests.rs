@@ -1306,6 +1306,43 @@ fn working_sessions_stall_only_when_quiet_and_the_transcript_is_unchanged() {
 }
 
 #[test]
+fn set_config_applies_to_the_running_engine_and_its_snapshot() {
+    let mut fixture = fixture();
+    let home = fixture.home.0.clone();
+    assert_eq!(
+        fixture.engine.set_config(&home, Some(0), None),
+        Err("stall_minutes must be 1 to 240, not 0".to_string())
+    );
+    assert!(!home.join("config.json").exists());
+    let version = *fixture.engine.watch_changes().borrow();
+    fixture
+        .engine
+        .set_config(&home, Some(1), Some(true))
+        .unwrap();
+    assert!(*fixture.engine.watch_changes().borrow() > version);
+    assert_eq!(
+        fixture.engine.snapshot().config,
+        crate::config::LiveConfig {
+            stall_minutes: 1,
+            answer_unattended: true
+        }
+    );
+    assert_eq!(
+        Config::load(&home).unwrap().live(),
+        fixture.engine.snapshot().config
+    );
+    fixture.send(&custom("UserPromptSubmit", json!({})));
+    let start = fixture.session().last_event_ms;
+    fixture.engine.check_stalls(start + 60_000 - 1);
+    assert_eq!(fixture.state(), SessionState::Working);
+    fixture.engine.check_stalls(start + 60_000);
+    assert_eq!(fixture.state(), SessionState::Stalled);
+    let outcome =
+        fixture.send_with_env(PERMISSION_REQUEST, &[("CLAUDE_CODE_SESSION_ATTENDED", "0")]);
+    assert!(matches!(outcome, HookOutcome::Wait(..)));
+}
+
+#[test]
 fn acknowledging_clears_done_error_and_stalled_and_restarts_the_stall_clock() {
     let mut fixture = fixture();
     fixture.send(&custom("StopFailure", json!({"error": "rate_limit"})));

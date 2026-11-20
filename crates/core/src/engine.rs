@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
+use std::path::Path;
 use tokio::sync::{mpsc, oneshot, watch};
 
 const RECENT_TOOL_USES: usize = 16;
@@ -194,7 +195,23 @@ impl Engine {
             resolved: self.resolved.iter().cloned().collect(),
             snoozed_until_ms: self.snoozed_until_ms,
             account_usage: self.account_usage.clone(),
+            config: self.config.live(),
         }
+    }
+
+    pub fn set_config(
+        &mut self,
+        home: &Path,
+        stall_minutes: Option<u64>,
+        answer_unattended: Option<bool>,
+    ) -> Result<(), String> {
+        self.config.change(home, stall_minutes, answer_unattended)?;
+        self.log.info(format_args!(
+            "configuration changed: {:?}",
+            self.config.live()
+        ));
+        self.changed();
+        Ok(())
     }
 
     pub fn control(&mut self, request: Request) -> Reply {
@@ -225,7 +242,7 @@ impl Engine {
                 self.queue_prompt(&session_id, &text, now_ms())
             }
             Request::CancelPrompt { id } => self.cancel_prompt(id),
-            Request::RefreshUsage | Request::Shutdown => Ok(()),
+            Request::RefreshUsage | Request::SetConfig { .. } | Request::Shutdown => Ok(()),
         };
         result.map_or_else(Reply::failed, |()| Reply::ok())
     }

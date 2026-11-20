@@ -122,6 +122,23 @@ pub async fn refresh_usage(feed: State<'_, Arc<Feed>>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn set_config(
+    feed: State<'_, Arc<Feed>>,
+    stall_minutes: Option<u64>,
+    answer_unattended: Option<bool>,
+) -> Result<(), String> {
+    ask(
+        feed.home.clone(),
+        Request::SetConfig {
+            stall_minutes,
+            answer_unattended,
+        },
+    )
+    .await
+    .map(drop)
+}
+
+#[tauri::command]
 pub async fn close_panel(app: AppHandle) {
     shell::post(&app, Action::ClosePanel);
 }

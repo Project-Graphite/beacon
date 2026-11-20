@@ -116,6 +116,58 @@ fn without_a_core_or_settings_the_doctor_fails() {
 }
 
 #[test]
+fn hooks_status_says_installed_not_installed_or_needs_repair() {
+    let root = TempDir::new("doctor-status");
+    let helper_source = root.0.join("beacon-hook.exe");
+    std::fs::write(&helper_source, b"stand-in helper").unwrap();
+    let paths = test_paths(&root, helper_source);
+    let registry_warning = vec![format!("managed policy: {REGISTRY_NOTICE}")];
+    let not_installed = HooksStatus {
+        state: HooksState::NotInstalled,
+        settings_path: paths.settings.clone(),
+        problems: Vec::new(),
+        warnings: registry_warning.clone(),
+    };
+    assert_eq!(hooks_status(&paths), not_installed);
+    install(&paths, true).unwrap();
+    assert_eq!(
+        hooks_status(&paths),
+        HooksStatus {
+            state: HooksState::Installed,
+            ..not_installed.clone()
+        }
+    );
+    let mut settings: Value =
+        serde_json::from_slice(&std::fs::read(&paths.settings).unwrap()).unwrap();
+    settings["hooks"]
+        .as_object_mut()
+        .unwrap()
+        .shift_remove("Stop");
+    std::fs::write(&paths.settings, settings.to_string()).unwrap();
+    assert_eq!(
+        hooks_status(&paths),
+        HooksStatus {
+            state: HooksState::NeedsRepair,
+            problems: vec!["hooks: Stop is not registered".to_string()],
+            ..not_installed.clone()
+        }
+    );
+    crate::installer::uninstall(&paths, true).unwrap();
+    assert_eq!(hooks_status(&paths), not_installed);
+    std::fs::write(&paths.settings, r#"{"disableAllHooks": true}"#).unwrap();
+    assert_eq!(
+        hooks_status(&paths),
+        HooksStatus {
+            problems: vec![format!(
+                "disableAllHooks: true in {}, so no hook runs",
+                paths.settings.display()
+            )],
+            ..not_installed
+        }
+    );
+}
+
+#[test]
 fn surfaces_are_counted_with_limited_sessions() {
     let session = |id: &str, entrypoint: Option<&str>, limited: bool| Session {
         entrypoint: entrypoint.map(str::to_string),
@@ -133,6 +185,7 @@ fn surfaces_are_counted_with_limited_sessions() {
         resolved: Vec::new(),
         snoozed_until_ms: None,
         account_usage: None,
+        config: beacon_core::Config::default().live(),
     };
     assert_eq!(
         surfaces(Some(&snapshot)),

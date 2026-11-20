@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-ui-settings"
+description = "Enables the set_ui_settings command without any pre-configured scope."
+commands.allow = ["set_ui_settings"]
+
+[[permission]]
+identifier = "deny-set-ui-settings"
+description = "Denies the set_ui_settings command without any pre-configured scope."
+commands.deny = ["set_ui_settings"]

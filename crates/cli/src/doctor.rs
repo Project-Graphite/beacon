@@ -1,9 +1,10 @@
 use crate::installer::{Paths, REGISTRY_NOTICE, managed_policy_findings};
 use crate::settings::{self, EVENTS};
-use crate::status::surface_label;
+use crate::surface_label;
 use beacon_core::{ControlClient, Endpoint, Request, Snapshot};
 use beacon_protocol::{DOCTOR_EVENT, HOME_ENV};
-use serde_json::Value;
+use serde::Serialize;
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -13,38 +14,83 @@ use std::time::Instant;
 const DOCTOR_REPLY: &[u8] = br#"{"beacon":"ok"}"#;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Level {
+pub enum Level {
     Ok,
     Warn,
     Fail,
 }
 
-type Check = (Level, String);
+pub type Check = (Level, String);
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HooksState {
+    Installed,
+    NotInstalled,
+    NeedsRepair,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HooksStatus {
+    pub state: HooksState,
+    pub settings_path: PathBuf,
+    pub problems: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+pub fn hooks_status(paths: &Paths) -> HooksStatus {
+    let helper = paths.helper();
+    let settings = match std::fs::read(&paths.settings) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Map::new()),
+        read => parse_settings(&paths.settings, read),
+    };
+    let present = helper.is_file() || settings.as_ref().is_ok_and(settings::has_beacon);
+    let mut checks = Vec::new();
+    if present {
+        checks.push(helper_check(&helper));
+    }
+    match &settings {
+        Ok(settings) if present => {
+            checks.extend(settings_checks(settings, &paths.settings, &helper))
+        }
+        Ok(settings) => checks.push(disable_all_hooks_check(settings, &paths.settings)),
+        Err(check) => checks.push(check.clone()),
+    }
+    checks.extend(managed_policy_checks(&paths.managed_dir));
+    let texts = |wanted: Level| -> Vec<String> {
+        checks
+            .iter()
+            .filter(|(level, _)| *level == wanted)
+            .map(|(_, text)| text.clone())
+            .collect()
+    };
+    let problems = texts(Level::Fail);
+    HooksStatus {
+        state: match (present, problems.is_empty()) {
+            (false, _) => HooksState::NotInstalled,
+            (true, true) => HooksState::Installed,
+            (true, false) => HooksState::NeedsRepair,
+        },
+        settings_path: paths.settings.clone(),
+        problems,
+        warnings: texts(Level::Warn),
+    }
+}
+
+pub fn installation_checks(paths: &Paths) -> Vec<Check> {
+    let helper = paths.helper();
+    let mut checks = vec![helper_check(&helper)];
+    match parse_settings(&paths.settings, std::fs::read(&paths.settings)) {
+        Ok(settings) => checks.extend(settings_checks(&settings, &paths.settings, &helper)),
+        Err(check) => checks.push(check),
+    }
+    checks.extend(managed_policy_checks(&paths.managed_dir));
+    checks
+}
 
 pub fn run(paths: &Paths) -> (String, bool) {
     let helper = paths.helper();
-    let mut checks = vec![if helper.is_file() {
-        (Level::Ok, format!("helper: {}", helper.display()))
-    } else {
-        (
-            Level::Fail,
-            format!("helper: missing at {}", helper.display()),
-        )
-    }];
-    checks.extend(settings_checks(&paths.settings, &helper));
-    let findings = managed_policy_findings(&paths.managed_dir);
-    if findings.is_empty() {
-        checks.push((
-            Level::Ok,
-            "managed policy: no managed settings file sets allowManagedHooksOnly".to_string(),
-        ));
-    }
-    checks.extend(
-        findings
-            .into_iter()
-            .map(|finding| (Level::Fail, format!("managed policy: {finding}"))),
-    );
-    checks.push((Level::Warn, format!("managed policy: {REGISTRY_NOTICE}")));
+    let mut checks = installation_checks(paths);
     let (core, snapshot) = core_check(&paths.home);
     checks.push(core);
     checks.push(round_trip(&paths.home, &helper));
@@ -71,17 +117,28 @@ pub fn run(paths: &Paths) -> (String, bool) {
     (report, healthy)
 }
 
-fn settings_checks(path: &Path, helper: &Path) -> Vec<Check> {
-    let parsed = std::fs::read(path)
-        .map_err(|error| format!("cannot read {}: {error}", path.display()))
+fn helper_check(helper: &Path) -> Check {
+    if helper.is_file() {
+        (Level::Ok, format!("helper: {}", helper.display()))
+    } else {
+        (
+            Level::Fail,
+            format!("helper: missing at {}", helper.display()),
+        )
+    }
+}
+
+fn parse_settings(path: &Path, read: io::Result<Vec<u8>>) -> Result<Map<String, Value>, Check> {
+    read.map_err(|error| format!("cannot read {}: {error}", path.display()))
         .and_then(|bytes| {
             settings::parse(&bytes).map_err(|error| format!("{}: {error}", path.display()))
-        });
-    let settings = match parsed {
-        Ok((settings, _)) => settings,
-        Err(error) => return vec![(Level::Fail, format!("settings: {error}"))],
-    };
-    let problems = settings::registration_problems(&settings, &helper.to_string_lossy());
+        })
+        .map(|(settings, _)| settings)
+        .map_err(|error| (Level::Fail, format!("settings: {error}")))
+}
+
+fn settings_checks(settings: &Map<String, Value>, path: &Path, helper: &Path) -> Vec<Check> {
+    let problems = settings::registration_problems(settings, &helper.to_string_lossy());
     vec![
         if problems.is_empty() {
             (
@@ -95,18 +152,42 @@ fn settings_checks(path: &Path, helper: &Path) -> Vec<Check> {
         } else {
             (Level::Fail, format!("hooks: {}", problems.join("; ")))
         },
-        if settings.get("disableAllHooks") == Some(&Value::Bool(true)) {
-            (
-                Level::Fail,
-                format!(
-                    "disableAllHooks: true in {}, so no hook runs",
-                    path.display()
-                ),
-            )
-        } else {
-            (Level::Ok, "disableAllHooks: not set".to_string())
-        },
+        disable_all_hooks_check(settings, path),
     ]
+}
+
+fn disable_all_hooks_check(settings: &Map<String, Value>, path: &Path) -> Check {
+    if settings.get("disableAllHooks") == Some(&Value::Bool(true)) {
+        (
+            Level::Fail,
+            format!(
+                "disableAllHooks: true in {}, so no hook runs",
+                path.display()
+            ),
+        )
+    } else {
+        (Level::Ok, "disableAllHooks: not set".to_string())
+    }
+}
+
+fn managed_policy_checks(managed_dir: &Path) -> Vec<Check> {
+    let findings = managed_policy_findings(managed_dir);
+    findings
+        .is_empty()
+        .then(|| {
+            (
+                Level::Ok,
+                "managed policy: no managed settings file sets allowManagedHooksOnly".to_string(),
+            )
+        })
+        .into_iter()
+        .chain(
+            findings
+                .into_iter()
+                .map(|finding| (Level::Fail, format!("managed policy: {finding}"))),
+        )
+        .chain([(Level::Warn, format!("managed policy: {REGISTRY_NOTICE}"))])
+        .collect()
 }
 
 fn core_check(home: &Path) -> (Check, Option<Snapshot>) {

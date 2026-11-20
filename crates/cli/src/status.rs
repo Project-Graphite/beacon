@@ -1,4 +1,5 @@
 use crate::{Context, connect, platform};
+use beacon_cli::surface_label;
 use beacon_core::{Reply, Session, Snapshot, now_ms, one_line};
 use std::cmp::Reverse;
 use std::io::Write;
@@ -144,17 +145,6 @@ pub fn render(snapshot: &Snapshot, now: u64) -> String {
         ));
     }
     text
-}
-
-pub fn surface_label(entrypoint: Option<&str>) -> &str {
-    match entrypoint {
-        Some("cli") => "terminal",
-        Some("sdk-cli") => "headless",
-        Some("claude-vscode") => "VS Code",
-        Some("claude-desktop") => "desktop",
-        Some(other) => other,
-        None => "unknown",
-    }
 }
 
 fn state_label(session: &Session) -> String {
@@ -330,6 +320,7 @@ mod tests {
             resolved: Vec::new(),
             snoozed_until_ms: None,
             account_usage: None,
+            config: beacon_core::Config::default().live(),
         };
         assert_eq!(
             render(&snapshot, NOW),
@@ -363,6 +354,7 @@ ID  PROJECT  TOOL                    INPUT                                      
             resolved: Vec::new(),
             snoozed_until_ms: None,
             account_usage: None,
+            config: beacon_core::Config::default().live(),
         };
         assert_eq!(
             render(&snapshot, NOW),
@@ -384,6 +376,7 @@ ID  PROJECT  TOOL  INPUT  AGE
             resolved: Vec::new(),
             snoozed_until_ms: None,
             account_usage: None,
+            config: beacon_core::Config::default().live(),
         };
         assert_eq!(
             render(&snapshot, NOW),

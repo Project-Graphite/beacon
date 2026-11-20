@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type { SurfaceIcon } from '../lib/sessions.ts';
 
-export type IconName = SurfaceIcon | 'bell-off' | 'pin' | 'chevron' | 'arrow-out';
+export type IconName = SurfaceIcon | 'bell-off' | 'pin' | 'chevron' | 'arrow-out' | 'gear';
 
 const PATHS: Record<IconName, ReactNode> = {
   terminal: (
@@ -29,6 +29,12 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   pin: <path d="M5.5 2.25h5M6.75 2.25v4L4.5 9.5h7L9.25 6.25v-4M8 9.5v4.25" />,
   chevron: <path d="m6 4 4 4-4 4" />,
+  gear: (
+    <>
+      <circle cx="8" cy="8" r="2" />
+      <path d="M6.9 1.75h2.2l.35 1.6 1.2.7 1.55-.5 1.1 1.9-1.2 1.1v1.4l1.2 1.1-1.1 1.9-1.55-.5-1.2.7-.35 1.6H6.9l-.35-1.6-1.2-.7-1.55.5-1.1-1.9 1.2-1.1v-1.4l-1.2-1.1 1.1-1.9 1.55.5 1.2-.7Z" />
+    </>
+  ),
   'arrow-out': <path d="M9.25 2.75h4v4M13.25 2.75 7.5 8.5M11.25 9.75v2a1.5 1.5 0 0 1-1.5 1.5h-5.5a1.5 1.5 0 0 1-1.5-1.5v-5.5a1.5 1.5 0 0 1 1.5-1.5h2" />,
 };
 

@@ -16,6 +16,16 @@
     "allow-jump",
     "allow-queue-prompt",
     "allow-cancel-prompt",
-    "allow-send-prompt-to-window"
+    "allow-send-prompt-to-window",
+    "allow-set-config",
+    "allow-hooks-status",
+    "allow-hooks-plan",
+    "allow-hooks-apply",
+    "allow-get-ui-settings",
+    "allow-set-ui-settings",
+    "allow-get-login-start",
+    "allow-set-login-start",
+    "allow-open-logs-folder",
+    "allow-app-info"
   ]
 }

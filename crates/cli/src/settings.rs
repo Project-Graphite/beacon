@@ -150,6 +150,15 @@ fn beacon_handlers(groups: &Value) -> impl Iterator<Item = &Value> {
         .filter(|handler| is_beacon_handler(handler))
 }
 
+pub fn has_beacon(settings: &Map<String, Value>) -> bool {
+    settings
+        .get("hooks")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|hooks| hooks.values())
+        .any(|groups| beacon_handlers(groups).next().is_some())
+}
+
 pub fn strip_beacon(settings: &mut Map<String, Value>, may_drop: impl Fn(Option<&str>) -> bool) {
     let Some(Value::Object(hooks)) = settings.get_mut("hooks") else {
         return;

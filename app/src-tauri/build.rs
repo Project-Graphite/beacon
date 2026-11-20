@@ -14,6 +14,16 @@ fn main() {
             "queue_prompt",
             "cancel_prompt",
             "send_prompt_to_window",
+            "set_config",
+            "hooks_status",
+            "hooks_plan",
+            "hooks_apply",
+            "get_ui_settings",
+            "set_ui_settings",
+            "get_login_start",
+            "set_login_start",
+            "open_logs_folder",
+            "app_info",
         ]),
     ))
     .expect("the Tauri build script failed");

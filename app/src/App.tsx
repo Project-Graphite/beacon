@@ -16,6 +16,7 @@ import { EmptyState } from './components/EmptyState';
 import { Header } from './components/Header';
 import { SessionCard } from './components/SessionCard';
 import { SessionList } from './components/SessionList';
+import { SettingsView } from './components/SettingsView';
 import { jumpReport, type JumpReport } from './lib/jump.ts';
 import { promptBoxId, promptPath } from './lib/prompts.ts';
 import {
@@ -47,6 +48,7 @@ export function App() {
   const [listening, setListening] = useState(false);
   const [chosenRequestId, setChosenRequestId] = useState<number | null>(null);
   const [notices, setNotices] = useState<ResolutionNotice[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const panel = useRef<HTMLElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -136,6 +138,10 @@ export function App() {
     const index = visible.findIndex((session) => session.session_id === selectedId);
     const selected: Session | undefined = visible[index];
     const handleKey = (event: KeyboardEvent) => {
+      if (settingsOpen) {
+        if (event.key === 'Escape') setSettingsOpen(false);
+        return;
+      }
       if (event.ctrlKey || event.altKey || event.metaKey || isTextField(event.target)) return;
       const key = event.key.toLowerCase();
       if (current && (key === 'a' || key === 'd' || key === 'm')) {
@@ -204,6 +210,8 @@ export function App() {
         snoozedUntil={snapshot?.snoozed_until_ms ?? null}
         pinned={opened?.mode === 'pinned'}
         queue={current && queue.length > 1 ? { position: queue.indexOf(current) + 1, total: queue.length } : null}
+        settingsOpen={settingsOpen}
+        onToggleSettings={() => setSettingsOpen(!settingsOpen)}
         run={run}
       />
       <div ref={scroller} className="scroll-thin min-h-0 flex-1 overflow-y-auto">
@@ -213,40 +221,46 @@ export function App() {
               {failure}
             </p>
           )}
-          {snapshot === null && (
-            <EmptyState title="Not connected to the Beacon core." detail="Sessions appear once it is running." />
-          )}
-          {snapshot?.sessions.length === 0 && (
-            <EmptyState title="No Claude sessions running." detail="Sessions appear here when Claude Code starts." />
-          )}
-          <SessionList
-            groups={groups}
-            ended={ended}
-            endedOpen={endedOpen}
-            onToggleEnded={() => setEndedOpen(!endedOpen)}
-            renderCard={(session) => (
-              <SessionCard
-                key={session.session_id}
-                session={session}
-                pending={queue.filter((request) => request.session_id === session.session_id)}
-                notices={notices.filter((notice) => notice.sessionId === session.session_id)}
-                currentId={current?.id ?? null}
-                queueSize={queue.length}
-                keys={requestKeys.current}
-                now={now}
-                selected={session.session_id === selectedId}
-                expanded={session.session_id === expandedId}
-                globalSnoozedUntil={snapshot?.snoozed_until_ms ?? null}
-                onActivate={() => {
-                  setSelectedId(session.session_id);
-                  toggle(session.session_id);
-                }}
-                onJump={() => jumpTo(session.session_id)}
-                onJumpReport={(report) => reportJump(session.session_id, report)}
-                run={run}
+          {settingsOpen ? (
+            <SettingsView config={snapshot?.config ?? null} />
+          ) : (
+            <>
+              {snapshot === null && (
+                <EmptyState title="Not connected to the Beacon core." detail="Sessions appear once it is running." />
+              )}
+              {snapshot?.sessions.length === 0 && (
+                <EmptyState title="No Claude sessions running." detail="Sessions appear here when Claude Code starts." />
+              )}
+              <SessionList
+                groups={groups}
+                ended={ended}
+                endedOpen={endedOpen}
+                onToggleEnded={() => setEndedOpen(!endedOpen)}
+                renderCard={(session) => (
+                  <SessionCard
+                    key={session.session_id}
+                    session={session}
+                    pending={queue.filter((request) => request.session_id === session.session_id)}
+                    notices={notices.filter((notice) => notice.sessionId === session.session_id)}
+                    currentId={current?.id ?? null}
+                    queueSize={queue.length}
+                    keys={requestKeys.current}
+                    now={now}
+                    selected={session.session_id === selectedId}
+                    expanded={session.session_id === expandedId}
+                    globalSnoozedUntil={snapshot?.snoozed_until_ms ?? null}
+                    onActivate={() => {
+                      setSelectedId(session.session_id);
+                      toggle(session.session_id);
+                    }}
+                    onJump={() => jumpTo(session.session_id)}
+                    onJumpReport={(report) => reportJump(session.session_id, report)}
+                    run={run}
+                  />
+                )}
               />
-            )}
-          />
+            </>
+          )}
         </div>
       </div>
     </section>

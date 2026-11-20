@@ -154,12 +154,18 @@ export interface AccountUsage {
   source: 'cache' | 'probe';
 }
 
+export interface LiveConfig {
+  stall_minutes: number;
+  answer_unattended: boolean;
+}
+
 export interface Snapshot {
   sessions: Session[];
   pending: PendingDecision[];
   resolved: ResolvedDecision[];
   snoozed_until_ms: number | null;
   account_usage: AccountUsage | null;
+  config: LiveConfig;
 }
 
 export interface TimelineEntry {
@@ -189,6 +195,28 @@ export interface Opened {
   focused: boolean;
 }
 
+export type HooksState = 'installed' | 'not_installed' | 'needs_repair';
+
+export type HooksAction = 'install' | 'uninstall';
+
+export interface HooksStatus {
+  state: HooksState;
+  settings_path: string;
+  problems: string[];
+  warnings: string[];
+}
+
+export interface UiSettings {
+  hotkey: string;
+  toasts_enabled: boolean;
+  toast_on_finished: boolean;
+}
+
+export interface AppInfo {
+  version: string;
+  home: string;
+}
+
 export const getSnapshot = () => invoke<Snapshot>('get_snapshot');
 export const getDetail = (sessionId: string) => invoke<SessionDetail>('get_detail', { sessionId });
 export const acknowledge = (sessionId: string) => invoke<void>('acknowledge', { sessionId });
@@ -204,6 +232,17 @@ export const queuePrompt = (sessionId: string, text: string) => invoke<void>('qu
 export const cancelPrompt = (id: number) => invoke<void>('cancel_prompt', { id });
 export const sendPromptToWindow = (sessionId: string, text: string) =>
   invoke<WindowPrompt>('send_prompt_to_window', { sessionId, text });
+export const setConfig = ({ stall_minutes, answer_unattended }: Partial<LiveConfig>) =>
+  invoke<void>('set_config', { stallMinutes: stall_minutes, answerUnattended: answer_unattended });
+export const hooksStatus = () => invoke<HooksStatus>('hooks_status');
+export const hooksPlan = (action: HooksAction) => invoke<string>('hooks_plan', { action });
+export const hooksApply = (action: HooksAction) => invoke<HooksStatus>('hooks_apply', { action });
+export const getUiSettings = () => invoke<UiSettings>('get_ui_settings');
+export const setUiSettings = (change: Partial<UiSettings>) => invoke<UiSettings>('set_ui_settings', { change });
+export const getLoginStart = () => invoke<boolean>('get_login_start');
+export const setLoginStart = (enabled: boolean) => invoke<void>('set_login_start', { enabled });
+export const openLogsFolder = () => invoke<void>('open_logs_folder');
+export const appInfo = () => invoke<AppInfo>('app_info');
 
 export const onSnapshot = (handler: (snapshot: Snapshot | null) => void): Promise<UnlistenFn> =>
   listen<Snapshot | null>('beacon://snapshot', (event) => handler(event.payload));

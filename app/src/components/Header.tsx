@@ -10,10 +10,21 @@ interface HeaderProps {
   snoozedUntil: number | null;
   pinned: boolean;
   queue: { position: number; total: number } | null;
+  settingsOpen: boolean;
+  onToggleSettings: () => void;
   run: (action: Promise<unknown>) => void;
 }
 
-export function Header({ sessions, accountUsage, snoozedUntil, pinned, queue, run }: HeaderProps) {
+export function Header({
+  sessions,
+  accountUsage,
+  snoozedUntil,
+  pinned,
+  queue,
+  settingsOpen,
+  onToggleSettings,
+  run,
+}: HeaderProps) {
   return (
     <header className="relative z-20 flex h-10 shrink-0 items-center gap-2 border-b border-line-soft px-3">
       <h1 className="shrink-0 font-semibold text-ink">Beacon</h1>
@@ -40,6 +51,16 @@ export function Header({ sessions, accountUsage, snoozedUntil, pinned, queue, ru
             <Icon name="pin" />
           </span>
         )}
+        <button
+          type="button"
+          aria-label="Settings"
+          aria-pressed={settingsOpen}
+          title={settingsOpen ? 'Back to sessions' : 'Settings'}
+          onClick={onToggleSettings}
+          className={`grid size-[26px] place-items-center rounded-field transition-colors duration-150 ease-settle hover:bg-surface hover:text-ink ${settingsOpen ? 'bg-surface text-ink' : 'text-muted'}`}
+        >
+          <Icon name="gear" />
+        </button>
       </div>
     </header>
   );

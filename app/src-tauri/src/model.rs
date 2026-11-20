@@ -172,6 +172,7 @@ pub mod tests {
             resolved: Vec::new(),
             snoozed_until_ms: None,
             account_usage: None,
+            config: beacon_core::Config::default().live(),
         }
     }
 

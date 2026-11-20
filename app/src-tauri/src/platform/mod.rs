@@ -1,4 +1,5 @@
 pub mod pill;
+pub mod registry;
 mod text;
 
 pub use text::GdiText;

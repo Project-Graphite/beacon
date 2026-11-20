@@ -6,9 +6,9 @@ const LINE_STYLES: Record<DiffKind, { mark: string; line: string; markColour: st
   added: { mark: '+', line: 'bg-live/12 text-ink', markColour: 'text-live' },
 };
 
-export function DiffBlock({ lines }: { lines: DiffLine[] }) {
+export function DiffBlock({ lines, heightClass = 'max-h-[252px]' }: { lines: DiffLine[]; heightClass?: string }) {
   return (
-    <div className="scroll-thin mt-1 max-h-[252px] overflow-auto rounded-field bg-surface py-1 font-mono text-secondary">
+    <div className={`scroll-thin mt-1 ${heightClass} overflow-auto rounded-field bg-surface py-1 font-mono text-secondary`}>
       <div className="w-max min-w-full">
         {lines.map((line, index) => (
           <div key={index} className={`flex pr-2 ${LINE_STYLES[line.kind].line}`}>

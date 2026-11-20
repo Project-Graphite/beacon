@@ -20,7 +20,7 @@ pub use account::{
     claude_json_path,
 };
 pub use beacon_protocol::{Endpoint, home_dir};
-pub use config::{Config, LogLevel};
+pub use config::{Config, LiveConfig, LogLevel};
 pub use control::{
     ControlClient, Decision, PendingDecision, Reply, Request, Resolution, ResolvedDecision,
     SessionDetail, Snapshot, Subscription, TimelineEntry,

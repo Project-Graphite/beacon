@@ -9,6 +9,7 @@ mod panel;
 mod platform;
 mod positions;
 mod raster;
+mod settings;
 mod shell;
 mod toasts;
 mod tray;
@@ -16,7 +17,6 @@ mod tray;
 use feed::Feed;
 use shell::{Action, Shell};
 use tauri::{Manager, RunEvent, WindowEvent};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 struct Options {
     tray_only: bool,
@@ -81,6 +81,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             jump::send_prompt_to_window,
             panel::queue_prompt,
             panel::cancel_prompt,
+            panel::set_config,
+            settings::hooks_status,
+            settings::hooks_plan,
+            settings::hooks_apply,
+            settings::get_ui_settings,
+            settings::set_ui_settings,
+            settings::get_login_start,
+            settings::set_login_start,
+            settings::open_logs_folder,
+            settings::app_info,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -96,17 +106,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 shell::dispatch(Action::Pill(event))
             })?;
             shell::install(Shell::new(handle.clone(), feed.clone(), tray));
-            let hotkey = positions::hotkey(&feed.home);
-            if let Err(error) =
-                handle
-                    .global_shortcut()
-                    .on_shortcut(hotkey.as_str(), |app, _, event| {
-                        if event.state() == ShortcutState::Pressed {
-                            shell::post(app, Action::TogglePanel);
-                        }
-                    })
+            if let Err(error) = settings::register_hotkey(&handle, &positions::hotkey(&feed.home)) {
+                eprintln!("{error}");
+            }
+            if !std::env::current_exe()?
+                .to_string_lossy()
+                .contains(r"\target\")
+                && let Err(error) =
+                    toasts::register_identity(&feed.home, &handle.config().identifier)
             {
-                eprintln!("cannot register {hotkey}: {error}");
+                eprintln!("cannot register the notification identity: {error}");
             }
             let publisher = handle.clone();
             feed.start(move |snapshot| shell::post(&publisher, Action::Snapshot(snapshot)))?;

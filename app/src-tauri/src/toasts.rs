@@ -1,7 +1,21 @@
+use crate::platform::registry;
 use beacon_core::{SessionState, Snapshot};
 use std::collections::HashMap;
+use std::io;
+use std::path::Path;
 
 const BODY_CHARS: usize = 120;
+
+pub fn register_identity(home: &Path, identifier: &str) -> io::Result<()> {
+    let icon = home.join("icon.png");
+    if !icon.is_file() {
+        std::fs::create_dir_all(home)?;
+        std::fs::write(&icon, include_bytes!("../icons/128x128.png"))?;
+    }
+    let key = format!(r"Software\Classes\AppUserModelId\{identifier}");
+    registry::write_string(&key, "DisplayName", "Beacon")?;
+    registry::write_string(&key, "IconUri", &icon.to_string_lossy())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Toast {
@@ -71,6 +85,11 @@ impl Toaster {
             }
         }
         was_empty && !self.batch.is_empty()
+    }
+
+    pub fn drop_finished(&mut self) {
+        self.batch
+            .retain(|candidate| candidate.state != SessionState::Done);
     }
 
     pub fn flush_unless_focused(&mut self, focused: Option<&str>) -> Option<Toast> {
@@ -258,6 +277,26 @@ mod tests {
             toaster.flush_unless_focused(None).unwrap().title,
             "2 sessions finished"
         );
+    }
+
+    #[test]
+    fn finished_sessions_can_be_left_out() {
+        let mut toaster = primed(vec![
+            session("a", SessionState::Working),
+            session("b", SessionState::Working),
+        ]);
+        toaster.observe(&snapshot(vec![
+            session("a", SessionState::Done),
+            session("b", SessionState::NeedsAnswer),
+        ]));
+        toaster.drop_finished();
+        assert_eq!(toaster.flush().unwrap().title, "project-b has a question");
+        toaster.observe(&snapshot(vec![
+            session("a", SessionState::Done),
+            session("b", SessionState::Done),
+        ]));
+        toaster.drop_finished();
+        assert_eq!(toaster.flush(), None);
     }
 
     #[test]

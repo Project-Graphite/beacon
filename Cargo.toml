@@ -11,6 +11,7 @@ publish = false
 [workspace.dependencies]
 beacon-protocol = { path = "crates/protocol" }
 beacon-core = { path = "crates/core" }
+beacon-cli = { path = "crates/cli" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tauri = { version = "2", features = ["tray-icon"] }

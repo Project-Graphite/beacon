@@ -1,38 +1,23 @@
 mod args;
-mod diff;
-mod doctor;
-mod installer;
 mod jump;
 mod platform;
-mod settings;
 mod status;
-#[cfg(test)]
-mod test_support;
 mod usage;
 
 use args::Command;
+use beacon_cli::Context;
+use beacon_cli::doctor;
+use beacon_cli::installer::{self, Paths};
 use beacon_core::{
     AccountSources, ClaudeAgentsLister, ClaudeUsageProber, Config, ControlClient, Core,
     CoreOptions, Reply, Request, claude_json_path, home_dir, now_ms,
 };
-use installer::Paths;
-use std::fmt::Display;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::OnceLock;
 
 static DAEMON_HOME: OnceLock<PathBuf> = OnceLock::new();
-
-pub trait Context<T> {
-    fn context(self, what: impl Display) -> Result<T, String>;
-}
-
-impl<T, E: Display> Context<T> for Result<T, E> {
-    fn context(self, what: impl Display) -> Result<T, String> {
-        self.map_err(|error| format!("{what}: {error}"))
-    }
-}
 
 fn main() -> ExitCode {
     let parsed = std::env::args_os()

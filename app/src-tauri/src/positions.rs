@@ -16,8 +16,26 @@ struct UiFile {
     display_positions: BTreeMap<String, Rect>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hotkey: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    toasts_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    toast_on_finished: Option<bool>,
     #[serde(flatten)]
     choice: DisplayChoice,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct UiSettings {
+    pub hotkey: String,
+    pub toasts_enabled: bool,
+    pub toast_on_finished: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct UiSettingsChange {
+    pub hotkey: Option<String>,
+    pub toasts_enabled: Option<bool>,
+    pub toast_on_finished: Option<bool>,
 }
 
 fn read(home: &Path) -> UiFile {
@@ -35,9 +53,24 @@ fn update(home: &Path, change: impl FnOnce(&mut UiFile)) -> io::Result<()> {
 }
 
 pub fn hotkey(home: &Path) -> String {
-    read(home)
-        .hotkey
-        .unwrap_or_else(|| DEFAULT_HOTKEY.to_string())
+    ui_settings(home).hotkey
+}
+
+pub fn ui_settings(home: &Path) -> UiSettings {
+    let file = read(home);
+    UiSettings {
+        hotkey: file.hotkey.unwrap_or_else(|| DEFAULT_HOTKEY.to_string()),
+        toasts_enabled: file.toasts_enabled.unwrap_or(true),
+        toast_on_finished: file.toast_on_finished.unwrap_or(true),
+    }
+}
+
+pub fn save_ui_settings(home: &Path, change: UiSettingsChange) -> io::Result<()> {
+    update(home, |file| {
+        file.hotkey = change.hotkey.or(file.hotkey.take());
+        file.toasts_enabled = change.toasts_enabled.or(file.toasts_enabled);
+        file.toast_on_finished = change.toast_on_finished.or(file.toast_on_finished);
+    })
 }
 
 pub fn load(home: &Path, signature: &str) -> Option<Rect> {
@@ -151,6 +184,60 @@ mod tests {
         );
         toggle_avoided(&home, "oled").unwrap();
         assert!(display_choice(&home).avoid_displays.is_empty());
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn ui_settings_round_trip_beside_the_existing_keys() {
+        let home = std::env::temp_dir().join(format!("beacon-ui-settings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let existing = r#"{"pill_positions":{"a":{"left":1,"top":2,"right":4,"bottom":6}},"display_positions":{"philips":{"left":5,"top":6,"right":12,"bottom":14}},"hotkey":"Ctrl+Shift+B","display":"philips","avoid_displays":["oled"]}"#;
+        std::fs::write(home.join(UI_FILE), existing).unwrap();
+        assert_eq!(
+            ui_settings(&home),
+            UiSettings {
+                hotkey: "Ctrl+Shift+B".to_string(),
+                toasts_enabled: true,
+                toast_on_finished: true,
+            }
+        );
+        save_ui_settings(
+            &home,
+            UiSettingsChange {
+                toast_on_finished: Some(false),
+                ..UiSettingsChange::default()
+            },
+        )
+        .unwrap();
+        save_ui_settings(
+            &home,
+            UiSettingsChange {
+                hotkey: Some("Ctrl+Alt+B".to_string()),
+                toasts_enabled: Some(false),
+                ..UiSettingsChange::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            ui_settings(&home),
+            UiSettings {
+                hotkey: "Ctrl+Alt+B".to_string(),
+                toasts_enabled: false,
+                toast_on_finished: false,
+            }
+        );
+        let mut expected: serde_json::Value = serde_json::from_str(existing).unwrap();
+        expected["hotkey"] = "Ctrl+Alt+B".into();
+        expected["toasts_enabled"] = false.into();
+        expected["toast_on_finished"] = false.into();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &std::fs::read(home.join(UI_FILE)).unwrap()
+            )
+            .unwrap(),
+            expected
+        );
         std::fs::remove_dir_all(&home).unwrap();
     }
 }
