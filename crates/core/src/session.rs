@@ -1,3 +1,4 @@
+use crate::focus::Host;
 use crate::state::{AgentStatus, Input, Overlays, SessionState, overlays_after, transition};
 use crate::usage::SessionUsage;
 use serde::{Deserialize, Serialize};
@@ -62,6 +63,8 @@ pub struct Session {
     pub usage: Option<SessionUsage>,
     #[serde(default)]
     pub mcp_request: Option<McpRequest>,
+    #[serde(default)]
+    pub host: Option<Host>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,6 +106,7 @@ impl Session {
             editor: None,
             usage: None,
             mcp_request: None,
+            host: None,
         }
     }
 

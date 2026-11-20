@@ -1,3 +1,4 @@
+use crate::focus::{Process, Window};
 use std::ffi::c_void;
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -6,7 +7,7 @@ use std::ptr::{null, null_mut};
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY, GetLastError, HANDLE,
-    INVALID_HANDLE_VALUE, LocalFree, WAIT_TIMEOUT,
+    HWND, INVALID_HANDLE_VALUE, LPARAM, LocalFree, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -18,6 +19,9 @@ use windows_sys::Win32::Security::{
     GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
     TokenUser,
 };
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
+};
 use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
 use windows_sys::Win32::System::Threading::{
     CREATE_NO_WINDOW, CreateMutexW, GetCurrentProcess, OpenProcess, OpenProcessToken,
@@ -25,6 +29,13 @@ use windows_sys::Win32::System::Threading::{
     QueryFullProcessImageNameW, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEONLYONCE,
     WaitForSingleObject,
 };
+use windows_sys::Win32::UI::Shell::ShellExecuteW;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, FLASHW_TIMERNOFG, FLASHW_TRAY, FLASHWINFO, FlashWindowEx, GetClassNameW,
+    GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+    SW_RESTORE, SW_SHOWNORMAL, SetForegroundWindow, ShowWindow,
+};
+use windows_sys::core::BOOL;
 
 pub const PIPE_PREFIX: &str = r"\\.\pipe\beacon-";
 
@@ -278,4 +289,159 @@ impl Drop for ProcessWatch {
 
 pub fn hide_console_window(command: &mut tokio::process::Command) {
     command.creation_flags(CREATE_NO_WINDOW);
+}
+
+fn text_until_nul(units: &[u16]) -> String {
+    let length = units
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(units.len());
+    String::from_utf16_lossy(&units[..length])
+}
+
+pub fn processes() -> io::Result<Vec<Process>> {
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let mut entry = PROCESSENTRY32W {
+        dwSize: size_of::<PROCESSENTRY32W>() as u32,
+        ..unsafe { std::mem::zeroed() }
+    };
+    let mut processes = Vec::new();
+    let mut listed = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
+    while listed {
+        processes.push(Process {
+            pid: entry.th32ProcessID,
+            parent_pid: entry.th32ParentProcessID,
+            image_name: text_until_nul(&entry.szExeFile),
+            image_path: process_image_path(entry.th32ProcessID).unwrap_or_default(),
+        });
+        listed = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
+    }
+    unsafe { CloseHandle(snapshot) };
+    Ok(processes)
+}
+
+pub fn top_level_windows() -> Vec<Window> {
+    let mut windows = Vec::new();
+    unsafe {
+        EnumWindows(
+            Some(collect_window),
+            &mut windows as *mut Vec<Window> as LPARAM,
+        )
+    };
+    windows
+}
+
+unsafe extern "system" fn collect_window(hwnd: HWND, data: LPARAM) -> BOOL {
+    if unsafe { IsWindowVisible(hwnd) } != 0 {
+        let windows = unsafe { &mut *(data as *mut Vec<Window>) };
+        let mut pid = 0;
+        let mut title = [0u16; 512];
+        let mut class = [0u16; 256];
+        unsafe {
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            GetWindowTextW(hwnd, title.as_mut_ptr(), title.len() as i32);
+            GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32);
+        }
+        windows.push(Window {
+            hwnd: hwnd as isize,
+            pid,
+            title: text_until_nul(&title),
+            class: text_until_nul(&class),
+        });
+    }
+    1
+}
+
+pub fn foreground_window() -> isize {
+    unsafe { GetForegroundWindow() as isize }
+}
+
+pub fn bring_to_front(hwnd: isize) -> bool {
+    let hwnd = hwnd as HWND;
+    unsafe {
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        SetForegroundWindow(hwnd) != 0
+    }
+}
+
+pub fn flash(hwnd: isize) {
+    unsafe {
+        FlashWindowEx(&FLASHWINFO {
+            cbSize: size_of::<FLASHWINFO>() as u32,
+            hwnd: hwnd as HWND,
+            dwFlags: FLASHW_TRAY | FLASHW_TIMERNOFG,
+            uCount: 0,
+            dwTimeout: 0,
+        })
+    };
+}
+
+pub fn open_link(link: &str) -> io::Result<()> {
+    let result = unsafe {
+        ShellExecuteW(
+            null_mut(),
+            wide("open").as_ptr(),
+            wide(link).as_ptr(),
+            null(),
+            null(),
+            SW_SHOWNORMAL,
+        )
+    } as isize;
+    if result <= 32 {
+        return Err(io::Error::other(format!(
+            "ShellExecuteW failed with {result}"
+        )));
+    }
+    Ok(())
+}
+
+pub mod clipboard {
+    use super::{check, wide};
+    use std::io;
+    use std::ptr::null_mut;
+    use windows_sys::Win32::Foundation::GlobalFree;
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+    };
+    use windows_sys::Win32::System::Memory::{
+        GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock,
+    };
+    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
+
+    pub fn set_text(text: &str) -> io::Result<()> {
+        let units = wide(text);
+        check(unsafe { OpenClipboard(null_mut()) })?;
+        let stored = store(&units);
+        unsafe { CloseClipboard() };
+        stored
+    }
+
+    fn store(units: &[u16]) -> io::Result<()> {
+        check(unsafe { EmptyClipboard() })?;
+        let memory = unsafe { GlobalAlloc(GMEM_MOVEABLE, size_of_val(units)) };
+        if memory.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let target = unsafe { GlobalLock(memory) }.cast::<u16>();
+        if target.is_null() {
+            let error = io::Error::last_os_error();
+            unsafe { GlobalFree(memory) };
+            return Err(error);
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(units.as_ptr(), target, units.len());
+            GlobalUnlock(memory);
+        }
+        if unsafe { SetClipboardData(u32::from(CF_UNICODETEXT), memory) }.is_null() {
+            let error = io::Error::last_os_error();
+            unsafe { GlobalFree(memory) };
+            return Err(error);
+        }
+        Ok(())
+    }
 }

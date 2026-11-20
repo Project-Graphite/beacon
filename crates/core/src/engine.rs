@@ -5,6 +5,7 @@ use crate::control::{
     Snapshot, TimelineEntry,
 };
 use crate::events::{self, Common, Event, Meta, ToolUse};
+use crate::focus::Host;
 use crate::lister::ListedSession;
 use crate::log::{Logger, now_ms};
 use crate::platform::{ProcessWatch, process_alive, process_image_path};
@@ -412,6 +413,9 @@ impl Engine {
             .and_then(|pid| pid.parse::<u32>().ok());
         if pid.is_some() {
             session.claude_pid = pid;
+        }
+        if session.host.is_none() {
+            session.host = Host::from_env(&meta.env);
         }
         let label = redact(&timeline_label(
             &common.hook_event_name,

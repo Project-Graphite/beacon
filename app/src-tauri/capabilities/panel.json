@@ -12,6 +12,7 @@
     "allow-unsnooze",
     "allow-refresh-usage",
     "allow-close-panel",
-    "allow-set-panel-height"
+    "allow-set-panel-height",
+    "allow-jump"
   ]
 }

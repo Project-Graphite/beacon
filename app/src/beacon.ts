@@ -67,11 +67,38 @@ export interface Session {
   editor: string | null;
   usage: SessionUsage | null;
   mcp_request: McpRequest | null;
+  host?: SessionHost | null;
+}
+
+export interface SessionHost {
+  term_program: string | null;
+  wt_session: string | null;
+  wt_profile_id: string | null;
+  vscode_pid: string | null;
+  tmux: string | null;
+  tmux_pane: string | null;
+  kitty_window_id: string | null;
+  wezterm_pane: string | null;
+  wsl_distro_name: string | null;
 }
 
 export interface McpRequest {
   server: string;
   message: string;
+}
+
+export type TargetKind =
+  | { type: 'editor'; scheme: string }
+  | { type: 'desktop' }
+  | { type: 'windows_terminal' }
+  | { type: 'console' }
+  | { type: 'other' };
+
+export interface JumpOutcome {
+  result: 'focused' | 'flashed' | 'no_window';
+  kind: TargetKind | null;
+  ambiguous: boolean;
+  link_opened: boolean;
 }
 
 export interface PendingDecision {
@@ -154,6 +181,7 @@ export const unsnooze = (sessionId: string | null) => invoke<void>('unsnooze', {
 export const refreshUsage = () => invoke<void>('refresh_usage');
 export const closePanel = () => invoke<void>('close_panel');
 export const setPanelHeight = (height: number) => invoke<void>('set_panel_height', { height });
+export const jump = (sessionId: string) => invoke<JumpOutcome>('jump', { sessionId });
 
 export const onSnapshot = (handler: (snapshot: Snapshot | null) => void): Promise<UnlistenFn> =>
   listen<Snapshot | null>('beacon://snapshot', (event) => handler(event.payload));
