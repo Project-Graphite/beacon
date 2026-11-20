@@ -3,6 +3,79 @@
 Decisions taken while building Beacon, newest phase first. Evidence for the phase 0 entries is in
 [SPIKES.md](SPIKES.md). An entry marked **needs Amr** is a proposal until he answers.
 
+## M3 to M5 and display targeting (2026-11-20)
+
+### Scope cut for v1
+
+Asked to drop what is not needed: the VS Code companion extension, Antigravity support, the claude.ai
+browser extension, the desktop-chat adapter, Beacon-spawned sessions, idle wake, headless resume, the
+edge-reveal form, toast action buttons and the test-matrix document are all out of v1.
+
+### Answering from the panel (M3)
+
+- Nothing is sent without a click or key press on that request. There is no "allow all".
+- A request that looks destructive is flagged and its Allow needs a second deliberate press. The
+  detector only adds that step; it never denies.
+- "Always allow" sends one `addRules` entry through `updatedPermissions`, with the scope the user
+  picks. Claude Code saves it as an ordinary permission rule; Beacon keeps no rules.
+- Secrets are masked in the request view until the user asks to see them. The rule editor is
+  prefilled unmasked, so a saved rule is never a masked one.
+- Questions are answered with `updatedInput` (`questions` plus `answers`); a plan is approved by
+  echoing its `tool_input`. Claude Code 2.1.328 now passes the plan text to hooks, so reading it from
+  the transcript is only a fallback.
+- **MCP input forms are not answered by Beacon.** A blocking `Elicitation` hook hides Claude Code's
+  own dialog until it returns, which would break the rule that a session behaves as if Beacon were
+  absent. The card says what is asked and points to the session.
+- Verified against real Claude Code: allow, deny with message, always allow, the destructive two
+  steps, a question and a plan approval.
+
+### Jump to window (M4)
+
+- No editor extension. The window is found from the process tree: the ancestor chain of the
+  session's `claude.exe` leads to the editor, the desktop app, Windows Terminal or a console, and the
+  window whose title carries the session's folder name is chosen.
+- For a VS Code session, the documented link `vscode://anthropic.claude-code/open?session=<id>` then
+  focuses that session's tab. It is opened only after the window was focused, because the link acts
+  on whichever VS Code window is in front.
+- The focus change runs in the process the user just clicked in, since Windows only lets that one
+  change the foreground window. From the CLI it is usually refused and the taskbar button flashes.
+- Several sessions in one editor window cannot be told apart, so the rules "no toast for the focused
+  session" and "focus acknowledges a finished session" apply only when exactly one session maps to
+  the foreground window.
+- Not verified: the focus change from a panel click, and the link. A session handed to Windows
+  Terminal by the default-terminal setting has no Windows Terminal ancestor and is not found.
+
+### Sending a prompt (M5, trimmed)
+
+| Session | Path | What happens |
+|---|---|---|
+| Turn running | At turn end | The core queues the text and returns it from the `Stop` hook as `additionalContext`. |
+| Idle in VS Code | Prefill | The session opens in VS Code with the text in its prompt box, unsent. |
+| Idle elsewhere | Copy and jump | The text goes to the clipboard and the window is raised. |
+| Ended | None | |
+
+- A queued prompt shows `queued`, `delivered`, `acknowledged` or `failed` with a reason, and
+  survives a core restart. A turn that ends without a `Stop` fails its queued prompts instead of
+  leaving them queued.
+- A `Stop` that delivers a prompt is not the end of the turn.
+- Verified against real Claude Code: a prompt queued during a running command was delivered at
+  `Stop` and Claude answered it.
+
+### Display targeting
+
+- `ui.json` holds the chosen display and a list of displays to avoid. The pill and the panel appear
+  only on the target: the chosen display if connected and allowed, otherwise the primary if allowed,
+  otherwise the first allowed display, otherwise nowhere (tray only).
+- The tray menu has `Show on`, `Never show on` and `Position`. Dragging the pill onto an allowed
+  display selects it; a drop on an avoided display is undone.
+- The single-instance lock is skipped when `BEACON_HOME` is set, so a test instance can run beside
+  the real one. The core still allows one instance per home.
+
+### Build
+
+`[profile.fast]` (no link-time optimisation) is for day-to-day and verification builds. The app must
+be built through the Tauri CLI, or it loads the dev server instead of the bundled front end.
+
 ## M2: tray, pill and panel (2026-11-20)
 
 ### The pill is native; the panel is a WebView that exists only while it is open
@@ -43,12 +116,11 @@ idle budget for as long as that lasts.
   alerting and cannot be dismissed; when alerting ends the panel returns to the mode it was opened
   in.
 - Hover and alert opens do not take focus.
-- The page can call eight commands and nothing else, restricted to the panel window by a capability
-  file. The CSP is `default-src 'self'` plus the `connect-src` Tauri's own IPC needs.
+- The page can call a fixed list of commands and nothing else, restricted to the panel window by a
+  capability file. The CSP is `default-src 'self'` plus the `connect-src` Tauri's own IPC needs.
 - Everything from a session is rendered as text nodes. The last message goes through a hand-written
   renderer for a Markdown subset; there is no HTML injection path and no Markdown dependency.
 - The panel is a solid Graphite surface. The brief's OS blur is not used, because Graphite is flat.
-- Pending requests are shown read-only. Allow and Deny are M3.
 
 ### Attention, acknowledge and snooze
 
@@ -64,8 +136,7 @@ idle budget for as long as that lasts.
 - The first snapshot after start is a baseline. Sessions that start alerting or finish within 2 s of
   each other become one toast. Snoozed sessions produce none.
 - Until the app is packaged (M7), Windows attributes the toasts to Windows PowerShell.
-- The "not while that window has focus" rule needs window identity and arrives with M4. Action
-  buttons arrive with M3.
+- Toasts have no action buttons; those need the packaged app identity.
 
 ### Hotkey
 
