@@ -68,6 +68,24 @@ export interface Session {
   usage: SessionUsage | null;
   mcp_request: McpRequest | null;
   host?: SessionHost | null;
+  prompts: Prompt[];
+}
+
+export type PromptStatus = 'queued' | 'delivered' | 'acknowledged' | 'failed';
+
+export interface Prompt {
+  id: number;
+  preview: string;
+  created_ms: number;
+  status: PromptStatus;
+  reason: string | null;
+}
+
+export type PromptPath = 'at_turn_end' | 'prefill' | 'copy_and_jump';
+
+export interface WindowPrompt {
+  path: PromptPath;
+  outcome: JumpOutcome;
 }
 
 export interface SessionHost {
@@ -182,6 +200,10 @@ export const refreshUsage = () => invoke<void>('refresh_usage');
 export const closePanel = () => invoke<void>('close_panel');
 export const setPanelHeight = (height: number) => invoke<void>('set_panel_height', { height });
 export const jump = (sessionId: string) => invoke<JumpOutcome>('jump', { sessionId });
+export const queuePrompt = (sessionId: string, text: string) => invoke<void>('queue_prompt', { sessionId, text });
+export const cancelPrompt = (id: number) => invoke<void>('cancel_prompt', { id });
+export const sendPromptToWindow = (sessionId: string, text: string) =>
+  invoke<WindowPrompt>('send_prompt_to_window', { sessionId, text });
 
 export const onSnapshot = (handler: (snapshot: Snapshot | null) => void): Promise<UnlistenFn> =>
   listen<Snapshot | null>('beacon://snapshot', (event) => handler(event.payload));

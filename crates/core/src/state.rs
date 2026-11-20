@@ -27,6 +27,14 @@ impl SessionState {
         )
     }
 
+    pub fn turn_running(self) -> bool {
+        self.needs_input()
+            || matches!(
+                self,
+                SessionState::Starting | SessionState::Working | SessionState::Stalled
+            )
+    }
+
     pub fn needs_attention(self) -> bool {
         self.needs_input()
             || matches!(

@@ -10,6 +10,7 @@ use crate::lister::ListedSession;
 use crate::log::{Logger, now_ms};
 use crate::platform::{ProcessWatch, process_alive, process_image_path};
 use crate::preview::input_preview;
+use crate::prompts::stop_output;
 use crate::redact::redact;
 use crate::session::{McpRequest, Session, activity_line, surface_from_image};
 use crate::state::{AgentStatus, Input, PermissionKind, SessionState, StartSource, ToolEvent};
@@ -29,6 +30,7 @@ const TIMELINE_KEPT: usize = 60;
 const LABEL_CHARS: usize = 200;
 const LAST_MESSAGE_BYTES: usize = 64 * 1024;
 const USAGE_EVENTS: [&str; 4] = ["Stop", "SubagentStop", "PostToolBatch", "SessionEnd"];
+const FOLLOWUP_DELIVERED: &str = "Follow-up delivered from Beacon";
 
 pub type ProcessExit = (String, u32);
 
@@ -67,6 +69,7 @@ enum Followup {
     ToolUsed(ToolUse),
     ToolRan(Option<String>),
     BatchFinished(Vec<String>),
+    PromptDelivered(String),
     PermissionAsked {
         tool_name: String,
         tool_input: Value,
@@ -89,6 +92,7 @@ pub struct Engine {
     pending: BTreeMap<u64, Pending>,
     resolved: VecDeque<ResolvedDecision>,
     next_id: u64,
+    next_prompt_id: u64,
     changes: watch::Sender<u64>,
     process_exits: mpsc::UnboundedSender<ProcessExit>,
     snoozed_until_ms: Option<u64>,
@@ -104,6 +108,12 @@ impl Engine {
         sessions: Vec<Session>,
     ) -> (Engine, mpsc::UnboundedReceiver<ProcessExit>) {
         let (process_exits, exits) = mpsc::unbounded_channel();
+        let next_prompt_id = sessions
+            .iter()
+            .flat_map(|session| &session.prompts)
+            .map(|prompt| prompt.id + 1)
+            .max()
+            .unwrap_or(1);
         let mut engine = Engine {
             config,
             log,
@@ -115,6 +125,7 @@ impl Engine {
             pending: BTreeMap::new(),
             resolved: VecDeque::new(),
             next_id: 1,
+            next_prompt_id,
             changes: watch::channel(0).0,
             process_exits,
             snoozed_until_ms: None,
@@ -170,7 +181,11 @@ impl Engine {
 
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
-            sessions: self.sessions.values().cloned().collect(),
+            sessions: self
+                .sessions
+                .values()
+                .map(Session::without_prompt_texts)
+                .collect(),
             pending: self
                 .pending
                 .values()
@@ -206,6 +221,10 @@ impl Engine {
                 Some(now_ms().saturating_add(minutes.saturating_mul(60_000))),
             ),
             Request::Unsnooze { session_id } => self.snooze(session_id.as_deref(), None),
+            Request::QueuePrompt { session_id, text } => {
+                self.queue_prompt(&session_id, &text, now_ms())
+            }
+            Request::CancelPrompt { id } => self.cancel_prompt(id),
             Request::RefreshUsage | Request::Shutdown => Ok(()),
         };
         result.map_or_else(Reply::failed, |()| Reply::ok())
@@ -225,6 +244,29 @@ impl Engine {
                     .snoozed_until_ms = until_ms;
             }
         }
+        self.changed();
+        Ok(())
+    }
+
+    fn queue_prompt(&mut self, session_id: &str, text: &str, now: u64) -> Result<(), String> {
+        self.sessions
+            .get_mut(session_id)
+            .ok_or_else(|| format!("no session {session_id}"))?
+            .queue_prompt(self.next_prompt_id, text, now)?;
+        self.log.info(format_args!(
+            "prompt {} queued for session {session_id}",
+            self.next_prompt_id
+        ));
+        self.next_prompt_id += 1;
+        self.changed();
+        Ok(())
+    }
+
+    fn cancel_prompt(&mut self, id: u64) -> Result<(), String> {
+        self.sessions
+            .values_mut()
+            .find_map(|session| session.cancel_prompt(id))
+            .ok_or_else(|| format!("no prompt {id}"))??;
         self.changed();
         Ok(())
     }
@@ -349,12 +391,9 @@ impl Engine {
                     "{} for session {}",
                     parsed.common.hook_event_name, parsed.common.session_id
                 ));
-                let session_id = parsed.common.session_id.clone();
                 let outcome = self.apply_event(&meta, parsed.common, parsed.event);
                 self.changed();
-                outcome.or_else(|| {
-                    (meta.event == "Stop").then(|| HookOutcome::Reply(self.stop_reply(&session_id)))
-                })
+                outcome
             }
             Err(rejected) => {
                 self.log.warn(format_args!(
@@ -375,10 +414,6 @@ impl Engine {
         })
     }
 
-    pub fn stop_reply(&self, _session_id: &str) -> HookReply {
-        HookReply::NoDecision
-    }
-
     fn apply_event(&mut self, meta: &Meta, common: Common, event: Event) -> Option<HookOutcome> {
         let now = now_ms();
         let session_id = common.session_id;
@@ -389,6 +424,7 @@ impl Engine {
         session.limited = false;
         session.last_event_ms = now;
         session.event_count += 1;
+        session.acknowledge_prompts();
         if let Some(cwd) = &common.cwd {
             session.set_location(cwd, meta.env("CLAUDE_PROJECT_DIR"));
         }
@@ -417,7 +453,7 @@ impl Engine {
         if session.host.is_none() {
             session.host = Host::from_env(&meta.env);
         }
-        let label = redact(&timeline_label(
+        let mut label = redact(&timeline_label(
             &common.hook_event_name,
             &event,
             session.cwd.as_deref(),
@@ -509,8 +545,23 @@ impl Engine {
                         .or_default()
                         .last_message = Some(message);
                 }
-                let background_tasks = background_tasks.map_or(0, |tasks| tasks.len() as u32);
-                (Some(Input::Stopped { background_tasks }), Followup::Nothing)
+                match (meta.event == "Stop")
+                    .then(|| session.deliver_next_prompt())
+                    .flatten()
+                {
+                    Some(text) => {
+                        label = FOLLOWUP_DELIVERED.to_string();
+                        (
+                            Some(Input::ToolActivity(ToolEvent::Tool)),
+                            Followup::PromptDelivered(text),
+                        )
+                    }
+                    None => {
+                        let background_tasks =
+                            background_tasks.map_or(0, |tasks| tasks.len() as u32);
+                        (Some(Input::Stopped { background_tasks }), Followup::Nothing)
+                    }
+                }
             }
             Event::StopFailure { error } => {
                 session.last_error = error;
@@ -562,6 +613,12 @@ impl Engine {
         }
         match followup {
             Followup::Nothing | Followup::ToolRan(None) => None,
+            Followup::PromptDelivered(text) => {
+                self.log.info(format_args!(
+                    "delivered a queued prompt to session {session_id}"
+                ));
+                Some(HookOutcome::Reply(HookReply::Stdout(stop_output(&text))))
+            }
             Followup::ToolUsed(tool_use) => {
                 self.note_tool_use(&session_id, common.agent_id, tool_use);
                 None

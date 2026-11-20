@@ -80,6 +80,7 @@ fn run(command: Command) -> Result<ExitCode, String> {
         Command::Ack { session } => acknowledge(&beacon_home()?, &session),
         Command::Jump { session } => jump::jump(&beacon_home()?, &session),
         Command::Where { session } => jump::locate(&beacon_home()?, &session),
+        Command::Prompt { session, text } => queue_prompt(&beacon_home()?, &session, text),
         Command::Snooze { session, minutes } => snooze(&beacon_home()?, session, Some(minutes)),
         Command::Unsnooze { session } => snooze(&beacon_home()?, session, None),
         Command::Usage { refresh } => {
@@ -175,6 +176,19 @@ fn acknowledge(home: &Path, prefix: &str) -> Result<ExitCode, String> {
         },
     )?;
     println!("Session {session_id} acknowledged.");
+    Ok(ExitCode::SUCCESS)
+}
+
+fn queue_prompt(home: &Path, prefix: &str, text: String) -> Result<ExitCode, String> {
+    let session_id = resolve_session(home, prefix)?;
+    request(
+        home,
+        &Request::QueuePrompt {
+            session_id: session_id.clone(),
+            text,
+        },
+    )?;
+    println!("Prompt queued for session {session_id}; it is sent when the current turn finishes.");
     Ok(ExitCode::SUCCESS)
 }
 

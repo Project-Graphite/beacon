@@ -1,20 +1,22 @@
 import { acknowledge, snooze, unsnooze, type Session } from '../beacon';
 import { clockTime } from '../lib/format.ts';
 import { canAcknowledge, canSnooze, needsInput } from '../lib/sessions.ts';
+import { JumpButton } from './JumpButton';
 import { OutlineButton } from './OutlineButton';
 
 interface CardActionsProps {
   session: Session;
   globalSnoozedUntil: number | null;
+  onJump: () => void;
   run: (action: Promise<unknown>) => void;
 }
 
-export function CardActions({ session, globalSnoozedUntil, run }: CardActionsProps) {
+export function CardActions({ session, globalSnoozedUntil, onJump, run }: CardActionsProps) {
   const snoozedUntil =
     needsInput(session) && session.attention && !session.alerting
       ? (session.snoozed_until_ms ?? globalSnoozedUntil)
       : null;
-  if (!canAcknowledge(session) && !canSnooze(session) && snoozedUntil === null) return null;
+  if (session.state === 'ended') return null;
   return (
     <div className="mt-1.5 flex items-center justify-end gap-2">
       {canAcknowledge(session) && (
@@ -41,6 +43,7 @@ export function CardActions({ session, globalSnoozedUntil, run }: CardActionsPro
           </OutlineButton>
         </>
       )}
+      <JumpButton onJump={onJump} />
     </div>
   );
 }

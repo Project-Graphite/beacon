@@ -2,6 +2,7 @@ import { useState, type MouseEvent } from 'react';
 import type { PendingDecision, Session } from '../beacon';
 import { plainText } from '../lib/markdown.ts';
 import { cardId, metaItems, statePhrase, surface, turnTime, type Tone } from '../lib/sessions.ts';
+import type { JumpReport } from '../lib/jump.ts';
 import type { ResolutionNotice } from '../lib/queue.ts';
 import { CardActions } from './CardActions';
 import { Icon } from './Icon';
@@ -28,6 +29,8 @@ interface SessionCardProps {
   expanded: boolean;
   globalSnoozedUntil: number | null;
   onActivate: () => void;
+  onJump: () => void;
+  onJumpReport: (report: JumpReport) => void;
   run: (action: Promise<unknown>) => void;
 }
 
@@ -43,6 +46,8 @@ export function SessionCard({
   expanded,
   globalSnoozedUntil,
   onActivate,
+  onJump,
+  onJumpReport,
   run,
 }: SessionCardProps) {
   const [seen, setSeen] = useState(expanded);
@@ -112,6 +117,7 @@ export function SessionCard({
               marked={queueSize > 1 && request.id === currentId}
               currentId={currentId}
               keys={keys}
+              onJump={onJump}
             />
           ))}
           {notices.map((notice) => (
@@ -145,7 +151,7 @@ export function SessionCard({
               {plainText(session.last_message_preview)}
             </p>
           )}
-          <CardActions session={session} globalSnoozedUntil={globalSnoozedUntil} run={run} />
+          <CardActions session={session} globalSnoozedUntil={globalSnoozedUntil} onJump={onJump} run={run} />
         </div>
       </div>
       {seen && (
@@ -154,7 +160,7 @@ export function SessionCard({
           className={`grid transition-[grid-template-rows] duration-150 ease-settle starting:grid-rows-[0fr] ${expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
         >
           <div className="min-h-0 overflow-hidden">
-            <SessionDetails session={session} expanded={expanded} />
+            <SessionDetails session={session} expanded={expanded} onJumpReport={onJumpReport} />
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Decision, PendingDecision } from '../beacon';
 import { FilledButton } from './FilledButton';
+import { JumpButton } from './JumpButton';
 import { KeyHint } from './KeyHint';
 import { Markdown } from './Markdown';
 import { MessageField } from './MessageField';
@@ -14,9 +15,10 @@ interface PlanRequestProps {
   sending: boolean;
   keys: Map<number, (key: string) => void>;
   send: (decision: Decision) => void;
+  onJump: () => void;
 }
 
-export function PlanRequest({ request, sending, keys, send }: PlanRequestProps) {
+export function PlanRequest({ request, sending, keys, send, onJump }: PlanRequestProps) {
   const [gaveUp, setGaveUp] = useState(() => Date.now() - request.created_ms >= PLAN_WAIT_MS);
   const [feedback, setFeedback] = useState(false);
 
@@ -73,6 +75,7 @@ export function PlanRequest({ request, sending, keys, send }: PlanRequestProps) 
             Reject with feedback
             <KeyHint shortcut="M" />
           </OutlineButton>
+          <JumpButton shortcut onJump={onJump} />
         </div>
       )}
     </>

@@ -70,6 +70,24 @@ pub async fn decide(feed: State<'_, Arc<Feed>>, id: u64, decision: Decision) -> 
 }
 
 #[tauri::command]
+pub async fn queue_prompt(
+    feed: State<'_, Arc<Feed>>,
+    session_id: String,
+    text: String,
+) -> Result<(), String> {
+    ask(feed.home.clone(), Request::QueuePrompt { session_id, text })
+        .await
+        .map(drop)
+}
+
+#[tauri::command]
+pub async fn cancel_prompt(feed: State<'_, Arc<Feed>>, id: u64) -> Result<(), String> {
+    ask(feed.home.clone(), Request::CancelPrompt { id })
+        .await
+        .map(drop)
+}
+
+#[tauri::command]
 pub async fn snooze(
     feed: State<'_, Arc<Feed>>,
     session_id: Option<String>,

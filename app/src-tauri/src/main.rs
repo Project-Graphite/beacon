@@ -78,6 +78,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             panel::close_panel,
             panel::set_panel_height,
             jump::jump,
+            jump::send_prompt_to_window,
+            panel::queue_prompt,
+            panel::cancel_prompt,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

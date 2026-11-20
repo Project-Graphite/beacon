@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-send-prompt-to-window"
+description = "Enables the send_prompt_to_window command without any pre-configured scope."
+commands.allow = ["send_prompt_to_window"]
+
+[[permission]]
+identifier = "deny-send-prompt-to-window"
+description = "Denies the send_prompt_to_window command without any pre-configured scope."
+commands.deny = ["send_prompt_to_window"]

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Decision, PendingDecision } from '../beacon';
 import { suggestedRule } from '../lib/rules.ts';
 import { FilledButton } from './FilledButton';
+import { JumpButton } from './JumpButton';
 import { KeyHint } from './KeyHint';
 import { MessageField } from './MessageField';
 import { OutlineButton } from './OutlineButton';
@@ -17,9 +18,10 @@ interface ToolActionsProps {
   sending: boolean;
   keys: Map<number, (key: string) => void>;
   send: (decision: Decision) => void;
+  onJump: () => void;
 }
 
-export function ToolActions({ request, destructive, currentId, sending, keys, send }: ToolActionsProps) {
+export function ToolActions({ request, destructive, currentId, sending, keys, send, onJump }: ToolActionsProps) {
   const [mode, setMode] = useState<'buttons' | 'rule' | 'message'>('buttons');
   const [armed, setArmed] = useState(false);
   const [more, setMore] = useState(false);
@@ -99,6 +101,7 @@ export function ToolActions({ request, destructive, currentId, sending, keys, se
           More
         </TextButton>
       )}
+      <JumpButton shortcut onJump={onJump} />
     </div>
   );
 }

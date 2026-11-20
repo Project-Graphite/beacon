@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Decision, PendingDecision } from '../beacon';
 import { NO_CHOICE, assembleAnswers, pickOption, pickOther, readQuestions, typeOther, type Choice } from '../lib/answers.ts';
 import { FilledButton } from './FilledButton';
+import { JumpButton } from './JumpButton';
 import { KeyHint } from './KeyHint';
 import { OutlineButton } from './OutlineButton';
 
@@ -12,9 +13,10 @@ interface QuestionRequestProps {
   sending: boolean;
   keys: Map<number, (key: string) => void>;
   send: (decision: Decision) => void;
+  onJump: () => void;
 }
 
-export function QuestionRequest({ request, sending, keys, send }: QuestionRequestProps) {
+export function QuestionRequest({ request, sending, keys, send, onJump }: QuestionRequestProps) {
   const questions = readQuestions(request.tool_input);
   const [choices, setChoices] = useState<Choice[]>(() => questions.map(() => NO_CHOICE));
   const answers = assembleAnswers(questions, choices);
@@ -97,6 +99,7 @@ export function QuestionRequest({ request, sending, keys, send }: QuestionReques
           Dismiss
           <KeyHint shortcut="D" />
         </OutlineButton>
+        <JumpButton shortcut onJump={onJump} />
       </div>
     </fieldset>
   );

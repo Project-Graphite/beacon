@@ -1,5 +1,6 @@
 import type { Session, SessionState } from '../beacon';
 import { formatDuration, formatTokens, shortModel } from './format.ts';
+import { queuedPrompts } from './prompts.ts';
 
 export type Tone = 'wip' | 'live' | 'danger' | 'muted';
 export type SurfaceIcon = 'terminal' | 'headless' | 'editor' | 'desktop' | 'unknown';
@@ -113,7 +114,9 @@ export function metaItems(session: Session): MetaItem[] {
   const model = session.model ?? session.usage?.model;
   const { subagents, background_tasks, compacting } = session.overlays;
   const contextTokens = session.usage?.context_tokens ?? 0;
+  const queued = queuedPrompts(session);
   return [
+    queued > 0 && { text: `${queued} queued` },
     model && { text: shortModel(model) },
     session.permission_mode && session.permission_mode !== 'default' && { text: session.permission_mode },
     session.tasks_created > 0 && { text: `tasks ${session.tasks_completed}/${session.tasks_created}` },

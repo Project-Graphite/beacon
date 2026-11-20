@@ -16,11 +16,12 @@ interface RequestCardProps {
   marked: boolean;
   currentId: number | null;
   keys: Map<number, (key: string) => void>;
+  onJump: () => void;
 }
 
 const unchanged = (text: string) => text;
 
-export function RequestCard({ request, now, marked, currentId, keys }: RequestCardProps) {
+export function RequestCard({ request, now, marked, currentId, keys, onJump }: RequestCardProps) {
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [unmasked, setUnmasked] = useState(false);
@@ -63,11 +64,12 @@ export function RequestCard({ request, now, marked, currentId, keys }: RequestCa
             sending={sending}
             keys={keys}
             send={send}
+            onJump={onJump}
           />
         </>
       )}
-      {request.kind === 'question' && <QuestionRequest request={request} sending={sending} keys={keys} send={send} />}
-      {request.kind === 'plan' && <PlanRequest request={request} sending={sending} keys={keys} send={send} />}
+      {request.kind === 'question' && <QuestionRequest request={request} sending={sending} keys={keys} send={send} onJump={onJump} />}
+      {request.kind === 'plan' && <PlanRequest request={request} sending={sending} keys={keys} send={send} onJump={onJump} />}
       {failure && <p className="mt-1.5 text-micro text-danger [overflow-wrap:anywhere]">{failure}</p>}
     </div>
   );

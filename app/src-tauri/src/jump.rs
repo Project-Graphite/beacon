@@ -1,15 +1,25 @@
 use crate::feed::{self, Feed};
 use beacon_core::focus::{self, JumpOutcome};
-use beacon_core::{Request, SessionState, Snapshot};
-use std::path::Path;
+use beacon_core::prompts::{PromptPath, check_text, prompt_path};
+use beacon_core::{Request, Session, SessionState, Snapshot, clipboard};
+use serde::Serialize;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::State;
 
-#[tauri::command]
-pub async fn jump(feed: State<'_, Arc<Feed>>, session_id: String) -> Result<JumpOutcome, String> {
-    let home = feed.home.clone();
+#[derive(Serialize)]
+pub struct WindowPrompt {
+    path: PromptPath,
+    outcome: JumpOutcome,
+}
+
+async fn with_session<T: Send + 'static>(
+    home: PathBuf,
+    session_id: String,
+    act: impl FnOnce(Session) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let session = feed::request(&home, &Request::Snapshot)?
+        act(feed::request(&home, &Request::Snapshot)?
             .snapshot
             .and_then(|snapshot| {
                 snapshot
@@ -17,11 +27,47 @@ pub async fn jump(feed: State<'_, Arc<Feed>>, session_id: String) -> Result<Jump
                     .into_iter()
                     .find(|session| session.session_id == session_id)
             })
-            .ok_or_else(|| format!("no session {session_id}"))?;
-        focus::jump(&session).map_err(|error| error.to_string())
+            .ok_or_else(|| format!("no session {session_id}"))?)
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn jump(feed: State<'_, Arc<Feed>>, session_id: String) -> Result<JumpOutcome, String> {
+    with_session(feed.home.clone(), session_id, |session| {
+        focus::jump(&session).map_err(|error| error.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn send_prompt_to_window(
+    feed: State<'_, Arc<Feed>>,
+    session_id: String,
+    text: String,
+) -> Result<WindowPrompt, String> {
+    with_session(feed.home.clone(), session_id, move |session| {
+        check_text(&text)?;
+        let (path, outcome) = match prompt_path(&session) {
+            Some(path @ PromptPath::Prefill) => (path, focus::jump_with_prompt(&session, &text)),
+            Some(path @ PromptPath::CopyAndJump) => (
+                path,
+                clipboard::set_text(&text).and_then(|()| focus::jump(&session)),
+            ),
+            Some(PromptPath::AtTurnEnd) | None => {
+                return Err(format!(
+                    "session {} takes no prompt through its window now",
+                    session.session_id
+                ));
+            }
+        };
+        Ok(WindowPrompt {
+            path,
+            outcome: outcome.map_err(|error| error.to_string())?,
+        })
+    })
+    .await
 }
 
 pub fn focused_session(snapshot: Option<&Snapshot>) -> Option<String> {

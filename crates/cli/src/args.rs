@@ -14,6 +14,7 @@ Usage:
   beacon ack <session-id-or-unique-prefix>
   beacon jump <session-id-or-unique-prefix>
   beacon where <session-id-or-unique-prefix>
+  beacon prompt <session-id-or-unique-prefix> \"<text>\"
   beacon snooze <session-id-or-unique-prefix|all> <minutes>
   beacon unsnooze <session-id-or-unique-prefix|all>
   beacon usage [--refresh]
@@ -44,6 +45,10 @@ pub enum Command {
     },
     Where {
         session: String,
+    },
+    Prompt {
+        session: String,
+        text: String,
     },
     Snooze {
         session: Option<String>,
@@ -128,6 +133,10 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         }),
         ("where", [session]) => Ok(Command::Where {
             session: session.clone(),
+        }),
+        ("prompt", [session, text]) => Ok(Command::Prompt {
+            session: session.clone(),
+            text: text.clone(),
         }),
         ("snooze", [session, minutes]) => Ok(Command::Snooze {
             session: session_or_all(session),
@@ -467,6 +476,25 @@ mod tests {
         }
         assert!(USAGE.contains("beacon jump <session-id-or-unique-prefix>"));
         assert!(USAGE.contains("beacon where <session-id-or-unique-prefix>"));
+    }
+
+    #[test]
+    fn prompt_parses_one_session_and_one_text() {
+        assert_eq!(
+            parsed(&["prompt", "4c2c", "Reply with PINEAPPLE."]),
+            Ok(Command::Prompt {
+                session: "4c2c".to_string(),
+                text: "Reply with PINEAPPLE.".to_string()
+            })
+        );
+        for line in [
+            &["prompt"][..],
+            &["prompt", "4c2c"],
+            &["prompt", "a", "b", "c"],
+        ] {
+            assert!(parsed(line).is_err(), "{line:?}");
+        }
+        assert!(USAGE.contains("beacon prompt <session-id-or-unique-prefix> \"<text>\""));
     }
 
     #[test]

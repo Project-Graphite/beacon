@@ -3,6 +3,7 @@ import {
   acknowledge,
   closePanel,
   getSnapshot,
+  jump,
   onOpened,
   onSnapshot,
   setPanelHeight,
@@ -15,6 +16,8 @@ import { EmptyState } from './components/EmptyState';
 import { Header } from './components/Header';
 import { SessionCard } from './components/SessionCard';
 import { SessionList } from './components/SessionList';
+import { jumpReport, type JumpReport } from './lib/jump.ts';
+import { promptBoxId, promptPath } from './lib/prompts.ts';
 import {
   currentRequest,
   firstRequestOf,
@@ -49,6 +52,7 @@ export function App() {
   const content = useRef<HTMLDivElement>(null);
   const pendingIds = useRef<number[]>([]);
   const requestKeys = useRef(new Map<number, (key: string) => void>());
+  const nextJumpNoticeId = useRef(-1);
 
   const run = useCallback((action: Promise<unknown>) => {
     action.then(
@@ -57,18 +61,17 @@ export function App() {
     );
   }, []);
 
+  const showNotices = useCallback((fresh: ResolutionNotice[]) => {
+    setNotices((current) => [...current, ...fresh]);
+    window.setTimeout(() => setNotices((current) => current.filter((notice) => !fresh.includes(notice))), NOTICE_MS);
+  }, []);
+
   useEffect(() => {
     const receive = (next: Snapshot | null) => {
       if (next) {
         const fresh = resolutionNotices(pendingIds.current, next.pending, next.resolved);
         pendingIds.current = next.pending.map((request) => request.id);
-        if (fresh.length > 0) {
-          setNotices((current) => [...current, ...fresh]);
-          window.setTimeout(
-            () => setNotices((current) => current.filter((notice) => !fresh.includes(notice))),
-            NOTICE_MS,
-          );
-        }
+        if (fresh.length > 0) showNotices(fresh);
       }
       setSnapshot(next);
       setNow(Date.now());
@@ -81,7 +84,7 @@ export function App() {
       }),
     );
     return () => void subscriptions.then((unlisteners) => unlisteners.forEach((unlisten) => unlisten()));
-  }, [run]);
+  }, [run, showNotices]);
 
   useEffect(() => {
     const [section, list, inner] = [panel.current, scroller.current, content.current];
@@ -121,6 +124,14 @@ export function App() {
 
   const toggle = (sessionId: string) => setExpandedId((expanded) => (expanded === sessionId ? null : sessionId));
 
+  const reportJump = (sessionId: string, { notice, succeeded }: JumpReport) => {
+    if (notice) showNotices([{ id: nextJumpNoticeId.current--, sessionId, text: notice }]);
+    if (succeeded) run(closePanel());
+  };
+
+  const jumpTo = (sessionId: string) =>
+    run(jump(sessionId).then((outcome) => reportJump(sessionId, jumpReport(outcome))));
+
   useEffect(() => {
     const index = visible.findIndex((session) => session.session_id === selectedId);
     const selected: Session | undefined = visible[index];
@@ -159,6 +170,18 @@ export function App() {
           break;
         case 's':
           if (selected && canSnooze(selected)) run(snooze(selected.session_id, 5));
+          break;
+        case 'j': {
+          const target = current?.session_id ?? (selected && selected.state !== 'ended' ? selected.session_id : null);
+          if (target) jumpTo(target);
+          break;
+        }
+        case '/':
+          if (selected && promptPath(selected)) {
+            event.preventDefault();
+            setExpandedId(selected.session_id);
+            window.setTimeout(() => document.getElementById(promptBoxId(selected.session_id))?.focus());
+          }
           break;
         case 'Escape':
           if (expandedId !== null) setExpandedId(null);
@@ -218,6 +241,8 @@ export function App() {
                   setSelectedId(session.session_id);
                   toggle(session.session_id);
                 }}
+                onJump={() => jumpTo(session.session_id)}
+                onJumpReport={(report) => reportJump(session.session_id, report)}
                 run={run}
               />
             )}

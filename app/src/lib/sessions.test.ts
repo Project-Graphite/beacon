@@ -44,6 +44,8 @@ const session = (fields: Partial<Session>): Session => ({
   alerting: false,
   editor: null,
   usage: null,
+  mcp_request: null,
+  prompts: [],
   ...fields,
 });
 
@@ -184,4 +186,9 @@ test('meta items list only what is present', () => {
     ],
   );
   assert.deepEqual(metaItems(session({ permission_mode: 'default' })), []);
+});
+
+test('a session with queued prompts says how many in its meta line', () => {
+  const prompt = (id: number, status: 'queued' | 'delivered') => ({ id, preview: '', created_ms: 0, status, reason: null });
+  assert.deepEqual(metaItems(session({ prompts: [prompt(1, 'delivered'), prompt(2, 'queued')] })), [{ text: '1 queued' }]);
 });

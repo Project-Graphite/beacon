@@ -32,6 +32,13 @@ pub enum Request {
     Detail {
         session_id: String,
     },
+    QueuePrompt {
+        session_id: String,
+        text: String,
+    },
+    CancelPrompt {
+        id: u64,
+    },
     RefreshUsage,
     Shutdown,
 }
@@ -296,6 +303,17 @@ mod tests {
                 r#"{"op":"detail","session_id":"s"}"#,
             ),
             (Request::RefreshUsage, r#"{"op":"refresh_usage"}"#),
+            (
+                Request::QueuePrompt {
+                    session_id: "s".to_string(),
+                    text: "go on".to_string(),
+                },
+                r#"{"op":"queue_prompt","session_id":"s","text":"go on"}"#,
+            ),
+            (
+                Request::CancelPrompt { id: 4 },
+                r#"{"op":"cancel_prompt","id":4}"#,
+            ),
         ];
         for (request, json) in shapes {
             assert_eq!(serde_json::to_string(&request).unwrap(), json);

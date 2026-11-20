@@ -1,4 +1,5 @@
 use crate::focus::Host;
+use crate::prompts::Prompt;
 use crate::state::{AgentStatus, Input, Overlays, SessionState, overlays_after, transition};
 use crate::usage::SessionUsage;
 use serde::{Deserialize, Serialize};
@@ -65,6 +66,8 @@ pub struct Session {
     pub mcp_request: Option<McpRequest>,
     #[serde(default)]
     pub host: Option<Host>,
+    #[serde(default)]
+    pub prompts: Vec<Prompt>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -107,6 +110,7 @@ impl Session {
             usage: None,
             mcp_request: None,
             host: None,
+            prompts: Vec::new(),
         }
     }
 
@@ -114,6 +118,7 @@ impl Session {
         let before = self.state;
         self.state = transition(self.state, input);
         self.overlays = overlays_after(self.overlays, input);
+        self.fail_queued_prompts();
         if self.state != SessionState::NeedsMcpInput {
             self.mcp_request = None;
         }

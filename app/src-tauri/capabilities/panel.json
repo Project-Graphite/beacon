@@ -13,6 +13,9 @@
     "allow-refresh-usage",
     "allow-close-panel",
     "allow-set-panel-height",
-    "allow-jump"
+    "allow-jump",
+    "allow-queue-prompt",
+    "allow-cancel-prompt",
+    "allow-send-prompt-to-window"
   ]
 }

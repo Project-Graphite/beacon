@@ -1,6 +1,7 @@
 use super::*;
 use crate::account::UsageSource;
 use crate::config::LogLevel;
+use crate::prompts::{self, PromptStatus};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1377,4 +1378,235 @@ fn the_host_identity_comes_from_the_first_event_that_carries_one_and_persists() 
     legacy.remove("host");
     let legacy: Session = serde_json::from_value(Value::Object(legacy)).unwrap();
     assert_eq!(legacy.host, None);
+}
+
+impl Fixture {
+    fn queue(&mut self, text: &str) -> Reply {
+        self.engine.control(Request::QueuePrompt {
+            session_id: SESSION.to_string(),
+            text: text.to_string(),
+        })
+    }
+
+    fn prompt_statuses(&self) -> Vec<(PromptStatus, Option<String>)> {
+        self.session()
+            .prompts
+            .iter()
+            .map(|prompt| (prompt.status, prompt.reason.clone()))
+            .collect()
+    }
+}
+
+fn stdout(outcome: HookOutcome) -> String {
+    match outcome {
+        HookOutcome::Reply(HookReply::Stdout(bytes)) => String::from_utf8(bytes).unwrap(),
+        _ => panic!("expected stdout"),
+    }
+}
+
+#[test]
+fn prompts_queue_only_while_a_turn_runs_and_within_the_limits() {
+    let mut fixture = fixture();
+    fixture.send(SESSION_START);
+    fixture.send(STOP);
+    let idle = fixture.queue("go on").error.unwrap();
+    assert!(idle.contains("is not running a turn"), "{idle}");
+    assert!(idle.contains("beacon jump"), "{idle}");
+    fixture.send_with_env(
+        USER_PROMPT_SUBMIT,
+        &[("CLAUDE_CODE_ENTRYPOINT", "claude-vscode")],
+    );
+    fixture.send(STOP);
+    let vscode = fixture.queue("go on").error.unwrap();
+    assert!(vscode.contains("VS Code"), "{vscode}");
+    fixture.send(USER_PROMPT_SUBMIT);
+    assert_eq!(
+        fixture.queue(" \n ").error.as_deref(),
+        Some("the prompt is empty")
+    );
+    assert_eq!(
+        fixture.queue(&"x".repeat(16_001)).error.as_deref(),
+        Some("the prompt has 16001 characters; the limit is 16000")
+    );
+    assert!(fixture.queue(&"é".repeat(16_000)).ok);
+    assert!(fixture.queue("token API_KEY=abc123 please").ok);
+    let unknown = fixture.engine.control(Request::QueuePrompt {
+        session_id: "nobody".to_string(),
+        text: "x".to_string(),
+    });
+    assert_eq!(unknown.error.as_deref(), Some("no session nobody"));
+    let shown = &fixture.engine.snapshot().sessions[0].prompts;
+    assert_eq!(shown.len(), 2);
+    assert_eq!(shown[1].preview, "token API_KEY=*** please");
+    assert_eq!(shown[1].status, PromptStatus::Queued);
+    assert!(shown.iter().all(|prompt| prompt.text.is_none()));
+    assert!(shown[0].preview.chars().count() <= 120);
+    fixture.send(SESSION_END);
+    assert!(
+        fixture
+            .queue("late")
+            .error
+            .unwrap()
+            .contains("has ended and takes no prompt")
+    );
+}
+
+#[test]
+fn a_stop_delivers_the_oldest_queued_prompt_and_keeps_the_turn_running() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    assert!(fixture.queue("Reply with \"PINEAPPLE\".").ok);
+    assert!(fixture.queue("second").ok);
+    assert_eq!(
+        stdout(fixture.send(STOP)),
+        r#"{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"The user sent this follow-up from Beacon: Reply with \"PINEAPPLE\"."}}"#
+    );
+    assert_eq!(fixture.state(), SessionState::Working);
+    assert_eq!(fixture.session().turn_ended_ms, None);
+    assert_eq!(
+        fixture.prompt_statuses(),
+        [
+            (PromptStatus::Delivered, None),
+            (PromptStatus::Queued, None)
+        ]
+    );
+    assert_eq!(
+        fixture
+            .engine
+            .detail(SESSION)
+            .unwrap()
+            .timeline
+            .last()
+            .unwrap()
+            .label,
+        "Follow-up delivered from Beacon"
+    );
+    fixture.send(PRE_TOOL_USE);
+    assert_eq!(fixture.prompt_statuses()[0].0, PromptStatus::Acknowledged);
+    assert!(stdout(fixture.send(STOP)).contains("from Beacon: second"));
+    assert_eq!(
+        fixture.prompt_statuses(),
+        [
+            (PromptStatus::Acknowledged, None),
+            (PromptStatus::Delivered, None)
+        ]
+    );
+    assert!(matches!(
+        fixture.send(STOP),
+        HookOutcome::Reply(HookReply::NoDecision)
+    ));
+    assert_eq!(fixture.state(), SessionState::Done);
+    assert!(fixture.session().turn_ended_ms.is_some());
+    assert_eq!(fixture.prompt_statuses()[1].0, PromptStatus::Acknowledged);
+}
+
+#[test]
+fn queued_prompts_fail_when_the_session_ends_or_the_turn_is_interrupted() {
+    let mut fixture = fixture();
+    fixture.send_with_env(USER_PROMPT_SUBMIT, &[("CLAUDE_PID", "4242")]);
+    assert!(fixture.queue("one").ok);
+    fixture.engine.process_exited(SESSION, 4242);
+    assert_eq!(
+        fixture.prompt_statuses(),
+        [(
+            PromptStatus::Failed,
+            Some(prompts::ENDED_REASON.to_string())
+        )]
+    );
+    fixture.send(USER_PROMPT_SUBMIT);
+    assert!(fixture.queue("two").ok);
+    fixture
+        .engine
+        .reconcile(vec![listed(SESSION, None, "idle")]);
+    assert_eq!(fixture.state(), SessionState::Idle);
+    assert_eq!(
+        fixture.prompt_statuses()[1],
+        (
+            PromptStatus::Failed,
+            Some(prompts::INTERRUPTED_REASON.to_string())
+        )
+    );
+    fixture.send(USER_PROMPT_SUBMIT);
+    assert!(fixture.queue("three").ok);
+    fixture.send(SESSION_END);
+    assert_eq!(
+        fixture.prompt_statuses()[2],
+        (
+            PromptStatus::Failed,
+            Some(prompts::ENDED_REASON.to_string())
+        )
+    );
+    assert!(
+        fixture
+            .session()
+            .prompts
+            .iter()
+            .all(|prompt| prompt.text.is_none())
+    );
+}
+
+#[test]
+fn a_queued_prompt_survives_a_core_restart() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    assert!(fixture.queue("after restart").ok);
+    let persisted = fixture.engine.persisted_state().unwrap();
+    assert!(String::from_utf8_lossy(&persisted).contains("\"text\": \"after restart\""));
+    let mut restored = fixture_with(
+        Config::default(),
+        Engine::load_sessions(&persisted).unwrap(),
+    );
+    assert!(restored.queue("next").ok);
+    assert_eq!(
+        restored
+            .session()
+            .prompts
+            .iter()
+            .map(|prompt| prompt.id)
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+    assert!(stdout(restored.send(STOP)).ends_with("from Beacon: after restart\"}}"));
+}
+
+#[test]
+fn only_a_queued_prompt_can_be_cancelled_and_finished_ones_are_trimmed_to_five() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    assert!(fixture.queue("keep").ok);
+    assert!(fixture.queue("drop").ok);
+    assert!(fixture.engine.control(Request::CancelPrompt { id: 2 }).ok);
+    assert_eq!(fixture.session().prompts.len(), 1);
+    assert_eq!(
+        fixture
+            .engine
+            .control(Request::CancelPrompt { id: 2 })
+            .error
+            .as_deref(),
+        Some("no prompt 2")
+    );
+    fixture.send(STOP);
+    assert_eq!(
+        fixture
+            .engine
+            .control(Request::CancelPrompt { id: 1 })
+            .error
+            .as_deref(),
+        Some("prompt 1 is delivered and can no longer be cancelled")
+    );
+    for round in 0..5 {
+        assert!(fixture.queue(&format!("round {round}")).ok);
+        fixture.send(STOP);
+    }
+    assert!(fixture.queue("waiting").ok);
+    let previews: Vec<String> = fixture
+        .session()
+        .prompts
+        .iter()
+        .map(|prompt| prompt.preview.clone())
+        .collect();
+    assert_eq!(
+        previews,
+        ["round 1", "round 2", "round 3", "round 4", "waiting"]
+    );
 }

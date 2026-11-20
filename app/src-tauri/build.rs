@@ -11,6 +11,9 @@ fn main() {
             "close_panel",
             "set_panel_height",
             "jump",
+            "queue_prompt",
+            "cancel_prompt",
+            "send_prompt_to_window",
         ]),
     ))
     .expect("the Tauri build script failed");

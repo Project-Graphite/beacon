@@ -183,6 +183,7 @@ fn flags(session: &Session) -> String {
         (overlays.background_tasks > 0).then(|| format!("bg:{}", overlays.background_tasks)),
         overlays.compacting.then(|| "compacting".to_string()),
         session.limited.then(|| "limited".to_string()),
+        (session.queued_prompts() > 0).then(|| format!("q:{}", session.queued_prompts())),
     ]
     .into_iter()
     .flatten()
@@ -224,6 +225,7 @@ pub fn table(headers: &[&str], rows: Vec<Vec<String>>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use beacon_core::prompts::{Prompt, PromptStatus};
     use beacon_core::{PendingDecision, PermissionKind, SessionState, input_preview};
     use serde_json::{Value, json};
 
@@ -387,6 +389,27 @@ ID  PROJECT  TOOL  INPUT  AGE
             render(&snapshot, NOW),
             "No sessions.\n\nNo pending decisions.\n"
         );
+    }
+
+    #[test]
+    fn queued_prompts_show_as_a_flag() {
+        let mut working = session("55555555", SessionState::Working, NOW);
+        let prompt = |id, status| Prompt {
+            id,
+            preview: "go on".to_string(),
+            created_ms: NOW,
+            status,
+            reason: None,
+            text: None,
+        };
+        working.prompts = vec![
+            prompt(1, PromptStatus::Delivered),
+            prompt(2, PromptStatus::Queued),
+            prompt(3, PromptStatus::Queued),
+        ];
+        assert_eq!(flags(&working), "q:2");
+        working.prompts.truncate(1);
+        assert_eq!(flags(&working), "");
     }
 
     #[test]

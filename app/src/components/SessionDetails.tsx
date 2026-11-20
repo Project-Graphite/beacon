@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { getDetail, type Session, type SessionDetail } from '../beacon';
 import { clockTimeWithSeconds, formatTokens } from '../lib/format.ts';
+import type { JumpReport } from '../lib/jump.ts';
 import { Markdown } from './Markdown';
+import { PromptBox } from './PromptBox';
 
 const TIMELINE_LIMIT = 12;
 
-export function SessionDetails({ session, expanded }: { session: Session; expanded: boolean }) {
+interface SessionDetailsProps {
+  session: Session;
+  expanded: boolean;
+  onJumpReport: (report: JumpReport) => void;
+}
+
+export function SessionDetails({ session, expanded, onJumpReport }: SessionDetailsProps) {
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -67,6 +75,7 @@ export function SessionDetails({ session, expanded }: { session: Session; expand
       {usage?.status === 'unrecognized' && (
         <p className="text-micro text-muted">Usage unavailable: transcript format not recognised</p>
       )}
+      <PromptBox session={session} onJumpReport={onJumpReport} />
       {timeline.length > 0 && (
         <section>
           <h3 className="mb-1 text-micro text-faint">Timeline</h3>
