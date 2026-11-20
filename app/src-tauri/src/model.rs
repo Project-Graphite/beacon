@@ -1,6 +1,25 @@
 use beacon_core::{Session, SessionState, Snapshot};
+use std::collections::BTreeSet;
+use std::time::Instant;
 
 pub const MAX_MARKS: usize = 10;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TabTone {
+    NeedsYou,
+    Failed,
+    Finished,
+    Working,
+    #[default]
+    Dormant,
+}
+
+#[derive(Debug, Default)]
+pub struct Unseen {
+    ids: BTreeSet<String>,
+    alerting: BTreeSet<String>,
+    since: Option<(Instant, Instant)>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkKind {
@@ -123,6 +142,66 @@ pub fn tray_state(snapshot: Option<&Snapshot>) -> TrayState {
         TrayState::Working
     } else {
         TrayState::Quiet
+    }
+}
+
+pub fn tab_tone(snapshot: Option<&Snapshot>) -> TabTone {
+    let sessions = snapshot.map_or(&[][..], |snapshot| &snapshot.sessions[..]);
+    let alerting_as = |kinds: &[MarkKind]| {
+        sessions.iter().any(|session| {
+            session.alerting && mark_kind(session.state).is_some_and(|kind| kinds.contains(&kind))
+        })
+    };
+    if alerting_as(&[MarkKind::NeedsInput, MarkKind::Stalled]) {
+        TabTone::NeedsYou
+    } else if alerting_as(&[MarkKind::Error]) {
+        TabTone::Failed
+    } else if alerting_as(&[MarkKind::Done]) {
+        TabTone::Finished
+    } else if sessions
+        .iter()
+        .any(|session| session.state == SessionState::Working)
+    {
+        TabTone::Working
+    } else {
+        TabTone::Dormant
+    }
+}
+
+impl Unseen {
+    pub fn observe(&mut self, snapshot: Option<&Snapshot>, now: Instant) {
+        let alerting: BTreeSet<String> = snapshot.map_or_else(BTreeSet::new, |snapshot| {
+            snapshot
+                .sessions
+                .iter()
+                .filter(|session| session.alerting)
+                .map(|session| session.session_id.clone())
+                .collect()
+        });
+        self.ids.retain(|id| alerting.contains(id));
+        let before = self.ids.len();
+        self.ids
+            .extend(alerting.difference(&self.alerting).cloned());
+        if self.ids.is_empty() {
+            self.since = None;
+        } else if self.ids.len() > before {
+            self.since = Some((
+                self.since
+                    .filter(|_| before > 0)
+                    .map_or(now, |(first, _)| first),
+                now,
+            ));
+        }
+        self.alerting = alerting;
+    }
+
+    pub fn clear(&mut self) {
+        self.ids.clear();
+        self.since = None;
+    }
+
+    pub fn since(&self) -> Option<(Instant, Instant)> {
+        self.since
     }
 }
 
@@ -270,6 +349,109 @@ pub mod tests {
             ]),
             TrayState::Alerting(3)
         );
+    }
+
+    #[test]
+    fn the_tab_tone_prefers_needs_you_then_failed_then_finished_then_working() {
+        let tone = |sessions: Vec<Session>| tab_tone(Some(&snapshot(sessions)));
+        assert_eq!(tab_tone(None), TabTone::Dormant);
+        assert_eq!(
+            tone(vec![session("a", SessionState::Idle)]),
+            TabTone::Dormant
+        );
+        assert_eq!(
+            tone(vec![
+                session("a", SessionState::Idle),
+                session("b", SessionState::Working)
+            ]),
+            TabTone::Working
+        );
+        assert_eq!(
+            tone(vec![
+                session("a", SessionState::Working),
+                snoozed(session("b", SessionState::Error))
+            ]),
+            TabTone::Working
+        );
+        assert_eq!(
+            tone(vec![
+                session("a", SessionState::Working),
+                session("b", SessionState::Done)
+            ]),
+            TabTone::Finished
+        );
+        assert_eq!(
+            tone(vec![
+                session("a", SessionState::Done),
+                session("b", SessionState::Error)
+            ]),
+            TabTone::Failed
+        );
+        assert_eq!(
+            tone(vec![
+                session("a", SessionState::Error),
+                session("b", SessionState::Stalled)
+            ]),
+            TabTone::NeedsYou
+        );
+        assert_eq!(
+            tone(vec![
+                session("a", SessionState::Done),
+                session("b", SessionState::NeedsPlanApproval)
+            ]),
+            TabTone::NeedsYou
+        );
+    }
+
+    #[test]
+    fn unseen_gains_new_alerts_clears_on_open_and_drops_quiet_sessions() {
+        let ids = |unseen: &Unseen| unseen.ids.iter().cloned().collect::<Vec<_>>();
+        let (start, later) = (
+            Instant::now(),
+            Instant::now() + std::time::Duration::from_secs(5),
+        );
+        let mut unseen = Unseen::default();
+        unseen.observe(
+            Some(&snapshot(vec![session("w", SessionState::Working)])),
+            start,
+        );
+        assert!(ids(&unseen).is_empty());
+        assert_eq!(unseen.since(), None);
+        let alerting_a = snapshot(vec![
+            session("a", SessionState::NeedsPermission),
+            session("w", SessionState::Working),
+        ]);
+        unseen.observe(Some(&alerting_a), start);
+        assert_eq!(ids(&unseen), ["a"]);
+        assert_eq!(unseen.since(), Some((start, start)));
+        unseen.clear();
+        assert!(ids(&unseen).is_empty());
+        assert_eq!(unseen.since(), None);
+        unseen.observe(Some(&alerting_a), later);
+        assert!(ids(&unseen).is_empty(), "a stays alerting and was seen");
+        let alerting_both = snapshot(vec![
+            session("a", SessionState::NeedsPermission),
+            session("b", SessionState::Error),
+        ]);
+        unseen.observe(Some(&alerting_both), later);
+        assert_eq!(ids(&unseen), ["b"]);
+        assert_eq!(unseen.since(), Some((later, later)));
+        let latest = later + std::time::Duration::from_secs(5);
+        let alerting_three = snapshot(vec![
+            session("a", SessionState::NeedsPermission),
+            session("b", SessionState::Error),
+            session("c", SessionState::Done),
+        ]);
+        unseen.observe(Some(&alerting_three), latest);
+        assert_eq!(ids(&unseen), ["b", "c"]);
+        assert_eq!(unseen.since(), Some((later, latest)));
+        unseen.observe(Some(&alerting_a), later);
+        assert!(ids(&unseen).is_empty());
+        assert_eq!(unseen.since(), None);
+        unseen.observe(Some(&alerting_both), start);
+        assert_eq!(ids(&unseen), ["b"]);
+        unseen.observe(None, start);
+        assert!(ids(&unseen).is_empty());
     }
 
     #[test]

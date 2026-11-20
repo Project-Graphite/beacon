@@ -1,4 +1,6 @@
-use crate::model::{Mark, MarkKind, PillModel, TrayState};
+use crate::geometry::Edge;
+use crate::model::{Mark, MarkKind, PillModel, TabTone, TrayState};
+use crate::motion::Curve;
 use std::f32::consts::TAU;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +28,21 @@ const WORKING_PERIOD: f32 = 1.2;
 const HALO_PERIOD: f32 = 1.6;
 const SHAPE_BLEED: f32 = 3.0;
 const TRAY_UNITS: f32 = 16.0;
+const MARK_CENTRE: f32 = 5.0;
+const SMALLEST_GROWTH: f32 = 0.01;
+const TAB_RADIUS: f32 = 2.0;
+const TAB_HIT_DEPTH: f32 = 8.0;
+const TAB_HIT_ALPHA: f32 = 1.0 / 255.0;
+const GLOW_REACH: f32 = 18.0;
+const GLOW_TAPER: f32 = 8.0;
+const GLOW_ALPHA: f32 = 0.45;
+const WORKING_TAB_OPACITY: f32 = 0.7;
+const DORMANT_TAB_OPACITY: f32 = 0.6;
+
+pub struct PillMotion<'a> {
+    pub growths: &'a [f32],
+    pub width: Option<usize>,
+}
 
 #[derive(Clone)]
 pub struct TextMask {
@@ -38,6 +55,7 @@ pub trait TextRasterizer {
     fn rasterize(&self, text: &str, pixel_size: f32) -> TextMask;
 }
 
+#[derive(Default)]
 pub struct Canvas {
     pub width: usize,
     pub height: usize,
@@ -46,11 +64,16 @@ pub struct Canvas {
 
 impl Canvas {
     fn new(width: usize, height: usize) -> Canvas {
-        Canvas {
-            width,
-            height,
-            pixels: vec![[0.0; 4]; width * height],
-        }
+        let mut canvas = Canvas::default();
+        canvas.reset(width, height);
+        canvas
+    }
+
+    fn reset(&mut self, width: usize, height: usize) {
+        self.width = width;
+        self.height = height;
+        self.pixels.clear();
+        self.pixels.resize(width * height, [0.0; 4]);
     }
 
     fn blend(&mut self, x: usize, y: usize, colour: Rgb, coverage: f32) {
@@ -127,11 +150,13 @@ impl Canvas {
         }
     }
 
-    pub fn premultiplied_bgra(&self) -> Vec<u8> {
-        self.pixels
-            .iter()
-            .flat_map(|[red, green, blue, alpha]| [*blue, *green, *red, *alpha].map(to_byte))
-            .collect()
+    pub fn write_premultiplied_bgra(&self, bytes: &mut Vec<u8>) {
+        bytes.clear();
+        bytes.extend(
+            self.pixels
+                .iter()
+                .flat_map(|[red, green, blue, alpha]| [*blue, *green, *red, *alpha].map(to_byte)),
+        );
     }
 
     pub fn straight_rgba(&self) -> Vec<u8> {
@@ -271,7 +296,7 @@ fn paint_mark(
         MarkKind::Working => shape(INK, opacity, &|x, y| ring(x, y, CENTRE, 4.0, 1.5)),
         MarkKind::NeedsInput => {
             if animated {
-                let progress = (phase / HALO_PERIOD).fract();
+                let progress = Curve::Settle.at(f64::from((phase / HALO_PERIOD).fract())) as f32;
                 shape(WIP, 1.0 - progress, &|x, y| {
                     ring(x, y, CENTRE, 4.5 + 2.5 * progress, 1.25)
                 });
@@ -309,6 +334,31 @@ pub fn render_pill(
     reduced_motion: bool,
     text: &dyn TextRasterizer,
 ) -> Canvas {
+    let mut canvas = Canvas::default();
+    paint_pill(
+        &mut canvas,
+        model,
+        scale,
+        phase,
+        reduced_motion,
+        text,
+        &PillMotion {
+            growths: &[],
+            width: None,
+        },
+    );
+    canvas
+}
+
+pub fn paint_pill(
+    canvas: &mut Canvas,
+    model: &PillModel,
+    scale: f32,
+    phase: f32,
+    reduced_motion: bool,
+    text: &dyn TextRasterizer,
+    motion: &PillMotion,
+) {
     let font = FONT_SIZE * scale;
     let overflow =
         (model.overflow > 0).then(|| text.rasterize(&format!("+{}", model.overflow), font));
@@ -323,15 +373,17 @@ pub fn render_pill(
     let content_end = count
         .as_ref()
         .map_or(overflow_end, |mask| count_left + mask.width as f32);
-    let mut canvas = Canvas::new(
-        (content_end + PADDING * scale).round() as usize,
+    canvas.reset(
+        motion
+            .width
+            .unwrap_or((content_end + PADDING * scale).round() as usize),
         (BAR_HEIGHT * scale).round() as usize,
     );
     canvas.paint_bar(scale);
     let top = (BAR_HEIGHT - MARK_SIZE) / 2.0 * scale;
     if model.marks.is_empty() {
         paint_shape(
-            &mut canvas,
+            canvas,
             [PADDING * scale, top],
             MARK_SIZE,
             scale,
@@ -341,12 +393,17 @@ pub fn render_pill(
         );
     }
     for (index, mark) in model.marks.iter().enumerate() {
+        let growth = motion.growths.get(index).copied().unwrap_or(1.0);
+        if growth < SMALLEST_GROWTH {
+            continue;
+        }
+        let shrink = MARK_CENTRE * scale * (1.0 - growth);
         let left = (PADDING + index as f32 * (MARK_SIZE + MARK_GAP)) * scale;
         paint_mark(
-            &mut canvas,
+            canvas,
             *mark,
-            [left, top],
-            scale,
+            [left + shrink, top + shrink],
+            scale * growth,
             phase,
             reduced_motion,
         );
@@ -357,7 +414,88 @@ pub fn render_pill(
     if let Some(mask) = &count {
         canvas.paint_mask(mask, count_left, WIP);
     }
-    canvas
+}
+
+pub fn tone_paint(tone: TabTone) -> (Rgb, f32) {
+    match tone {
+        TabTone::NeedsYou => (WIP, 1.0),
+        TabTone::Failed => (DANGER, 1.0),
+        TabTone::Finished => (LIVE, 1.0),
+        TabTone::Working => (INK, WORKING_TAB_OPACITY),
+        TabTone::Dormant => (DORMANT, DORMANT_TAB_OPACITY),
+    }
+}
+
+pub fn mix(
+    (from, from_opacity): (Rgb, f32),
+    (to, to_opacity): (Rgb, f32),
+    amount: f32,
+) -> (Rgb, f32) {
+    let channel =
+        |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * amount).round() as u8;
+    (
+        Rgb(
+            channel(from.0, to.0),
+            channel(from.1, to.1),
+            channel(from.2, to.2),
+        ),
+        from_opacity + (to_opacity - from_opacity) * amount,
+    )
+}
+
+pub fn paint_tab(
+    canvas: &mut Canvas,
+    (width, height): (usize, usize),
+    edge: Edge,
+    (colour, opacity): (Rgb, f32),
+    thickness: f32,
+    glow: f32,
+    scale: f32,
+) {
+    canvas.reset(width, height);
+    let length = match edge {
+        Edge::Left | Edge::Right => height,
+        Edge::Top | Edge::Bottom => width,
+    } as f32;
+    let (thickness, radius) = (thickness * scale, TAB_RADIUS * scale);
+    let (hit_depth, reach, taper) = (
+        TAB_HIT_DEPTH * scale,
+        GLOW_REACH * scale,
+        GLOW_TAPER * scale,
+    );
+    let strip = [
+        length / 2.0,
+        (thickness - radius) / 2.0,
+        length / 2.0,
+        (thickness + radius) / 2.0,
+    ];
+    for y in 0..height {
+        for x in 0..width {
+            let (across, down) = (x as f32 + 0.5, y as f32 + 0.5);
+            let (along, depth) = match edge {
+                Edge::Left => (down, across),
+                Edge::Right => (down, width as f32 - across),
+                Edge::Top => (across, down),
+                Edge::Bottom => (across, height as f32 - down),
+            };
+            if depth < hit_depth {
+                canvas.pixels[y * width + x] = [0.0, 0.0, 0.0, TAB_HIT_ALPHA];
+            }
+            if glow > 0.0 && depth > thickness {
+                let fade = (1.0 - (depth - thickness) / (reach - thickness)).clamp(0.0, 1.0);
+                let ends = (along.min(length - along) / taper).clamp(0.0, 1.0);
+                let coverage = glow * GLOW_ALPHA * fade * fade * ends * opacity;
+                if coverage > 0.0 {
+                    canvas.blend(x, y, colour, coverage);
+                }
+            }
+            let coverage =
+                (0.5 - rounded_box(along, depth, strip, radius)).clamp(0.0, 1.0) * opacity;
+            if coverage > 0.0 {
+                canvas.blend(x, y, colour, coverage);
+            }
+        }
+    }
 }
 
 pub fn render_tray(state: TrayState, size: usize, text: &dyn TextRasterizer) -> Canvas {
@@ -587,6 +725,102 @@ mod tests {
         assert_eq!(canvas.width, 30);
         assert!(close_to(straight(&canvas, 18, 14), DORMANT, 2));
         assert!(close_to(straight(&canvas, 15, 14), SURFACE, 1));
+    }
+
+    #[test]
+    fn the_tab_paints_its_strip_a_faint_hit_band_and_nothing_beyond() {
+        for scale in SCALES {
+            let lp = |value: f32| (value * scale) as usize;
+            let mut canvas = Canvas::default();
+            paint_tab(
+                &mut canvas,
+                (lp(18.0), lp(72.0)),
+                Edge::Left,
+                (WIP, 1.0),
+                4.0,
+                0.0,
+                scale,
+            );
+            let middle = lp(36.0);
+            assert!(
+                close_to(straight(&canvas, lp(2.0), middle), WIP, 1),
+                "scale {scale}"
+            );
+            assert_eq!(straight(&canvas, lp(2.0), middle)[3], 255);
+            assert_eq!(straight(&canvas, lp(6.0), middle)[3], 1);
+            assert_eq!(straight(&canvas, lp(12.0), middle)[3], 0);
+            assert!(
+                straight(&canvas, lp(3.0), 0)[3] < 200,
+                "rounded inner corner"
+            );
+            paint_tab(
+                &mut canvas,
+                (lp(72.0), lp(8.0)),
+                Edge::Bottom,
+                (DORMANT, 0.6),
+                4.0,
+                0.0,
+                scale,
+            );
+            let bottom = straight(&canvas, middle, lp(8.0) - 1);
+            assert!(close_to(bottom, DORMANT, 1) && bottom[3] == to_byte(0.6));
+            assert_eq!(straight(&canvas, middle, 0)[3], 1);
+            paint_tab(
+                &mut canvas,
+                (lp(18.0), lp(72.0)),
+                Edge::Right,
+                (LIVE, 1.0),
+                6.0,
+                1.0,
+                scale,
+            );
+            assert!(close_to(straight(&canvas, lp(18.0) - 1, middle), LIVE, 1));
+            assert!(straight(&canvas, lp(8.0), middle)[3] > 1);
+            assert_eq!(straight(&canvas, 0, middle)[3], 0);
+        }
+    }
+
+    #[test]
+    fn tones_follow_the_palette_and_mix_smoothly() {
+        assert_eq!(tone_paint(TabTone::NeedsYou), (WIP, 1.0));
+        assert_eq!(tone_paint(TabTone::Working), (INK, 0.7));
+        assert_eq!(tone_paint(TabTone::Dormant), (DORMANT, 0.6));
+        assert_eq!(mix((WIP, 1.0), (LIVE, 0.5), 0.0), (WIP, 1.0));
+        assert_eq!(mix((WIP, 1.0), (LIVE, 0.5), 1.0), (LIVE, 0.5));
+        assert_eq!(
+            mix((Rgb(0, 0, 0), 0.0), (Rgb(200, 100, 50), 1.0), 0.5),
+            (Rgb(100, 50, 25), 0.5)
+        );
+    }
+
+    #[test]
+    fn a_growing_mark_starts_small_and_an_animated_width_overrides_the_layout() {
+        let model = model(&[MarkKind::NeedsInput], 0);
+        let mut canvas = Canvas::default();
+        let motion = |growths, width| PillMotion { growths, width };
+        paint_pill(
+            &mut canvas,
+            &model,
+            1.0,
+            0.0,
+            true,
+            &BlockText,
+            &motion(&[0.5], Some(40)),
+        );
+        assert_eq!(canvas.width, 40);
+        assert!(close_to(straight(&canvas, 14, 13), WIP, 2));
+        assert!(close_to(straight(&canvas, 11, 14), SURFACE, 1));
+        paint_pill(
+            &mut canvas,
+            &model,
+            1.0,
+            0.0,
+            true,
+            &BlockText,
+            &motion(&[1.0], None),
+        );
+        assert_eq!(canvas.width, 30);
+        assert!(close_to(straight(&canvas, 11, 14), WIP, 2));
     }
 
     #[test]

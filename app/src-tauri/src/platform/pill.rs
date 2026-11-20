@@ -1,12 +1,16 @@
-use super::{GdiText, bitmap, cursor_position, monitor_info, monitors, reduced_motion};
-use crate::displays::{landing, target};
-use crate::geometry::{
-    Corner, Monitor, Rect, corner_rect, layout_signature, monitor_for, resize_anchored,
-    restored_pill_rect, snap,
+use super::frames::{self, WM_FRAME};
+use super::{
+    GdiText, bitmap, cursor_position, monitor_info, monitors, reduced_motion, refresh_rate,
 };
-use crate::model::PillModel;
-use crate::positions;
-use crate::raster::render_pill;
+use crate::displays::{dock, landing, target};
+use crate::geometry::{
+    Corner, Edge, Monitor, Rect, TabPlacement, corner_rect, default_placement, layout_signature,
+    monitor_for, pill_edge, resize_anchored, restored_pill_rect, slide, snap, tab_rect,
+};
+use crate::model::{PillModel, TabTone};
+use crate::motion::{Attention, Curve, Strip, Tween, next_burst, unseen_moving, unseen_strip};
+use crate::positions::{self, Style};
+use crate::raster::{Canvas, PillMotion, Rgb, mix, paint_pill, paint_tab, render_pill, tone_paint};
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::io;
@@ -17,8 +21,8 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use std::time::Instant;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-    MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTONULL, MonitorFromWindow, ReleaseDC, SelectObject,
+    AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION, CreateCompatibleDC, DeleteObject, HBITMAP, HDC,
+    MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTONULL, MonitorFromWindow, SelectObject,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
@@ -27,24 +31,37 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, SetCapture, TME_HOVER, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, EVENT_SYSTEM_FOREGROUND, GetClassNameW, GetForegroundWindow,
-    GetWindowRect, IDC_ARROW, IsZoomed, KillTimer, LoadCursorW, MA_NOACTIVATE, PostMessageW,
-    RegisterClassExW, SPI_SETWORKAREA, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE,
-    SWP_NOZORDER, SetTimer, SetWindowPos, ShowWindow, ULW_ALPHA, UpdateLayeredWindow,
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_CAPTURECHANGED, WM_DISPLAYCHANGE,
-    WM_DPICHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_SETTINGCHANGE,
-    WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-    WS_POPUP,
+    CallNextHookEx, CreateWindowExW, DefWindowProcW, EVENT_SYSTEM_FOREGROUND, GetClassNameW,
+    GetForegroundWindow, GetWindowRect, HC_ACTION, HHOOK, IDC_ARROW, IsZoomed, KillTimer,
+    LoadCursorW, MA_NOACTIVATE, MSLLHOOKSTRUCT, PostMessageW, RegisterClassExW, SPI_SETWORKAREA,
+    SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetTimer, SetWindowPos,
+    SetWindowsHookExW, ShowWindow, ULW_ALPHA, UnhookWindowsHookEx, UpdateLayeredWindow,
+    WH_MOUSE_LL, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_CAPTURECHANGED,
+    WM_DISPLAYCHANGE, WM_DPICHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_SETTINGCHANGE, WM_TIMER, WM_XBUTTONDOWN,
+    WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 const CLASS: &str = "BeaconPill";
-const ANIMATION_TIMER: usize = 1;
 const HOVER_TIMER: usize = 2;
+const BURST_TIMER: usize = 3;
 const TICK_MS: u32 = 100;
 const HOVER_MS: u32 = 150;
-const CLICK_SLOP: f32 = 4.0;
+const CLICK_SLOP: f64 = 4.0;
 const WM_FOREGROUND_CHANGED: u32 = WM_APP + 1;
+const WM_POINTER_PRESSED: u32 = WM_APP + 2;
 const DESKTOP_CLASSES: [&str; 2] = ["Progman", "WorkerW"];
+const FADE: f64 = 0.16;
+const TONE_FADE: f64 = 0.2;
+const HOVER_GROW: f64 = 0.12;
+const GLIDE: f64 = 0.18;
+const MARK_POP: f64 = 0.18;
+const WIDTH_GLIDE: f64 = 0.18;
+const PHASE_WRAP: f64 = 4.8;
+const RESTING_STRIP: f64 = 4.0;
+const HOVERED_STRIP: f64 = 6.0;
+const STILL_DEPTH: f64 = 8.0;
+const PULSING_DEPTH: f64 = 18.0;
 
 static WINDOW: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 
@@ -55,26 +72,53 @@ pub enum PillEvent {
     Moved,
     HoverTick,
     ForegroundChanged,
+    Pressed((i32, i32)),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TabModel {
+    pub tone: TabTone,
+    pub unseen_since: Option<(Instant, Instant)>,
 }
 
 struct Press {
     cursor: (i32, i32),
     origin: Rect,
+    placement: TabPlacement,
     dragging: bool,
+}
+
+struct Glide {
+    from: (i32, i32),
+    progress: Tween,
+}
+
+struct Surface {
+    dc: HDC,
+    bitmap: HBITMAP,
+    bits: *mut u8,
+    width: i32,
+    height: i32,
 }
 
 struct Pill {
     hwnd: HWND,
     home: PathBuf,
+    style: Style,
     model: PillModel,
-    scale: f32,
+    tab: TabModel,
+    scale: f64,
     rect: Rect,
+    work: Rect,
+    bounds: Rect,
+    display: String,
+    placement: TabPlacement,
     user_visible: bool,
     targeted: bool,
     fullscreen: bool,
     shown: bool,
     reduced_motion: bool,
-    animating: bool,
+    hovering: bool,
     hover_polling: bool,
     tracking: bool,
     pressed_since_entry: bool,
@@ -82,6 +126,21 @@ struct Pill {
     started: Instant,
     text: GdiText,
     on_event: Rc<dyn Fn(PillEvent)>,
+    refresh_rate: u32,
+    framing: bool,
+    fade: Tween,
+    paint_from: (Rgb, f32),
+    tone_fade: Tween,
+    strip: Tween,
+    glide: Option<Glide>,
+    mark_pops: Vec<f64>,
+    growths: Vec<f32>,
+    width: Tween,
+    canvas: Canvas,
+    frame: Vec<u8>,
+    surface: Surface,
+    alpha: u8,
+    press_hook: HHOOK,
 }
 
 thread_local! {
@@ -147,16 +206,25 @@ pub fn create(
     };
     let mut pill = Pill {
         hwnd,
+        style: positions::style(&home),
         home,
         model: PillModel::default(),
+        tab: TabModel::default(),
         scale: 1.0,
         rect: Rect::default(),
+        work: Rect::default(),
+        bounds: Rect::default(),
+        display: String::new(),
+        placement: TabPlacement {
+            edge: Edge::Right,
+            offset: 0.5,
+        },
         user_visible: visible,
         targeted: false,
         fullscreen: false,
         shown: false,
         reduced_motion: reduced_motion(),
-        animating: false,
+        hovering: false,
         hover_polling: false,
         tracking: false,
         pressed_since_entry: false,
@@ -164,6 +232,27 @@ pub fn create(
         started: Instant::now(),
         text: GdiText::default(),
         on_event: Rc::new(on_event),
+        refresh_rate: 0,
+        framing: false,
+        fade: Tween::rest(0.0),
+        paint_from: tone_paint(TabTone::default()),
+        tone_fade: Tween::rest(1.0),
+        strip: Tween::rest(RESTING_STRIP),
+        glide: None,
+        mark_pops: Vec::new(),
+        growths: Vec::new(),
+        width: Tween::rest(0.0),
+        canvas: Canvas::default(),
+        frame: Vec::new(),
+        surface: Surface {
+            dc: unsafe { CreateCompatibleDC(null_mut()) },
+            bitmap: null_mut(),
+            bits: null_mut(),
+            width: 0,
+            height: 0,
+        },
+        alpha: 0,
+        press_hook: null_mut(),
     };
     pill.relocate();
     pill.fullscreen = foreground_is_fullscreen(hwnd);
@@ -175,10 +264,54 @@ pub fn create(
 pub fn show_model(model: PillModel) {
     with_pill(|pill| {
         if pill.model != model {
+            let start = pill.animation_start();
+            pill.mark_pops = model
+                .marks
+                .iter()
+                .enumerate()
+                .map(|(index, mark)| match pill.model.marks.get(index) {
+                    Some(previous) if previous.kind == mark.kind => pill
+                        .mark_pops
+                        .get(index)
+                        .copied()
+                        .unwrap_or(f64::NEG_INFINITY),
+                    _ => start,
+                })
+                .collect();
             pill.model = model;
+            let now = pill.now();
+            let width = f64::from(pill.natural_size().width());
+            let duration = pill.duration(WIDTH_GLIDE);
+            pill.width.head_to(width, now, duration, Curve::Settle);
             pill.present();
-            pill.sync();
+            pill.schedule();
         }
+    });
+}
+
+pub fn show_tab(tab: TabModel) {
+    with_pill(|pill| {
+        if pill.tab == tab {
+            return;
+        }
+        let now = pill.now();
+        if tab.tone != pill.tab.tone {
+            pill.paint_from = pill.tone_paint(now);
+            pill.tone_fade = Tween::between(0.0, 1.0, now, pill.duration(TONE_FADE), Curve::Settle);
+        }
+        if let (Some(attention), None) = (pill.attention(now), tab.unseen_since) {
+            let from = unseen_strip(attention, pill.reduced_motion).thickness;
+            pill.strip = Tween::between(
+                from,
+                pill.resting_strip(),
+                now,
+                pill.duration(HOVER_GROW),
+                Curve::Settle,
+            );
+        }
+        pill.tab = tab;
+        pill.present();
+        pill.schedule();
     });
 }
 
@@ -193,15 +326,15 @@ pub fn user_visible() -> bool {
     with_pill(|pill| pill.user_visible).unwrap_or(false)
 }
 
-pub fn targeted() -> bool {
-    with_pill(|pill| pill.targeted).unwrap_or(false)
+pub fn set_style(style: Style) {
+    with_pill(|pill| {
+        pill.style = style;
+        pill.reappear();
+    });
 }
 
 pub fn retarget() {
-    with_pill(|pill| {
-        pill.relocate();
-        pill.sync();
-    });
+    with_pill(Pill::reappear);
 }
 
 pub fn move_to_corner(corner: Corner) {
@@ -215,8 +348,39 @@ pub fn move_to_corner(corner: Corner) {
     });
 }
 
+pub fn move_to_edge(edge: Edge) {
+    with_pill(|pill| {
+        if !pill.targeted {
+            return;
+        }
+        let from = pill.rect;
+        pill.placement = TabPlacement { edge, offset: 0.5 };
+        if let Err(error) = positions::save_tab(&pill.home, &pill.display, pill.placement) {
+            eprintln!("cannot save the tab position: {error}");
+        }
+        pill.glide_from(from);
+    });
+}
+
 pub fn shown_rect() -> Option<Rect> {
     with_pill(|pill| pill.shown.then_some(pill.rect)).flatten()
+}
+
+pub fn shown_tab() -> Option<(Rect, Edge)> {
+    with_pill(|pill| {
+        (pill.shown && pill.style == Style::Tab).then_some((pill.rect, pill.placement.edge))
+    })
+    .flatten()
+}
+
+pub fn anchor_edge() -> Option<Edge> {
+    with_pill(|pill| {
+        pill.shown.then(|| match pill.style {
+            Style::Tab => pill.placement.edge,
+            Style::Pill => pill_edge(pill.rect, &pill.work),
+        })
+    })
+    .flatten()
 }
 
 pub fn set_hover_polling(polling: bool) {
@@ -234,91 +398,360 @@ pub fn set_hover_polling(polling: bool) {
     });
 }
 
+pub fn watch_presses(watching: bool) {
+    with_pill(|pill| {
+        if watching == !pill.press_hook.is_null() {
+            return;
+        }
+        if watching {
+            pill.press_hook = unsafe {
+                SetWindowsHookExW(
+                    WH_MOUSE_LL,
+                    Some(pointer_pressed),
+                    GetModuleHandleW(null()),
+                    0,
+                )
+            };
+            if pill.press_hook.is_null() {
+                eprintln!(
+                    "cannot watch for presses outside the panel: {}",
+                    io::Error::last_os_error()
+                );
+            }
+        } else {
+            unsafe { UnhookWindowsHookEx(pill.press_hook) };
+            pill.press_hook = null_mut();
+        }
+    });
+}
+
+impl Surface {
+    fn resize(&mut self, width: i32, height: i32) -> bool {
+        let (created, bits) = bitmap(self.dc, width, height);
+        if created.is_null() || bits.is_null() {
+            eprintln!(
+                "cannot create the pill bitmap: {}",
+                io::Error::last_os_error()
+            );
+            return false;
+        }
+        unsafe {
+            SelectObject(self.dc, created);
+            if !self.bitmap.is_null() {
+                DeleteObject(self.bitmap);
+            }
+        }
+        (self.bitmap, self.bits, self.width, self.height) = (created, bits, width, height);
+        true
+    }
+
+    fn pixels(&mut self) -> &mut [u8] {
+        if self.bits.is_null() {
+            return &mut [];
+        }
+        unsafe {
+            std::slice::from_raw_parts_mut(self.bits, (self.width * self.height * 4) as usize)
+        }
+    }
+}
+
 impl Pill {
+    fn now(&self) -> f64 {
+        self.started.elapsed().as_secs_f64()
+    }
+
+    fn at(&self, instant: Instant) -> f64 {
+        instant
+            .saturating_duration_since(self.started)
+            .as_secs_f64()
+    }
+
+    fn duration(&self, seconds: f64) -> f64 {
+        if self.reduced_motion { 0.0 } else { seconds }
+    }
+
+    fn animation_start(&self) -> f64 {
+        if self.reduced_motion {
+            f64::NEG_INFINITY
+        } else {
+            self.now()
+        }
+    }
+
+    fn resting_strip(&self) -> f64 {
+        if self.hovering {
+            HOVERED_STRIP
+        } else {
+            RESTING_STRIP
+        }
+    }
+
+    fn tone_paint(&self, now: f64) -> (Rgb, f32) {
+        mix(
+            self.paint_from,
+            tone_paint(self.tab.tone),
+            self.tone_fade.value(now) as f32,
+        )
+    }
+
+    fn attention(&self, now: f64) -> Option<Attention> {
+        self.tab.unseen_since.map(|(first, newest)| Attention {
+            since_first: now - self.at(first),
+            since_newest: now - self.at(newest),
+        })
+    }
+
+    fn natural_size(&self) -> Rect {
+        let canvas = render_pill(&self.model, self.scale as f32, 0.0, true, &self.text);
+        Rect::sized(0, 0, canvas.width as i32, canvas.height as i32)
+    }
+
+    fn adopt(&mut self, monitor: &Monitor) {
+        self.scale = monitor.scale;
+        self.work = monitor.work;
+        self.bounds = monitor.bounds;
+        self.display = monitor.id.clone();
+    }
+
     fn relocate(&mut self) {
         let monitors = monitors();
         let target = target(&monitors, &positions::display_choice(&self.home));
         self.targeted = target.is_some();
         if let Some(target) = target {
-            let canvas = render_pill(&self.model, target.scale as f32, 0.0, true, &self.text);
+            self.adopt(target);
+            self.placement = positions::load_tab(&self.home, &target.id)
+                .unwrap_or_else(|| default_placement(target, &monitors));
             let saved = [
                 positions::load_for_display(&self.home, &target.id),
                 positions::load(&self.home, &layout_signature(&monitors)),
             ];
-            let size = Rect::sized(0, 0, canvas.width as i32, canvas.height as i32);
+            let size = self.natural_size();
             self.rect = restored_pill_rect(saved, size, target, &monitors);
-            self.scale = target.scale as f32;
+            self.width = Tween::rest(f64::from(size.width()));
         }
+        self.glide = None;
         self.present();
+        self.refresh_rate = refresh_rate(self.hwnd);
+    }
+
+    fn reappear(&mut self) {
+        self.fade = Tween::rest(0.0);
+        self.relocate();
+        self.sync();
+    }
+
+    fn paint_pill(&mut self, now: f64) -> Rect {
+        self.growths.clear();
+        self.growths.extend(
+            self.mark_pops
+                .iter()
+                .map(|start| Curve::Pop.at((now - start) / MARK_POP) as f32),
+        );
+        paint_pill(
+            &mut self.canvas,
+            &self.model,
+            self.scale as f32,
+            (now % PHASE_WRAP) as f32,
+            self.reduced_motion,
+            &self.text,
+            &PillMotion {
+                growths: &self.growths,
+                width: Some(self.width.value(now).round() as usize),
+            },
+        );
+        resize_anchored(
+            self.rect,
+            self.canvas.width as i32,
+            self.canvas.height as i32,
+            &self.work,
+        )
+    }
+
+    fn paint_tab(&mut self, now: f64) -> Rect {
+        let attention = self.attention(now);
+        let strip = match attention {
+            Some(attention) => unseen_strip(attention, self.reduced_motion),
+            None => Strip {
+                thickness: self.strip.value(now),
+                glow: 0.0,
+            },
+        };
+        let depth = if attention.is_some() && !self.reduced_motion {
+            PULSING_DEPTH
+        } else {
+            STILL_DEPTH
+        };
+        let docked = tab_rect(&self.bounds, self.placement, depth, self.scale);
+        let rect = match &self.glide {
+            Some(glide) => {
+                let progress = glide.progress.value(now);
+                let between = |from: i32, to: i32| {
+                    (f64::from(from) + f64::from(to - from) * progress).round() as i32
+                };
+                Rect::sized(
+                    between(glide.from.0, docked.left),
+                    between(glide.from.1, docked.top),
+                    docked.width(),
+                    docked.height(),
+                )
+            }
+            None => docked,
+        };
+        let paint = self.tone_paint(now);
+        paint_tab(
+            &mut self.canvas,
+            (rect.width() as usize, rect.height() as usize),
+            self.placement.edge,
+            paint,
+            strip.thickness as f32,
+            strip.glow as f32,
+            self.scale as f32,
+        );
+        rect
     }
 
     fn present(&mut self) {
-        let canvas = render_pill(
-            &self.model,
-            self.scale,
-            self.started.elapsed().as_secs_f32(),
-            self.reduced_motion,
-            &self.text,
-        );
-        let (width, height) = (canvas.width as i32, canvas.height as i32);
-        if (width, height) != (self.rect.width(), self.rect.height()) {
-            let monitors = monitors();
-            let work = monitor_for(&self.rect, &monitors).map_or(self.rect, |monitor| monitor.work);
-            self.rect = resize_anchored(self.rect, width, height, &work);
+        let now = self.now();
+        let rect = match self.style {
+            Style::Pill => self.paint_pill(now),
+            Style::Tab => self.paint_tab(now),
+        };
+        self.canvas.write_premultiplied_bgra(&mut self.frame);
+        let alpha = (self.fade.value(now).clamp(0.0, 1.0) * 255.0).round() as u8;
+        let resized = (rect.width(), rect.height()) != (self.surface.width, self.surface.height);
+        if !resized
+            && rect == self.rect
+            && alpha == self.alpha
+            && *self.surface.pixels() == self.frame[..]
+        {
+            return;
         }
-        let pixels = canvas.premultiplied_bgra();
+        if resized && !self.surface.resize(rect.width(), rect.height()) {
+            return;
+        }
+        self.surface.pixels().copy_from_slice(&self.frame);
         unsafe {
-            let screen = GetDC(null_mut());
-            let memory = CreateCompatibleDC(screen);
-            let (bitmap, bits) = bitmap(memory, width, height);
-            std::ptr::copy_nonoverlapping(pixels.as_ptr(), bits, pixels.len());
-            let previous = SelectObject(memory, bitmap);
             UpdateLayeredWindow(
                 self.hwnd,
-                screen,
+                null_mut(),
                 &POINT {
-                    x: self.rect.left,
-                    y: self.rect.top,
+                    x: rect.left,
+                    y: rect.top,
                 },
                 &SIZE {
-                    cx: width,
-                    cy: height,
+                    cx: rect.width(),
+                    cy: rect.height(),
                 },
-                memory,
+                self.surface.dc,
                 &POINT { x: 0, y: 0 },
                 0,
                 &BLENDFUNCTION {
                     BlendOp: AC_SRC_OVER as u8,
                     BlendFlags: 0,
-                    SourceConstantAlpha: 255,
+                    SourceConstantAlpha: alpha,
                     AlphaFormat: AC_SRC_ALPHA as u8,
                 },
                 ULW_ALPHA,
             );
-            SelectObject(memory, previous);
-            DeleteObject(bitmap);
-            DeleteDC(memory);
-            ReleaseDC(null_mut(), screen);
+        }
+        self.rect = rect;
+        self.alpha = alpha;
+    }
+
+    fn moving(&self, now: f64) -> bool {
+        match self.style {
+            Style::Pill => {
+                self.model.animates(self.reduced_motion)
+                    || self.width.moving(now)
+                    || self.mark_pops.iter().any(|start| now - start < MARK_POP)
+            }
+            Style::Tab => {
+                self.tone_fade.moving(now)
+                    || self.strip.moving(now)
+                    || self.glide.is_some()
+                    || (!self.reduced_motion && self.attention(now).is_some_and(unseen_moving))
+            }
+        }
+    }
+
+    fn schedule(&mut self) {
+        let now = self.now();
+        if self
+            .glide
+            .as_ref()
+            .is_some_and(|glide| !glide.progress.moving(now))
+        {
+            self.glide = None;
+            self.refresh_rate = refresh_rate(self.hwnd);
+        }
+        let fading_out = self.fade.target() == 0.0;
+        if self.shown && fading_out && !self.fade.moving(now) {
+            self.shown = false;
+            unsafe { ShowWindow(self.hwnd, SW_HIDE) };
+        }
+        let framing = self.shown && (self.fade.moving(now) || (!fading_out && self.moving(now)));
+        if framing != self.framing {
+            self.framing = framing;
+            if framing {
+                frames::run(self.hwnd, self.refresh_rate);
+            } else {
+                frames::stop();
+            }
+        }
+        let burst_in = self
+            .attention(now)
+            .filter(|_| self.shown && !framing && !self.reduced_motion && self.style == Style::Tab)
+            .map(|attention| next_burst(attention.since_newest) - attention.since_newest);
+        unsafe {
+            if let Some(wait) = burst_in {
+                SetTimer(
+                    self.hwnd,
+                    BURST_TIMER,
+                    (wait * 1000.0).ceil().max(1.0) as u32,
+                    None,
+                );
+            } else {
+                KillTimer(self.hwnd, BURST_TIMER);
+            }
         }
     }
 
     fn sync(&mut self) {
+        let now = self.now();
         let visible = self.user_visible && self.targeted && !self.fullscreen;
-        if visible != self.shown {
-            self.shown = visible;
-            unsafe { ShowWindow(self.hwnd, if visible { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
+        let duration = self.duration(FADE);
+        self.fade.head_to(
+            if visible { 1.0 } else { 0.0 },
+            now,
+            duration,
+            Curve::Settle,
+        );
+        self.present();
+        if visible && !self.shown {
+            self.shown = true;
+            unsafe { ShowWindow(self.hwnd, SW_SHOWNOACTIVATE) };
         }
-        let animate = visible && self.model.animates(self.reduced_motion);
-        if animate != self.animating {
-            self.animating = animate;
-            unsafe {
-                if animate {
-                    SetTimer(self.hwnd, ANIMATION_TIMER, TICK_MS, None);
-                } else {
-                    KillTimer(self.hwnd, ANIMATION_TIMER);
-                }
-            }
+        self.schedule();
+    }
+
+    fn hover(&mut self, hovering: bool) {
+        if self.hovering != hovering {
+            self.hovering = hovering;
+            let (now, duration) = (self.now(), self.duration(HOVER_GROW));
+            let resting = self.resting_strip();
+            self.strip.head_to(resting, now, duration, Curve::Settle);
+            self.present();
+            self.schedule();
         }
+    }
+
+    fn glide_from(&mut self, from: Rect) {
+        self.glide = (!self.reduced_motion).then(|| Glide {
+            from: (from.left, from.top),
+            progress: Tween::between(0.0, 1.0, self.now(), GLIDE, Curve::Pop),
+        });
+        self.present();
+        self.schedule();
     }
 
     fn move_to(&mut self, left: i32, top: i32) {
@@ -335,11 +768,15 @@ impl Pill {
             )
         };
         let monitors = monitors();
-        let scale =
-            monitor_for(&self.rect, &monitors).map_or(self.scale, |monitor| monitor.scale as f32);
-        if scale != self.scale {
-            self.scale = scale;
-            self.present();
+        if let Some(monitor) = monitor_for(&self.rect, &monitors) {
+            let rescaled = monitor.scale != self.scale;
+            self.work = monitor.work;
+            self.scale = monitor.scale;
+            if rescaled {
+                self.width = Tween::rest(f64::from(self.natural_size().width()));
+                self.present();
+                self.refresh_rate = refresh_rate(self.hwnd);
+            }
         }
     }
 
@@ -354,10 +791,41 @@ impl Pill {
         };
         let snapped = snap(self.rect, &monitor.work, monitor.scale);
         self.move_to(snapped.left, snapped.top);
+        self.adopt(monitor);
         if let Err(error) = positions::choose_display(&self.home, &monitor.id) {
             eprintln!("cannot save the chosen display: {error}");
         }
         self.save(&monitors, &monitor.id);
+    }
+
+    fn finish_tab_drag(&mut self, origin: TabPlacement) {
+        let monitors = monitors();
+        let from = self.rect;
+        let docked = monitors
+            .iter()
+            .find(|monitor| monitor.id == self.display)
+            .and_then(|current| {
+                dock(
+                    cursor_position(),
+                    current,
+                    self.placement.edge,
+                    &monitors,
+                    &positions::display_choice(&self.home),
+                )
+            });
+        match docked {
+            Some((monitor, placement)) => {
+                self.adopt(monitor);
+                self.placement = placement;
+                let saved = positions::save_tab(&self.home, &monitor.id, placement)
+                    .and_then(|()| positions::choose_display(&self.home, &monitor.id));
+                if let Err(error) = saved {
+                    eprintln!("cannot save the tab position: {error}");
+                }
+            }
+            None => self.placement = origin,
+        }
+        self.glide_from(from);
     }
 
     fn save(&self, monitors: &[Monitor], display: &str) {
@@ -368,7 +836,26 @@ impl Pill {
         }
     }
 
-    fn handle(&mut self, message: u32, wparam: WPARAM) -> Option<Option<PillEvent>> {
+    fn drag(&mut self, press_cursor: (i32, i32), origin: Rect) {
+        let (x, y) = cursor_position();
+        match self.style {
+            Style::Pill => self.move_to(
+                origin.left + x - press_cursor.0,
+                origin.top + y - press_cursor.1,
+            ),
+            Style::Tab => {
+                self.placement = slide(&self.bounds, self.placement.edge, (x, y));
+                self.present();
+            }
+        }
+    }
+
+    fn handle(
+        &mut self,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> Option<Option<PillEvent>> {
         match message {
             WM_MOUSEMOVE => {
                 if !self.tracking {
@@ -380,17 +867,16 @@ impl Pill {
                     };
                     self.tracking = unsafe { TrackMouseEvent(&mut tracking) } != 0;
                 }
+                self.hover(true);
                 let slop = (CLICK_SLOP * self.scale) as i32;
-                let target = self.press.as_mut().and_then(|press| {
+                let dragged = self.press.as_mut().and_then(|press| {
                     let (x, y) = cursor_position();
                     let (dx, dy) = (x - press.cursor.0, y - press.cursor.1);
                     press.dragging |= dx.abs() > slop || dy.abs() > slop;
-                    press
-                        .dragging
-                        .then_some((press.origin.left + dx, press.origin.top + dy))
+                    press.dragging.then_some((press.cursor, press.origin))
                 });
-                if let Some((left, top)) = target {
-                    self.move_to(left, top);
+                if let Some((cursor, origin)) = dragged {
+                    self.drag(cursor, origin);
                 }
                 Some(None)
             }
@@ -400,6 +886,9 @@ impl Pill {
             WM_MOUSELEAVE => {
                 self.tracking = false;
                 self.pressed_since_entry = false;
+                if self.press.is_none() {
+                    self.hover(false);
+                }
                 Some(None)
             }
             WM_LBUTTONDOWN => {
@@ -408,6 +897,7 @@ impl Pill {
                 self.press = Some(Press {
                     cursor: cursor_position(),
                     origin: self.rect,
+                    placement: self.placement,
                     dragging: false,
                 });
                 Some(None)
@@ -420,26 +910,42 @@ impl Pill {
                 }
                 Some(match press {
                     Some(press) if press.dragging => {
-                        self.finish_drag(press.origin);
+                        self.hover(false);
+                        match self.style {
+                            Style::Pill => self.finish_drag(press.origin),
+                            Style::Tab => self.finish_tab_drag(press.placement),
+                        }
                         Some(PillEvent::Moved)
                     }
                     Some(_) if message == WM_LBUTTONUP => Some(PillEvent::Clicked),
                     _ => None,
                 })
             }
-            WM_TIMER if wparam == ANIMATION_TIMER => {
-                self.present();
+            WM_FRAME => {
+                frames::received();
+                if self.framing {
+                    self.present();
+                    self.schedule();
+                }
+                Some(None)
+            }
+            WM_TIMER if wparam == BURST_TIMER => {
+                unsafe { KillTimer(self.hwnd, BURST_TIMER) };
+                self.schedule();
                 Some(None)
             }
             WM_TIMER if wparam == HOVER_TIMER => Some(Some(PillEvent::HoverTick)),
+            WM_POINTER_PRESSED => Some(Some(PillEvent::Pressed((
+                wparam as isize as i32,
+                lparam as i32,
+            )))),
             WM_DPICHANGED => {
-                self.scale = (wparam & 0xffff) as f32 / 96.0;
+                self.scale = f64::from((wparam & 0xffff) as u16) / 96.0;
                 self.present();
                 Some(Some(PillEvent::Moved))
             }
             WM_DISPLAYCHANGE => {
-                self.relocate();
-                self.sync();
+                self.reappear();
                 Some(Some(PillEvent::Moved))
             }
             WM_SETTINGCHANGE => {
@@ -472,7 +978,7 @@ unsafe extern "system" fn window_proc(
         return MA_NOACTIVATE as LRESULT;
     }
     let handled = with_pill(|pill| {
-        pill.handle(message, wparam)
+        pill.handle(message, wparam, lparam)
             .map(|event| (event, pill.on_event.clone()))
     })
     .flatten();
@@ -485,6 +991,26 @@ unsafe extern "system" fn window_proc(
         }
         None => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
     }
+}
+
+unsafe extern "system" fn pointer_pressed(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32
+        && matches!(
+            wparam as u32,
+            WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN
+        )
+    {
+        let point = unsafe { (*(lparam as *const MSLLHOOKSTRUCT)).pt };
+        unsafe {
+            PostMessageW(
+                WINDOW.load(Ordering::Relaxed),
+                WM_POINTER_PRESSED,
+                point.x as isize as WPARAM,
+                point.y as LPARAM,
+            )
+        };
+    }
+    unsafe { CallNextHookEx(null_mut(), code, wparam, lparam) }
 }
 
 unsafe extern "system" fn foreground_changed(

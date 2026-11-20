@@ -1,8 +1,11 @@
-use crate::displays::{self, AVOID, CORNER, DisplayMenu, MenuEntry, SHOW_ON, corner};
+use crate::displays::{
+    self, AVOID, CORNER, DisplayMenu, EDGE, MenuEntry, SHOW_ON, STYLE, corner, edge, style,
+};
 use crate::feed;
+use crate::geometry::Rect;
 use crate::model::{TrayState, tooltip, tray_state};
 use crate::platform::{self, GdiText, tray_icon_size};
-use crate::positions;
+use crate::positions::{self, Style};
 use crate::raster::render_tray;
 use crate::shell::{self, Action};
 use beacon_core::{Request, Snapshot};
@@ -21,8 +24,13 @@ pub struct Tray {
     text: GdiText,
 }
 
-fn pill_label(shown: bool) -> &'static str {
-    if shown { "Hide pill" } else { "Show pill" }
+fn pill_label(shown: bool, style: Style) -> &'static str {
+    match (shown, style) {
+        (true, Style::Tab) => "Hide edge tab",
+        (false, Style::Tab) => "Show edge tab",
+        (true, Style::Pill) => "Hide pill",
+        (false, Style::Pill) => "Show pill",
+    }
 }
 
 fn image(state: TrayState, text: &GdiText) -> Image<'static> {
@@ -35,7 +43,11 @@ fn image(state: TrayState, text: &GdiText) -> Image<'static> {
 }
 
 fn display_menu(home: &Path) -> DisplayMenu {
-    displays::menu(&platform::monitors(), &positions::display_choice(home))
+    displays::menu(
+        &platform::monitors(),
+        &positions::display_choice(home),
+        positions::style(home),
+    )
 }
 
 fn submenu(app: &AppHandle, title: &str, entries: &[MenuEntry]) -> tauri::Result<Submenu<Wry>> {
@@ -87,6 +99,7 @@ fn menu(
             )?,
             &MenuItem::with_id(app, "clear-snooze", "Clear snooze", true, None::<&str>)?,
             pill_item,
+            &submenu(app, "Style", &displays.style)?,
             &submenu(app, "Show on", &displays.show_on)?,
             &submenu(app, "Never show on", &displays.never_show_on)?,
             &submenu(app, "Position", &displays.position)?,
@@ -99,7 +112,7 @@ pub fn build(app: &AppHandle, home: PathBuf, pill_shown: bool) -> tauri::Result<
     let pill_item = MenuItem::with_id(
         app,
         "toggle-pill",
-        pill_label(pill_shown),
+        pill_label(pill_shown, positions::style(&home)),
         true,
         None::<&str>,
     )?;
@@ -161,6 +174,16 @@ fn handle_menu(app: &AppHandle, home: &Path, event: MenuEvent) {
                     shell::post(app, Action::MoveToCorner(corner));
                 }
             }
+            Some((EDGE, key)) => {
+                if let Some(edge) = edge(key) {
+                    shell::post(app, Action::MoveToEdge(edge));
+                }
+            }
+            Some((STYLE, key)) => {
+                if let Some(style) = style(key) {
+                    shell::post(app, Action::SetStyle(style));
+                }
+            }
             _ => {}
         },
     }
@@ -195,8 +218,20 @@ impl Tray {
         }
     }
 
+    pub fn rect(&self) -> Option<Rect> {
+        let rect = self.icon.rect().ok().flatten()?;
+        let (position, size) = (
+            rect.position.to_physical::<i32>(1.0),
+            rect.size.to_physical::<i32>(1.0),
+        );
+        Some(Rect::sized(position.x, position.y, size.width, size.height))
+    }
+
     pub fn show_pill_state(&self, shown: bool) {
-        if let Err(error) = self.pill_item.set_text(pill_label(shown)) {
+        if let Err(error) = self
+            .pill_item
+            .set_text(pill_label(shown, positions::style(&self.home)))
+        {
             eprintln!("cannot relabel the pill menu item: {error}");
         }
     }

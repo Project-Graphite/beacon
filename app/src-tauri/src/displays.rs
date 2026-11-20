@@ -1,15 +1,32 @@
-use crate::geometry::{Corner, Monitor, Rect, monitor_for, primary};
+use crate::geometry::{
+    Corner, Edge, Monitor, Rect, TabPlacement, monitor_for, near_edge, nearest_edge, primary, slide,
+};
+use crate::positions::Style;
 use serde::{Deserialize, Serialize};
 
 pub const SHOW_ON: &str = "show-on";
 pub const AVOID: &str = "avoid";
 pub const CORNER: &str = "corner";
+pub const EDGE: &str = "edge";
+pub const STYLE: &str = "style";
 
 const CORNERS: [(Corner, &str, &str); 4] = [
     (Corner::TopLeft, "top-left", "Top left"),
     (Corner::TopRight, "top-right", "Top right"),
     (Corner::BottomLeft, "bottom-left", "Bottom left"),
     (Corner::BottomRight, "bottom-right", "Bottom right"),
+];
+
+const EDGES: [(Edge, &str, &str); 4] = [
+    (Edge::Left, "left", "Left edge"),
+    (Edge::Right, "right", "Right edge"),
+    (Edge::Top, "top", "Top edge"),
+    (Edge::Bottom, "bottom", "Bottom edge"),
+];
+
+const STYLES: [(Style, &str, &str); 2] = [
+    (Style::Tab, "tab", "Edge tab"),
+    (Style::Pill, "pill", "Pill"),
 ];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,6 +50,7 @@ pub struct DisplayMenu {
     pub show_on: Vec<MenuEntry>,
     pub never_show_on: Vec<MenuEntry>,
     pub position: Vec<MenuEntry>,
+    pub style: Vec<MenuEntry>,
 }
 
 impl DisplayChoice {
@@ -72,11 +90,47 @@ pub fn landing<'a>(
     monitor_for(rect, monitors).filter(|monitor| !choice.avoids(monitor))
 }
 
-pub fn corner(key: &str) -> Option<Corner> {
-    CORNERS
+pub fn dock<'a>(
+    pointer: (i32, i32),
+    from: &'a Monitor,
+    edge: Edge,
+    monitors: &'a [Monitor],
+    choice: &DisplayChoice,
+) -> Option<(&'a Monitor, TabPlacement)> {
+    if near_edge(from, edge, pointer) {
+        return Some((from, slide(&from.bounds, edge, pointer)));
+    }
+    let monitor = monitors
+        .iter()
+        .find(|monitor| monitor.bounds.contains(pointer))
+        .filter(|monitor| !choice.avoids(monitor))?;
+    Some((
+        monitor,
+        slide(
+            &monitor.bounds,
+            nearest_edge(&monitor.bounds, pointer),
+            pointer,
+        ),
+    ))
+}
+
+fn find_key<T: Copy>(entries: &[(T, &str, &str)], key: &str) -> Option<T> {
+    entries
         .iter()
         .find(|(_, name, _)| *name == key)
-        .map(|(corner, _, _)| *corner)
+        .map(|(value, _, _)| *value)
+}
+
+pub fn corner(key: &str) -> Option<Corner> {
+    find_key(&CORNERS, key)
+}
+
+pub fn edge(key: &str) -> Option<Edge> {
+    find_key(&EDGES, key)
+}
+
+pub fn style(key: &str) -> Option<Style> {
+    find_key(&STYLES, key)
 }
 
 fn label(monitor: &Monitor) -> String {
@@ -89,7 +143,7 @@ fn label(monitor: &Monitor) -> String {
     )
 }
 
-pub fn menu(monitors: &[Monitor], choice: &DisplayChoice) -> DisplayMenu {
+pub fn menu(monitors: &[Monitor], choice: &DisplayChoice, style: Style) -> DisplayMenu {
     let target = target(monitors, choice);
     let entries = |kind: &str, checked: &dyn Fn(&Monitor) -> bool| -> Vec<MenuEntry> {
         monitors
@@ -107,13 +161,31 @@ pub fn menu(monitors: &[Monitor], choice: &DisplayChoice) -> DisplayMenu {
             target.is_some_and(|target| target.id == monitor.id)
         }),
         never_show_on: entries(AVOID, &|monitor| choice.avoids(monitor)),
-        position: CORNERS
+        position: match style {
+            Style::Tab => EDGES
+                .iter()
+                .map(|(_, key, label)| (EDGE, *key, *label))
+                .collect::<Vec<_>>(),
+            Style::Pill => CORNERS
+                .iter()
+                .map(|(_, key, label)| (CORNER, *key, *label))
+                .collect(),
+        }
+        .into_iter()
+        .map(|(kind, key, label)| MenuEntry {
+            id: format!("{kind}:{key}"),
+            label: label.to_string(),
+            checked: None,
+            enabled: target.is_some(),
+        })
+        .collect(),
+        style: STYLES
             .iter()
-            .map(|(_, key, label)| MenuEntry {
-                id: format!("{CORNER}:{key}"),
+            .map(|(value, key, label)| MenuEntry {
+                id: format!("{STYLE}:{key}"),
                 label: label.to_string(),
-                checked: None,
-                enabled: target.is_some(),
+                checked: Some(*value == style),
+                enabled: true,
             })
             .collect(),
     }
@@ -144,7 +216,7 @@ pub fn listing(monitors: &[Monitor]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::tests::monitor;
+    use crate::geometry::tests::{monitor, owner_desk};
 
     fn desk() -> Vec<Monitor> {
         vec![
@@ -212,7 +284,7 @@ mod tests {
 
     #[test]
     fn the_menu_labels_each_display_and_checks_the_target_and_the_avoided() {
-        let menu = menu(&desk(), &choice(Some("philips"), &["oled"]));
+        let menu = menu(&desk(), &choice(Some("philips"), &["oled"]), Style::Pill);
         let entry = |id: &str, label: &str, checked: Option<bool>, enabled: bool| MenuEntry {
             id: id.to_string(),
             label: label.to_string(),
@@ -253,7 +325,11 @@ mod tests {
 
     #[test]
     fn without_a_target_nothing_is_shown_on_and_positions_are_disabled() {
-        let menu = menu(&desk(), &choice(None, &["oled", "philips", "bar"]));
+        let menu = menu(
+            &desk(),
+            &choice(None, &["oled", "philips", "bar"]),
+            Style::Pill,
+        );
         assert!(
             menu.show_on
                 .iter()
@@ -265,6 +341,52 @@ mod tests {
                 .all(|entry| entry.checked == Some(true))
         );
         assert!(menu.position.iter().all(|entry| !entry.enabled));
+    }
+
+    #[test]
+    fn a_released_tab_slides_redocks_moves_display_or_is_undone() {
+        let monitors = owner_desk();
+        let philips = &monitors[1];
+        let free = choice(Some(&philips.id), &[]);
+        let docked = |pointer, choice: &DisplayChoice| {
+            dock(pointer, philips, Edge::Top, &monitors, choice)
+                .map(|(monitor, placement)| (monitor.id.clone(), placement))
+        };
+        let placed = |id: &str, edge, offset| Some((id.to_string(), TabPlacement { edge, offset }));
+        assert_eq!(docked((-540, 70), &free), placed("philips", Edge::Top, 0.5));
+        assert_eq!(
+            docked((-1000, 960), &free),
+            placed("philips", Edge::Left, 0.5)
+        );
+        assert_eq!(docked((2500, 720), &free), placed("oled", Edge::Right, 0.5));
+        assert_eq!(
+            docked((2500, 720), &choice(Some("philips"), &["oled"])),
+            None
+        );
+    }
+
+    #[test]
+    fn the_tab_style_offers_edges_and_checks_the_active_style() {
+        let menu = menu(&desk(), &choice(None, &[]), Style::Tab);
+        let ids = |entries: &[MenuEntry]| -> Vec<String> {
+            entries.iter().map(|entry| entry.id.clone()).collect()
+        };
+        assert_eq!(
+            ids(&menu.position),
+            ["edge:left", "edge:right", "edge:top", "edge:bottom"]
+        );
+        assert_eq!(menu.position[0].label, "Left edge");
+        assert_eq!(ids(&menu.style), ["style:tab", "style:pill"]);
+        assert_eq!(
+            menu.style
+                .iter()
+                .map(|entry| entry.checked)
+                .collect::<Vec<_>>(),
+            [Some(true), Some(false)]
+        );
+        assert_eq!(edge("bottom"), Some(Edge::Bottom));
+        assert_eq!(style("pill"), Some(Style::Pill));
+        assert_eq!(style("square"), None);
     }
 
     #[test]

@@ -5,6 +5,7 @@ mod feed;
 mod geometry;
 mod jump;
 mod model;
+mod motion;
 mod panel;
 mod platform;
 mod positions;

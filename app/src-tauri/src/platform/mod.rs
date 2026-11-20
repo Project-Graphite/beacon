@@ -1,3 +1,4 @@
+mod frames;
 pub mod pill;
 pub mod registry;
 mod text;
@@ -15,9 +16,10 @@ use windows_sys::Win32::Devices::Display::{
 };
 use windows_sys::Win32::Foundation::{LPARAM, LUID, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, EnumDisplayMonitors,
-    GetMonitorInfoW, HBITMAP, HDC, HMONITOR, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MONITORINFOEXW,
-    MonitorFromPoint,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DEVMODEW, DIB_RGB_COLORS,
+    ENUM_CURRENT_SETTINGS, EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, HBITMAP,
+    HDC, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MONITORINFOEXW,
+    MonitorFromPoint, MonitorFromWindow,
 };
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -212,6 +214,29 @@ pub fn reduced_motion() -> bool {
         )
     };
     animation == 0
+}
+
+fn refresh_rate(window: *mut c_void) -> u32 {
+    let mut info = MONITORINFOEXW {
+        monitorInfo: MONITORINFO {
+            cbSize: size_of::<MONITORINFOEXW>() as u32,
+            ..unsafe { std::mem::zeroed() }
+        },
+        ..unsafe { std::mem::zeroed() }
+    };
+    let mut mode = DEVMODEW {
+        dmSize: size_of::<DEVMODEW>() as u16,
+        ..unsafe { std::mem::zeroed() }
+    };
+    let found = unsafe {
+        let monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+        GetMonitorInfoW(
+            monitor,
+            &mut info as *mut MONITORINFOEXW as *mut MONITORINFO,
+        ) != 0
+            && EnumDisplaySettingsW(info.szDevice.as_ptr(), ENUM_CURRENT_SETTINGS, &mut mode) != 0
+    };
+    if found { mode.dmDisplayFrequency } else { 0 }
 }
 
 pub fn tray_icon_size() -> usize {

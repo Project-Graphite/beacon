@@ -1,5 +1,5 @@
 use crate::displays::DisplayChoice;
-use crate::geometry::Rect;
+use crate::geometry::{Rect, TabPlacement};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io;
@@ -8,12 +8,24 @@ use std::path::Path;
 const UI_FILE: &str = "ui.json";
 const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Space";
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Style {
+    #[default]
+    Tab,
+    Pill,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct UiFile {
     #[serde(default)]
     pill_positions: BTreeMap<String, Rect>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     display_positions: BTreeMap<String, Rect>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    style: Option<Style>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    tab_positions: BTreeMap<String, TabPlacement>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hotkey: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -90,6 +102,24 @@ pub fn load_for_display(home: &Path, display: &str) -> Option<Rect> {
 pub fn save_for_display(home: &Path, display: &str, rect: Rect) -> io::Result<()> {
     update(home, |file| {
         file.display_positions.insert(display.to_string(), rect);
+    })
+}
+
+pub fn style(home: &Path) -> Style {
+    read(home).style.unwrap_or_default()
+}
+
+pub fn save_style(home: &Path, style: Style) -> io::Result<()> {
+    update(home, |file| file.style = Some(style))
+}
+
+pub fn load_tab(home: &Path, display: &str) -> Option<TabPlacement> {
+    read(home).tab_positions.remove(display)
+}
+
+pub fn save_tab(home: &Path, display: &str, placement: TabPlacement) -> io::Result<()> {
+    update(home, |file| {
+        file.tab_positions.insert(display.to_string(), placement);
     })
 }
 
@@ -231,6 +261,38 @@ mod tests {
         expected["hotkey"] = "Ctrl+Alt+B".into();
         expected["toasts_enabled"] = false.into();
         expected["toast_on_finished"] = false.into();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &std::fs::read(home.join(UI_FILE)).unwrap()
+            )
+            .unwrap(),
+            expected
+        );
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn the_style_and_tab_placements_round_trip_beside_every_existing_key() {
+        use crate::geometry::Edge;
+        let home = std::env::temp_dir().join(format!("beacon-tab-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let existing = r#"{"pill_positions":{"a":{"left":1,"top":2,"right":4,"bottom":6}},"display_positions":{"philips":{"left":5,"top":6,"right":12,"bottom":14}},"hotkey":"Ctrl+Shift+B","toasts_enabled":false,"toast_on_finished":true,"display":"philips","avoid_displays":["oled"]}"#;
+        std::fs::write(home.join(UI_FILE), existing).unwrap();
+        assert_eq!(style(&home), Style::Tab);
+        assert_eq!(load_tab(&home, "philips"), None);
+        save_style(&home, Style::Pill).unwrap();
+        let placement = TabPlacement {
+            edge: Edge::Top,
+            offset: 0.25,
+        };
+        save_tab(&home, "philips", placement).unwrap();
+        assert_eq!(style(&home), Style::Pill);
+        assert_eq!(load_tab(&home, "philips"), Some(placement));
+        assert_eq!(load_tab(&home, "oled"), None);
+        let mut expected: serde_json::Value = serde_json::from_str(existing).unwrap();
+        expected["style"] = "pill".into();
+        expected["tab_positions"] = serde_json::json!({"philips": {"edge": "top", "offset": 0.25}});
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(
                 &std::fs::read(home.join(UI_FILE)).unwrap()

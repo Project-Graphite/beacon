@@ -3,10 +3,41 @@ use serde::{Deserialize, Serialize};
 const EDGE_MARGIN: f64 = 12.0;
 const SNAP_DISTANCE: f64 = 16.0;
 const PANEL_GAP: f64 = 8.0;
-const PANEL_WIDTH: f64 = 380.0;
+const PANEL_WIDTH: f64 = 340.0;
 const PANEL_MIN_HEIGHT: f64 = 120.0;
 const PANEL_MAX_HEIGHT: f64 = 640.0;
 const PANEL_SCREEN_ALLOWANCE: f64 = 24.0;
+const TAB_LENGTH: f64 = 72.0;
+const DOCK_DISTANCE: f64 = 80.0;
+const EDGE_ORDER: [Edge; 4] = [Edge::Right, Edge::Left, Edge::Top, Edge::Bottom];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Edge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TabPlacement {
+    pub edge: Edge,
+    pub offset: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PressTarget {
+    Panel,
+    Anchor,
+    Outside,
+}
+
+impl Edge {
+    fn vertical(self) -> bool {
+        matches!(self, Edge::Left | Edge::Right)
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rect {
@@ -175,16 +206,23 @@ pub fn resize_anchored(rect: Rect, width: i32, height: i32, work: &Rect) -> Rect
     Rect::sized(left, rect.top, width, height)
 }
 
-pub fn place_panel(pill: Option<Rect>, monitor: &Monitor, content_height: f64) -> (Rect, f64) {
+fn panel_size(monitor: &Monitor, content_height: f64) -> (i32, i32) {
     let (work, scale) = (monitor.work, monitor.scale);
     let tallest = PANEL_MAX_HEIGHT.min(f64::from(work.height()) / scale - PANEL_SCREEN_ALLOWANCE);
-    let height = px(
-        content_height
-            .min(tallest)
-            .max(PANEL_MIN_HEIGHT.min(tallest)),
-        scale,
-    );
-    let width = px(PANEL_WIDTH, scale);
+    (
+        px(PANEL_WIDTH, scale),
+        px(
+            content_height
+                .min(tallest)
+                .max(PANEL_MIN_HEIGHT.min(tallest)),
+            scale,
+        ),
+    )
+}
+
+pub fn place_panel(pill: Option<Rect>, monitor: &Monitor, content_height: f64) -> (Rect, f64) {
+    let (work, scale) = (monitor.work, monitor.scale);
+    let (width, height) = panel_size(monitor, content_height);
     let gap = px(PANEL_GAP, scale);
     let (left, top) = match pill {
         Some(pill) => (
@@ -208,6 +246,145 @@ pub fn place_panel(pill: Option<Rect>, monitor: &Monitor, content_height: f64) -
         Rect::sized(left, top, width, height).kept_inside(&work),
         scale,
     )
+}
+
+pub fn pill_edge(pill: Rect, work: &Rect) -> Edge {
+    if pill.centre().1 < work.centre().1 {
+        Edge::Top
+    } else {
+        Edge::Bottom
+    }
+}
+
+pub fn place_panel_on_edge(
+    tab: Rect,
+    edge: Edge,
+    monitor: &Monitor,
+    content_height: f64,
+) -> (Rect, f64) {
+    let (bounds, scale) = (monitor.bounds, monitor.scale);
+    let (width, height) = panel_size(monitor, content_height);
+    let gap = px(PANEL_GAP, scale);
+    let (x, y) = tab.centre();
+    let (left, top) = match edge {
+        Edge::Left => (bounds.left + gap, y - height / 2),
+        Edge::Right => (bounds.right - gap - width, y - height / 2),
+        Edge::Top => (x - width / 2, bounds.top + gap),
+        Edge::Bottom => (x - width / 2, bounds.bottom - gap - height),
+    };
+    (
+        Rect::sized(left, top, width, height).kept_inside(&monitor.work),
+        scale,
+    )
+}
+
+fn span(bounds: &Rect, edge: Edge) -> (i32, i32) {
+    if edge.vertical() {
+        (bounds.top, bounds.bottom)
+    } else {
+        (bounds.left, bounds.right)
+    }
+}
+
+pub fn tab_rect(bounds: &Rect, placement: TabPlacement, depth: f64, scale: f64) -> Rect {
+    let (length, depth) = (px(TAB_LENGTH, scale), px(depth, scale));
+    let (start, end) = span(bounds, placement.edge);
+    let centre = start + (f64::from(end - start) * placement.offset.clamp(0.0, 1.0)).round() as i32;
+    let along = (centre - length / 2).clamp(start, end - length);
+    match placement.edge {
+        Edge::Left => Rect::sized(bounds.left, along, depth, length),
+        Edge::Right => Rect::sized(bounds.right - depth, along, depth, length),
+        Edge::Top => Rect::sized(along, bounds.top, length, depth),
+        Edge::Bottom => Rect::sized(along, bounds.bottom - depth, length, depth),
+    }
+}
+
+fn shares_segment(from: i32, to: i32, other_from: i32, other_to: i32) -> bool {
+    to.min(other_to) - from.max(other_from) > 0
+}
+
+fn touches(bounds: &Rect, edge: Edge, other: &Rect) -> bool {
+    match edge {
+        Edge::Left => {
+            other.right == bounds.left
+                && shares_segment(bounds.top, bounds.bottom, other.top, other.bottom)
+        }
+        Edge::Right => {
+            other.left == bounds.right
+                && shares_segment(bounds.top, bounds.bottom, other.top, other.bottom)
+        }
+        Edge::Top => {
+            other.bottom == bounds.top
+                && shares_segment(bounds.left, bounds.right, other.left, other.right)
+        }
+        Edge::Bottom => {
+            other.top == bounds.bottom
+                && shares_segment(bounds.left, bounds.right, other.left, other.right)
+        }
+    }
+}
+
+pub fn default_placement(monitor: &Monitor, monitors: &[Monitor]) -> TabPlacement {
+    let edge = EDGE_ORDER
+        .into_iter()
+        .find(|edge| {
+            !monitors
+                .iter()
+                .filter(|other| other.id != monitor.id)
+                .any(|other| touches(&monitor.bounds, *edge, &other.bounds))
+        })
+        .unwrap_or(Edge::Right);
+    TabPlacement { edge, offset: 0.5 }
+}
+
+fn edge_distance(bounds: &Rect, edge: Edge, (x, y): (i32, i32)) -> i32 {
+    match edge {
+        Edge::Left => (x - bounds.left).abs(),
+        Edge::Right => (bounds.right - x).abs(),
+        Edge::Top => (y - bounds.top).abs(),
+        Edge::Bottom => (bounds.bottom - y).abs(),
+    }
+}
+
+pub fn near_edge(monitor: &Monitor, edge: Edge, point: (i32, i32)) -> bool {
+    edge_distance(&monitor.bounds, edge, point) <= px(DOCK_DISTANCE, monitor.scale)
+}
+
+pub fn nearest_edge(bounds: &Rect, point: (i32, i32)) -> Edge {
+    EDGE_ORDER.into_iter().fold(Edge::Right, |nearest, edge| {
+        if edge_distance(bounds, edge, point) < edge_distance(bounds, nearest, point) {
+            edge
+        } else {
+            nearest
+        }
+    })
+}
+
+pub fn slide(bounds: &Rect, edge: Edge, (x, y): (i32, i32)) -> TabPlacement {
+    let (start, end) = span(bounds, edge);
+    let along = if edge.vertical() { y } else { x };
+    TabPlacement {
+        edge,
+        offset: (f64::from(along - start) / f64::from(end - start)).clamp(0.0, 1.0),
+    }
+}
+
+pub fn press_target(
+    point: (i32, i32),
+    panel: Option<Rect>,
+    anchors: &[Option<Rect>],
+) -> PressTarget {
+    if panel.is_some_and(|panel| panel.contains(point)) {
+        PressTarget::Panel
+    } else if anchors
+        .iter()
+        .flatten()
+        .any(|anchor| anchor.contains(point))
+    {
+        PressTarget::Anchor
+    } else {
+        PressTarget::Outside
+    }
 }
 
 #[cfg(test)]
@@ -369,19 +546,19 @@ pub(crate) mod tests {
         let place = |pill: Rect| place_panel(Some(pill), &main, 300.0).0;
         assert_eq!(
             place(Rect::sized(1808, 12, 100, 28)),
-            Rect::sized(1528, 48, 380, 300)
+            Rect::sized(1568, 48, 340, 300)
         );
         assert_eq!(
             place(Rect::sized(12, 12, 100, 28)),
-            Rect::sized(12, 48, 380, 300)
+            Rect::sized(12, 48, 340, 300)
         );
         assert_eq!(
             place(Rect::sized(12, 992, 100, 28)),
-            Rect::sized(12, 684, 380, 300)
+            Rect::sized(12, 684, 340, 300)
         );
         assert_eq!(
             place(Rect::sized(1808, 992, 100, 28)),
-            Rect::sized(1528, 684, 380, 300)
+            Rect::sized(1568, 684, 340, 300)
         );
     }
 
@@ -390,7 +567,7 @@ pub(crate) mod tests {
         let main = monitor("main", Rect::sized(0, 0, 1920, 1080), 48, 1.5, true);
         let (panel, scale) = place_panel(Some(Rect::sized(1800, 18, 100, 42)), &main, 40.0);
         assert_eq!(scale, 1.5);
-        assert_eq!(panel, Rect::sized(1330, 72, 570, 180));
+        assert_eq!(panel, Rect::sized(1390, 72, 510, 180));
         let (tall, _) = place_panel(Some(Rect::sized(0, 18, 100, 42)), &main, 2000.0);
         assert_eq!(tall.height(), 960);
         let (short, _) = place_panel(
@@ -408,13 +585,202 @@ pub(crate) mod tests {
         assert_eq!(scale, 1.0);
         assert_eq!(
             panel,
-            Rect::sized(1920 - 12 - 380, 1032 - 12 - 200, 380, 200)
+            Rect::sized(1920 - 12 - 340, 1032 - 12 - 200, 340, 200)
         );
     }
 
     #[test]
     fn without_a_pill_the_panel_sits_bottom_right_of_a_portrait_work_area() {
         let (panel, _) = place_panel(None, &portrait_desk()[1], 200.0);
-        assert_eq!(panel, Rect::sized(-12 - 380, 1572 - 12 - 200, 380, 200));
+        assert_eq!(panel, Rect::sized(-12 - 340, 1572 - 12 - 200, 340, 200));
+    }
+
+    pub fn owner_desk() -> Vec<Monitor> {
+        vec![
+            monitor("oled", Rect::sized(0, 0, 2560, 1440), 48, 1.0, true),
+            monitor("philips", Rect::sized(-1080, 0, 1080, 1920), 48, 1.0, false),
+            monitor("bar", Rect::sized(-3000, 0, 1920, 464), 0, 1.0, false),
+        ]
+    }
+
+    fn at(edge: Edge, offset: f64) -> TabPlacement {
+        TabPlacement { edge, offset }
+    }
+
+    #[test]
+    fn the_default_edge_is_the_first_free_one_in_right_left_top_bottom_order() {
+        let monitors = owner_desk();
+        let edges: Vec<Edge> = monitors
+            .iter()
+            .map(|monitor| default_placement(monitor, &monitors).edge)
+            .collect();
+        assert_eq!(edges, [Edge::Right, Edge::Top, Edge::Left]);
+        assert_eq!(default_placement(&monitors[0], &monitors).offset, 0.5);
+        let boxed_in = vec![
+            monitor("middle", Rect::sized(0, 0, 100, 100), 0, 1.0, true),
+            monitor("left", Rect::sized(-100, 0, 100, 100), 0, 1.0, false),
+            monitor("right", Rect::sized(100, 0, 100, 100), 0, 1.0, false),
+            monitor("above", Rect::sized(0, -100, 100, 100), 0, 1.0, false),
+            monitor("below", Rect::sized(0, 100, 100, 100), 0, 1.0, false),
+        ];
+        assert_eq!(default_placement(&boxed_in[0], &boxed_in).edge, Edge::Right);
+        let corner_only = vec![
+            monitor("a", Rect::sized(0, 0, 100, 100), 0, 1.0, true),
+            monitor("beside", Rect::sized(100, 0, 100, 100), 0, 1.0, false),
+            monitor("diagonal", Rect::sized(-100, 100, 100, 100), 0, 1.0, false),
+        ];
+        assert_eq!(
+            default_placement(&corner_only[0], &corner_only).edge,
+            Edge::Left
+        );
+    }
+
+    #[test]
+    fn the_tab_and_its_hover_band_sit_flush_on_every_edge() {
+        let bar = Rect::sized(-3000, 0, 1920, 464);
+        let cases = [
+            (
+                Edge::Left,
+                1.0,
+                Rect::sized(-3000, 196, 4, 72),
+                Rect::sized(-3000, 196, 8, 72),
+            ),
+            (
+                Edge::Right,
+                1.0,
+                Rect::sized(-1084, 196, 4, 72),
+                Rect::sized(-1088, 196, 8, 72),
+            ),
+            (
+                Edge::Top,
+                1.0,
+                Rect::sized(-2076, 0, 72, 4),
+                Rect::sized(-2076, 0, 72, 8),
+            ),
+            (
+                Edge::Bottom,
+                1.0,
+                Rect::sized(-2076, 460, 72, 4),
+                Rect::sized(-2076, 456, 72, 8),
+            ),
+            (
+                Edge::Left,
+                1.5,
+                Rect::sized(-3000, 178, 6, 108),
+                Rect::sized(-3000, 178, 12, 108),
+            ),
+            (
+                Edge::Right,
+                1.5,
+                Rect::sized(-1086, 178, 6, 108),
+                Rect::sized(-1092, 178, 12, 108),
+            ),
+            (
+                Edge::Top,
+                1.5,
+                Rect::sized(-2094, 0, 108, 6),
+                Rect::sized(-2094, 0, 108, 12),
+            ),
+            (
+                Edge::Bottom,
+                1.5,
+                Rect::sized(-2094, 458, 108, 6),
+                Rect::sized(-2094, 452, 108, 12),
+            ),
+        ];
+        for (edge, scale, strip, hover) in cases {
+            assert_eq!(
+                tab_rect(&bar, at(edge, 0.5), 4.0, scale),
+                strip,
+                "{edge:?} at {scale}"
+            );
+            assert_eq!(
+                tab_rect(&bar, at(edge, 0.5), 8.0, scale),
+                hover,
+                "{edge:?} at {scale}"
+            );
+        }
+        assert_eq!(
+            tab_rect(&bar, at(Edge::Left, 0.0), 8.0, 1.0),
+            Rect::sized(-3000, 0, 8, 72)
+        );
+        assert_eq!(
+            tab_rect(&bar, at(Edge::Top, 1.0), 8.0, 1.0),
+            Rect::sized(-1152, 0, 72, 8)
+        );
+    }
+
+    #[test]
+    fn the_panel_opens_against_the_tab_edge_centred_on_the_tab() {
+        let oled = monitor("oled", Rect::sized(0, 0, 2560, 1440), 48, 1.0, true);
+        let place = |edge, offset| {
+            place_panel_on_edge(
+                tab_rect(&oled.bounds, at(edge, offset), 8.0, 1.0),
+                edge,
+                &oled,
+                300.0,
+            )
+            .0
+        };
+        assert_eq!(
+            place(Edge::Right, 0.5),
+            Rect::sized(2560 - 8 - 340, 720 - 150, 340, 300)
+        );
+        assert_eq!(place(Edge::Left, 0.5), Rect::sized(8, 720 - 150, 340, 300));
+        assert_eq!(place(Edge::Top, 0.5), Rect::sized(1280 - 170, 8, 340, 300));
+        assert_eq!(
+            place(Edge::Bottom, 0.5),
+            Rect::sized(1280 - 170, 1392 - 300, 340, 300)
+        );
+        assert_eq!(
+            place(Edge::Right, 0.0),
+            Rect::sized(2560 - 8 - 340, 0, 340, 300)
+        );
+        assert_eq!(
+            place(Edge::Bottom, 1.0),
+            Rect::sized(2560 - 340, 1392 - 300, 340, 300)
+        );
+    }
+
+    #[test]
+    fn a_pill_reports_the_nearer_horizontal_edge() {
+        let work = Rect::sized(0, 0, 1920, 1032);
+        assert_eq!(pill_edge(Rect::sized(1800, 12, 100, 28), &work), Edge::Top);
+        assert_eq!(
+            pill_edge(Rect::sized(12, 990, 100, 28), &work),
+            Edge::Bottom
+        );
+    }
+
+    #[test]
+    fn sliding_follows_the_pointer_along_the_edge_and_the_nearest_edge_wins() {
+        let bar = Rect::sized(-3000, 0, 1920, 464);
+        assert_eq!(slide(&bar, Edge::Left, (-2990, 116)), at(Edge::Left, 0.25));
+        assert_eq!(slide(&bar, Edge::Top, (-2040, 300)), at(Edge::Top, 0.5));
+        assert_eq!(slide(&bar, Edge::Left, (-2990, 900)), at(Edge::Left, 1.0));
+        assert_eq!(nearest_edge(&bar, (-2990, 200)), Edge::Left);
+        assert_eq!(nearest_edge(&bar, (-1100, 200)), Edge::Right);
+        assert_eq!(nearest_edge(&bar, (-2000, 10)), Edge::Top);
+        assert_eq!(nearest_edge(&bar, (-2000, 450)), Edge::Bottom);
+        let philips = &owner_desk()[1];
+        assert!(near_edge(philips, Edge::Top, (-500, 80)));
+        assert!(!near_edge(philips, Edge::Top, (-500, 81)));
+    }
+
+    #[test]
+    fn a_press_is_inside_the_panel_on_an_anchor_or_outside() {
+        let panel = Some(Rect::sized(100, 100, 340, 300));
+        let anchors = [Some(Rect::sized(0, 214, 8, 72)), None];
+        assert_eq!(
+            press_target((200, 200), panel, &anchors),
+            PressTarget::Panel
+        );
+        assert_eq!(press_target((4, 250), panel, &anchors), PressTarget::Anchor);
+        assert_eq!(
+            press_target((900, 900), panel, &anchors),
+            PressTarget::Outside
+        );
+        assert_eq!(press_target((4, 250), None, &anchors), PressTarget::Anchor);
+        assert_eq!(press_target((200, 200), None, &[]), PressTarget::Outside);
     }
 }
