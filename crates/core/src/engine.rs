@@ -10,10 +10,10 @@ use crate::log::{Logger, now_ms};
 use crate::platform::{ProcessWatch, process_alive, process_image_path};
 use crate::preview::input_preview;
 use crate::redact::redact;
-use crate::session::{Session, activity_line, surface_from_image};
+use crate::session::{McpRequest, Session, activity_line, surface_from_image};
 use crate::state::{AgentStatus, Input, PermissionKind, SessionState, StartSource, ToolEvent};
 use crate::usage::{SessionUsage, UsageStatus};
-use beacon_protocol::{DOCTOR_EVENT, HookReply, is_waiting_event};
+use beacon_protocol::{DECISION_TIMEOUT_SECS, DOCTOR_EVENT, HookReply, is_waiting_event};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -93,6 +93,7 @@ pub struct Engine {
     snoozed_until_ms: Option<u64>,
     account_usage: Option<AccountUsage>,
     usage_wanted: BTreeMap<String, String>,
+    plans_wanted: Vec<u64>,
 }
 
 impl Engine {
@@ -118,6 +119,7 @@ impl Engine {
             snoozed_until_ms: None,
             account_usage: None,
             usage_wanted: BTreeMap::new(),
+            plans_wanted: Vec::new(),
         };
         engine.prune_ended(now_ms());
         engine.settle_snoozes(now_ms());
@@ -276,6 +278,30 @@ impl Engine {
         std::mem::take(&mut self.usage_wanted)
     }
 
+    pub fn take_plans_wanted(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.plans_wanted)
+    }
+
+    pub fn plan_source(&self, id: u64) -> Option<(String, Option<String>)> {
+        let view = &self.pending.get(&id)?.view;
+        if view.plan.is_some() {
+            return None;
+        }
+        let transcript = self
+            .sessions
+            .get(&view.session_id)?
+            .transcript_path
+            .clone()?;
+        Some((transcript, view.tool_use_id.clone()))
+    }
+
+    pub fn set_plan(&mut self, id: u64, plan: String) {
+        if let Some(pending) = self.pending.get_mut(&id) {
+            pending.view.plan = Some(plan);
+            self.changed();
+        }
+    }
+
     pub fn set_usage(&mut self, session_id: &str, usage: SessionUsage) {
         let Some(session) = self.sessions.get_mut(session_id) else {
             return;
@@ -373,7 +399,7 @@ impl Engine {
         let reads_usage =
             transcript_changed || USAGE_EVENTS.contains(&common.hook_event_name.as_str());
         if common.permission_mode.is_some() {
-            session.permission_mode = common.permission_mode;
+            session.permission_mode = common.permission_mode.clone();
         }
         if let Some(entrypoint) = meta.env("CLAUDE_CODE_ENTRYPOINT") {
             session.entrypoint = Some(entrypoint.to_string());
@@ -495,7 +521,16 @@ impl Engine {
                 },
                 Followup::Nothing,
             ),
-            Event::Elicitation => (Some(Input::ElicitationRequested), Followup::Nothing),
+            Event::Elicitation {
+                mcp_server_name,
+                message,
+            } => {
+                session.mcp_request = Some(McpRequest {
+                    server: mcp_server_name.unwrap_or_default(),
+                    message: message.unwrap_or_default(),
+                });
+                (Some(Input::ElicitationRequested), Followup::Nothing)
+            }
             Event::ElicitationResult => (Some(Input::ElicitationResolved), Followup::Nothing),
             Event::CwdChanged { new_cwd } => {
                 if let Some(new_cwd) = &new_cwd {
@@ -554,6 +589,11 @@ impl Engine {
                     permission_suggestions,
                     created_ms: now,
                     tool_use_id: None,
+                    cwd: common.cwd,
+                    permission_mode: common.permission_mode,
+                    agent_type: common.agent_type,
+                    expires_ms: now + DECISION_TIMEOUT_SECS * 1000,
+                    plan: None,
                 },
             )),
         }
@@ -570,6 +610,17 @@ impl Engine {
         view.id = self.next_id;
         self.next_id += 1;
         view.tool_use_id = self.claim_recent_tool_use(&view);
+        if view.kind == PermissionKind::Plan {
+            view.plan = view
+                .tool_input
+                .get("plan")
+                .and_then(Value::as_str)
+                .filter(|plan| !plan.is_empty())
+                .map(str::to_string);
+            if view.plan.is_none() {
+                self.plans_wanted.push(view.id);
+            }
+        }
         self.log.info(format_args!(
             "decision {} pending: {} in session {}",
             view.id, view.tool_name, view.session_id

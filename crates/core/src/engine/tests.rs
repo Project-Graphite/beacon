@@ -430,6 +430,128 @@ fn waiting_events_without_a_decision_reply_at_once() {
 }
 
 #[test]
+fn an_elicitation_names_its_server_and_message_until_the_session_moves_on() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    fixture.send(&custom(
+        "Elicitation",
+        json!({"mcp_server_name": "github", "message": "Which repository?"}),
+    ));
+    assert_eq!(
+        fixture.session().mcp_request,
+        Some(McpRequest {
+            server: "github".to_string(),
+            message: "Which repository?".to_string()
+        })
+    );
+    fixture.send(PRE_TOOL_USE);
+    assert!(fixture.session().mcp_request.is_some());
+    fixture.send(&custom("ElicitationResult", json!({})));
+    assert_eq!(fixture.state(), SessionState::Working);
+    assert_eq!(fixture.session().mcp_request, None);
+    fixture.send(&custom("Elicitation", json!({})));
+    assert_eq!(
+        fixture.session().mcp_request,
+        Some(McpRequest {
+            server: String::new(),
+            message: String::new()
+        })
+    );
+    fixture.send(STOP);
+    assert_eq!(fixture.session().mcp_request, None);
+}
+
+#[test]
+fn pending_decisions_carry_the_request_context_and_expiry() {
+    let mut fixture = fixture();
+    let (_id, _receiver) = fixture.ask(&custom(
+        "PermissionRequest",
+        json!({"tool_name": "Bash", "tool_input": {"command": "ls"}, "permission_mode": "acceptEdits", "agent_id": "agent-1", "agent_type": "Explore"}),
+    ));
+    let pending = &fixture.engine.snapshot().pending[0];
+    assert_eq!(pending.cwd.as_deref(), Some(r"C:\nowhere"));
+    assert_eq!(pending.permission_mode.as_deref(), Some("acceptEdits"));
+    assert_eq!(pending.agent_id.as_deref(), Some("agent-1"));
+    assert_eq!(pending.agent_type.as_deref(), Some("Explore"));
+    assert_eq!(pending.expires_ms, pending.created_ms + 3_600_000);
+    assert_eq!(pending.plan, None);
+    assert!(fixture.engine.take_plans_wanted().is_empty());
+    assert_eq!(
+        fixture.session().permission_mode.as_deref(),
+        Some("acceptEdits")
+    );
+    let (_id, _receiver) = fixture.ask(PERMISSION_REQUEST);
+    let plain = &fixture.engine.snapshot().pending[1];
+    assert_eq!(plain.agent_id, None);
+    assert_eq!(plain.agent_type, None);
+    assert_eq!(plain.permission_mode.as_deref(), Some("default"));
+}
+
+#[test]
+fn older_pending_decisions_without_the_new_fields_still_parse() {
+    let pending: PendingDecision = serde_json::from_value(json!({
+        "id": 1, "session_id": "s", "agent_id": null, "tool_name": "Bash", "tool_input": {},
+        "permission_suggestions": null, "kind": "tool", "created_ms": 5, "tool_use_id": null
+    }))
+    .unwrap();
+    assert_eq!(
+        (
+            pending.cwd,
+            pending.permission_mode,
+            pending.agent_type,
+            pending.expires_ms,
+            pending.plan
+        ),
+        (None, None, None, 0, None)
+    );
+}
+
+#[test]
+fn a_plan_comes_from_the_input_or_is_looked_up_in_the_transcript() {
+    let mut fixture = fixture();
+    let (with_text, _receiver) = fixture.ask(&custom(
+        "PermissionRequest",
+        json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": "# Inline"}}),
+    ));
+    assert_eq!(
+        fixture.engine.snapshot().pending[0].plan.as_deref(),
+        Some("# Inline")
+    );
+    assert!(fixture.engine.take_plans_wanted().is_empty());
+    assert_eq!(fixture.engine.plan_source(with_text), None);
+    let transcript = r"C:\nowhere\plan.jsonl";
+    let (empty, _receiver) = fixture.ask(&custom(
+        "PermissionRequest",
+        json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": ""}, "transcript_path": transcript}),
+    ));
+    assert_eq!(fixture.engine.take_plans_wanted(), [empty]);
+    assert_eq!(
+        fixture.engine.plan_source(empty),
+        Some((transcript.to_string(), None))
+    );
+    fixture.send(&custom(
+        "PreToolUse",
+        json!({"tool_name": "ExitPlanMode", "tool_input": {"plan": ""}, "tool_use_id": "toolu_plan"}),
+    ));
+    assert_eq!(
+        fixture.engine.plan_source(empty),
+        Some((transcript.to_string(), Some("toolu_plan".to_string())))
+    );
+    fixture
+        .engine
+        .set_plan(empty, "# From the transcript".to_string());
+    assert_eq!(
+        fixture.engine.snapshot().pending[1].plan.as_deref(),
+        Some("# From the transcript")
+    );
+    assert_eq!(fixture.engine.plan_source(empty), None);
+    fixture.engine.decide(empty, Decision::Allow).unwrap();
+    fixture.engine.set_plan(empty, "late".to_string());
+    assert_eq!(fixture.engine.plan_source(empty), None);
+    assert_eq!(fixture.engine.snapshot().pending.len(), 1);
+}
+
+#[test]
 fn doctor_replies_ok_and_leaves_the_registry_alone() {
     let mut fixture = fixture();
     let outcome = fixture

@@ -1,0 +1,80 @@
+import { useEffect, useState } from 'react';
+import type { Decision, PendingDecision } from '../beacon';
+import { FilledButton } from './FilledButton';
+import { KeyHint } from './KeyHint';
+import { Markdown } from './Markdown';
+import { MessageField } from './MessageField';
+import { OutlineButton } from './OutlineButton';
+
+const PLAN_WAIT_MS = 5000;
+const KEEP_PLANNING = 'The user wants to keep planning.';
+
+interface PlanRequestProps {
+  request: PendingDecision;
+  sending: boolean;
+  keys: Map<number, (key: string) => void>;
+  send: (decision: Decision) => void;
+}
+
+export function PlanRequest({ request, sending, keys, send }: PlanRequestProps) {
+  const [gaveUp, setGaveUp] = useState(() => Date.now() - request.created_ms >= PLAN_WAIT_MS);
+  const [feedback, setFeedback] = useState(false);
+
+  useEffect(() => {
+    if (gaveUp || request.plan !== null) return;
+    const timer = window.setTimeout(() => setGaveUp(true), PLAN_WAIT_MS - (Date.now() - request.created_ms));
+    return () => window.clearTimeout(timer);
+  }, [gaveUp, request.plan, request.created_ms]);
+
+  const approve = () => send({ type: 'allow_with_input', input: request.tool_input });
+  const keepPlanning = () => send({ type: 'deny', message: KEEP_PLANNING });
+
+  useEffect(() => {
+    keys.set(request.id, (key) => {
+      if (sending || feedback) return;
+      if (key === 'a') approve();
+      if (key === 'd') keepPlanning();
+      if (key === 'm') setFeedback(true);
+    });
+    return () => void keys.delete(request.id);
+  });
+
+  return (
+    <>
+      {request.plan !== null ? (
+        <div className="scroll-thin mt-1 max-h-80 overflow-y-auto rounded-field bg-surface px-2 py-1.5">
+          <Markdown source={request.plan} />
+        </div>
+      ) : (
+        <p className="mt-1 text-secondary text-muted">
+          {gaveUp ? 'The plan text is not available here; read it in the session window.' : 'Loading the plan…'}
+        </p>
+      )}
+      {feedback ? (
+        <MessageField
+          label="Feedback on the plan"
+          placeholder="What should change"
+          sendLabel="Reject"
+          disabled={sending}
+          onSend={(message) => send({ type: 'deny', message })}
+          onCancel={() => setFeedback(false)}
+        />
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <FilledButton disabled={sending} onClick={approve}>
+            Approve plan
+            <KeyHint shortcut="A" />
+          </FilledButton>
+          <OutlineButton disabled={sending} onClick={keepPlanning}>
+            Keep planning
+            <KeyHint shortcut="D" />
+          </OutlineButton>
+          <OutlineButton disabled={sending} onClick={() => setFeedback(true)}>
+            Reject with feedback
+            <KeyHint shortcut="M" />
+          </OutlineButton>
+        </div>
+      )}
+    </>
+  );
+}

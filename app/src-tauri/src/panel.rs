@@ -1,7 +1,7 @@
 use crate::feed::{self, Feed};
 use crate::geometry::Rect;
 use crate::shell::{self, Action};
-use beacon_core::{Reply, Request, SessionDetail, Snapshot};
+use beacon_core::{Decision, Reply, Request, SessionDetail, Snapshot};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -58,6 +58,13 @@ pub async fn get_detail(
 #[tauri::command]
 pub async fn acknowledge(feed: State<'_, Arc<Feed>>, session_id: String) -> Result<(), String> {
     ask(feed.home.clone(), Request::Acknowledge { session_id })
+        .await
+        .map(drop)
+}
+
+#[tauri::command]
+pub async fn decide(feed: State<'_, Arc<Feed>>, id: u64, decision: Decision) -> Result<(), String> {
+    ask(feed.home.clone(), Request::Decide { id, decision })
         .await
         .map(drop)
 }

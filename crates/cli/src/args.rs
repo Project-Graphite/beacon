@@ -1,5 +1,5 @@
 use beacon_core::Decision;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use std::path::PathBuf;
 
 pub const USAGE: &str = "\
@@ -10,6 +10,7 @@ Usage:
   beacon decide <id> allow
   beacon decide <id> deny [--message <text>] [--stop]
   beacon decide <id> answer \"<question>=<label>\" ...
+  beacon decide <id> always \"<Tool(specifier)>\" [--scope session|local|project|user]
   beacon ack <session-id-or-unique-prefix>
   beacon snooze <session-id-or-unique-prefix|all> <minutes>
   beacon unsnooze <session-id-or-unique-prefix|all>
@@ -153,7 +154,7 @@ fn session_or_all(session: &str) -> Option<String> {
 
 fn parse_decide(args: &[String]) -> Result<Command, String> {
     let [id, verb, rest @ ..] = args else {
-        return Err("decide needs a decision id and allow, deny or answer".to_string());
+        return Err("decide needs a decision id and allow, always, deny or answer".to_string());
     };
     let id = id
         .parse::<u64>()
@@ -169,6 +170,12 @@ fn parse_decide(args: &[String]) -> Result<Command, String> {
                 Decision::Deny { message }
             }
         }
+        ("always", [rule, options @ ..]) => {
+            let scope = Options::parse(options, &[], &["--scope"])?.value("--scope");
+            Decision::AllowAlways {
+                permissions: vec![always_rule(rule, scope.as_deref().unwrap_or("session"))?],
+            }
+        }
         ("answer", [_, ..]) => Decision::Answer {
             answers: rest
                 .iter()
@@ -178,6 +185,42 @@ fn parse_decide(args: &[String]) -> Result<Command, String> {
         _ => return Err(format!("unknown decision: {}", args[1..].join(" "))),
     };
     Ok(Command::Decide { id, decision })
+}
+
+fn always_rule(rule: &str, scope: &str) -> Result<Value, String> {
+    let destination = match scope {
+        "session" => "session",
+        "local" => "localSettings",
+        "project" => "projectSettings",
+        "user" => "userSettings",
+        _ => {
+            return Err(format!(
+                "unknown scope {scope}: expected session, local, project or user"
+            ));
+        }
+    };
+    let parsed = match rule.split_once('(') {
+        None => Some((rule, None)),
+        Some((tool, rest)) => rest
+            .strip_suffix(')')
+            .filter(|content| !content.is_empty())
+            .map(|content| (tool, Some(content))),
+    };
+    let Some((tool, content)) = parsed.filter(|(tool, _)| {
+        !tool.is_empty()
+            && !tool.contains(|character: char| character.is_whitespace() || character == ')')
+    }) else {
+        return Err(format!(
+            "expected a rule like Bash or Bash(npm test *), got: {rule}"
+        ));
+    };
+    let mut entry = json!({"toolName": tool});
+    if let Some(content) = content {
+        entry["ruleContent"] = json!(content);
+    }
+    Ok(
+        json!({"type": "addRules", "rules": [entry], "behavior": "allow", "destination": destination}),
+    )
 }
 
 fn answer(pair: &str) -> Result<(String, Value), String> {
@@ -308,6 +351,58 @@ mod tests {
             Value::Object(answers),
             json!({"Which db?": "Postgres", "a=b": "c"})
         );
+    }
+
+    fn always(line: &[&str]) -> Value {
+        let Ok(Command::Decide {
+            id: 4,
+            decision: Decision::AllowAlways { permissions },
+        }) = parsed(line)
+        else {
+            panic!("expected an always decision for {line:?}");
+        };
+        Value::Array(permissions)
+    }
+
+    #[test]
+    fn always_builds_one_add_rules_entry() {
+        assert_eq!(
+            serde_json::to_string(&always(&["decide", "4", "always", "Bash(node -e *)"])).unwrap(),
+            r#"[{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"node -e *"}],"behavior":"allow","destination":"session"}]"#
+        );
+        assert_eq!(
+            always(&["decide", "4", "always", "WebFetch", "--scope", "user"]),
+            json!([{"type": "addRules", "rules": [{"toolName": "WebFetch"}], "behavior": "allow", "destination": "userSettings"}])
+        );
+        assert_eq!(
+            always(&[
+                "decide",
+                "4",
+                "always",
+                "Bash(node -e \"console.log('x')\")",
+                "--scope",
+                "local"
+            ]),
+            json!([{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "node -e \"console.log('x')\""}], "behavior": "allow", "destination": "localSettings"}])
+        );
+        assert_eq!(
+            always(&["decide", "4", "always", "mcp__github", "--scope", "project"])[0]["destination"],
+            "projectSettings"
+        );
+        for line in [
+            &["decide", "4", "always"][..],
+            &["decide", "4", "always", "Bash("],
+            &["decide", "4", "always", "Bash()"],
+            &["decide", "4", "always", "(npm test)"],
+            &["decide", "4", "always", "Bash(x) extra"],
+            &["decide", "4", "always", "Bash(x)y"],
+            &["decide", "4", "always", "Read File"],
+            &["decide", "4", "always", "Bash", "--scope", "everywhere"],
+            &["decide", "4", "always", "Bash", "--scope"],
+            &["decide", "4", "always", "Bash", "--global"],
+        ] {
+            assert!(parsed(line).is_err(), "{line:?}");
+        }
     }
 
     #[test]

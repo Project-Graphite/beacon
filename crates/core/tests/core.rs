@@ -191,6 +191,59 @@ fn malformed_control_lines_get_an_error_reply() {
 }
 
 #[test]
+fn a_plan_written_to_the_transcript_after_the_request_reaches_the_snapshot() {
+    use std::io::Write;
+    let home = TempHome::new();
+    let core = start(&home, Ok(Vec::new())).unwrap();
+    std::fs::create_dir_all(&home.0).unwrap();
+    let transcript = home.0.join("plan-session.jsonl");
+    std::fs::write(&transcript, "{\"type\":\"user\"}\n").unwrap();
+    let endpoint = beacon_protocol::Endpoint::read(&home.0).unwrap();
+    let mut helper = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&endpoint.pipe_name)
+        .unwrap();
+    let request = beacon_protocol::HookRequest {
+        meta: json!({"v": 1, "event": "PermissionRequest", "env": {}})
+            .to_string()
+            .into_bytes(),
+        payload: json!({
+            "session_id": "plan-session",
+            "hook_event_name": "PermissionRequest",
+            "transcript_path": transcript,
+            "cwd": home.0,
+            "tool_name": "ExitPlanMode",
+            "tool_input": {},
+        })
+        .to_string()
+        .into_bytes(),
+    };
+    helper
+        .write_all(&request.encode(&endpoint.token).unwrap())
+        .unwrap();
+    let pending = wait_for(&home, |snapshot| snapshot.pending.len() == 1);
+    assert_eq!(pending.pending[0].plan, None);
+    std::thread::sleep(Duration::from_millis(600));
+    let block = json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_late", "name": "ExitPlanMode", "input": {"plan": "# Late plan"}}]}});
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&transcript)
+        .unwrap()
+        .write_all(format!("{block}\n").as_bytes())
+        .unwrap();
+    let planned = wait_for(&home, |snapshot| {
+        snapshot
+            .pending
+            .first()
+            .is_some_and(|pending| pending.plan.is_some())
+    });
+    assert_eq!(planned.pending[0].plan.as_deref(), Some("# Late plan"));
+    drop(helper);
+    core.shutdown().unwrap();
+}
+
+#[test]
 fn subscribers_get_a_snapshot_then_changes() {
     let home = TempHome::new();
     let core = start(&home, Ok(vec![listed("s", "idle")])).unwrap();

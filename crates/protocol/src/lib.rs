@@ -9,6 +9,7 @@ pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
 pub const HOME_ENV: &str = "BEACON_HOME";
 pub const ENDPOINT_FILE: &str = "endpoint";
 pub const DOCTOR_EVENT: &str = "BeaconDoctor";
+pub const DECISION_TIMEOUT_SECS: u64 = 3600;
 pub const WAITING_EVENTS: [&str; 4] = ["PermissionRequest", "Stop", "Elicitation", DOCTOR_EVENT];
 pub const FORWARDED_ENV: [&str; 18] = [
     "CLAUDE_PID",

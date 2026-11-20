@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
 use std::ops::AddAssign;
 use std::path::{Path, PathBuf};
+
+const PLAN_TOOL: &str = "ExitPlanMode";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -83,6 +86,42 @@ impl TranscriptReader {
             },
         })
     }
+}
+
+pub fn find_plan(transcript: &Path, tool_use_id: Option<&str>) -> io::Result<Option<String>> {
+    let mut last = None;
+    for line in BufReader::new(File::open(transcript)?).split(b'\n') {
+        let line = line?;
+        if !line
+            .windows(PLAN_TOOL.len())
+            .any(|window| window == PLAN_TOOL.as_bytes())
+        {
+            continue;
+        }
+        let Ok(line) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        if line["type"] != "assistant" {
+            continue;
+        }
+        for block in line["message"]["content"].as_array().into_iter().flatten() {
+            let Some(plan) = block["input"]["plan"]
+                .as_str()
+                .filter(|plan| !plan.is_empty())
+            else {
+                continue;
+            };
+            if block["type"] != "tool_use" || block["name"] != PLAN_TOOL {
+                continue;
+            }
+            match tool_use_id {
+                Some(id) if block["id"] == id => return Ok(Some(plan.to_string())),
+                Some(_) => {}
+                None => last = Some(plan.to_string()),
+            }
+        }
+    }
+    Ok(last)
 }
 
 fn subagent_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
@@ -432,6 +471,103 @@ mod tests {
         let usage = TranscriptReader::new("changed", &changed).read(0).unwrap();
         assert_eq!(usage.status, UsageStatus::Unrecognized);
         assert_eq!(totals(&usage), [0; 6]);
+    }
+
+    fn plan_call(id: &str, plan: &str) -> String {
+        json!({
+            "type": "assistant",
+            "message": {
+                "id": format!("msg_{id}"),
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "Here is the plan."},
+                    {"type": "tool_use", "id": id, "name": "ExitPlanMode", "input": {"plan": plan}},
+                ],
+            },
+        })
+        .to_string()
+            + "\n"
+    }
+
+    #[test]
+    fn the_plan_is_found_by_its_tool_use_id() {
+        let dir = TempDir::new();
+        let transcript = dir.0.join("p1.jsonl");
+        append(
+            &transcript,
+            &[
+                user(),
+                plan_call("toolu_a", "# First plan"),
+                plan_call("toolu_b", "# Second plan"),
+                json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_b", "content": "ExitPlanMode"}]}}).to_string() + "\n",
+            ]
+            .concat(),
+        );
+        assert_eq!(
+            find_plan(&transcript, Some("toolu_a")).unwrap().as_deref(),
+            Some("# First plan")
+        );
+        assert_eq!(
+            find_plan(&transcript, Some("toolu_b")).unwrap().as_deref(),
+            Some("# Second plan")
+        );
+        assert_eq!(find_plan(&transcript, Some("toolu_c")).unwrap(), None);
+    }
+
+    #[test]
+    fn without_a_tool_use_id_the_last_plan_call_is_used() {
+        let dir = TempDir::new();
+        let transcript = dir.0.join("p2.jsonl");
+        append(
+            &transcript,
+            &[
+                plan_call("toolu_a", "# Old plan"),
+                assistant("msg_x", "m", [1, 1, 1, 1]),
+                plan_call("toolu_b", "# New plan"),
+                json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_c", "name": "ExitPlanMode", "input": {}}]}}).to_string() + "\n",
+            ]
+            .concat(),
+        );
+        assert_eq!(
+            find_plan(&transcript, None).unwrap().as_deref(),
+            Some("# New plan")
+        );
+    }
+
+    #[test]
+    fn a_transcript_without_a_plan_call_has_no_plan() {
+        let dir = TempDir::new();
+        let transcript = dir.0.join("p3.jsonl");
+        append(
+            &transcript,
+            &[
+                user(),
+                assistant("msg_a", "m", [1, 1, 1, 1]),
+                json!({"type": "user", "message": {"role": "user", "content": "mention ExitPlanMode in text"}}).to_string() + "\n",
+                json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_x", "name": "Bash", "input": {"plan": "not a plan", "command": "ExitPlanMode"}}]}}).to_string() + "\n",
+                "{ExitPlanMode not json\n".to_string(),
+            ]
+            .concat(),
+        );
+        assert_eq!(find_plan(&transcript, None).unwrap(), None);
+        assert_eq!(find_plan(&transcript, Some("toolu_x")).unwrap(), None);
+        assert!(find_plan(&dir.0.join("gone.jsonl"), None).is_err());
+    }
+
+    #[test]
+    fn a_plan_written_after_the_first_look_is_found_on_a_retry() {
+        let dir = TempDir::new();
+        let transcript = dir.0.join("p4.jsonl");
+        let call = plan_call("toolu_late", "# Late plan");
+        append(&transcript, &(user() + &call[..call.len() / 2]));
+        assert_eq!(find_plan(&transcript, Some("toolu_late")).unwrap(), None);
+        append(&transcript, &call[call.len() / 2..]);
+        assert_eq!(
+            find_plan(&transcript, Some("toolu_late"))
+                .unwrap()
+                .as_deref(),
+            Some("# Late plan")
+        );
     }
 
     #[test]

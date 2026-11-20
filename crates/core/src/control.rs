@@ -132,6 +132,16 @@ pub struct PendingDecision {
     pub tool_use_id: Option<String>,
     #[serde(default)]
     pub preview: String,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub permission_mode: Option<String>,
+    #[serde(default)]
+    pub agent_type: Option<String>,
+    #[serde(default)]
+    pub expires_ms: u64,
+    #[serde(default)]
+    pub plan: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

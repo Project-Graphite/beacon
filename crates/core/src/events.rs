@@ -64,6 +64,7 @@ pub struct Common {
     pub cwd: Option<String>,
     pub permission_mode: Option<String>,
     pub agent_id: Option<String>,
+    pub agent_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -120,7 +121,10 @@ pub enum Event {
     Notification {
         notification_type: Option<String>,
     },
-    Elicitation,
+    Elicitation {
+        mcp_server_name: Option<String>,
+        message: Option<String>,
+    },
     ElicitationResult,
     CwdChanged {
         new_cwd: Option<String>,

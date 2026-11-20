@@ -60,6 +60,14 @@ pub struct Session {
     pub editor: Option<String>,
     #[serde(default)]
     pub usage: Option<SessionUsage>,
+    #[serde(default)]
+    pub mcp_request: Option<McpRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct McpRequest {
+    pub server: String,
+    pub message: String,
 }
 
 impl Session {
@@ -94,6 +102,7 @@ impl Session {
             alerting: false,
             editor: None,
             usage: None,
+            mcp_request: None,
         }
     }
 
@@ -101,6 +110,9 @@ impl Session {
         let before = self.state;
         self.state = transition(self.state, input);
         self.overlays = overlays_after(self.overlays, input);
+        if self.state != SessionState::NeedsMcpInput {
+            self.mcp_request = None;
+        }
         if self.attention && !self.state.needs_attention() {
             self.snoozed_until_ms = None;
         }

@@ -5,7 +5,7 @@ use crate::engine::{Engine, HookOutcome, ProcessExit};
 use crate::lister::SessionLister;
 use crate::log::{Logger, now_ms};
 use crate::platform::{self, InstanceLock, PIPE_PREFIX, PipeSecurity};
-use crate::usage::TranscriptReader;
+use crate::usage::{TranscriptReader, find_plan};
 use beacon_protocol::{
     Channel, ENDPOINT_FILE, Endpoint, HookReply, MAX_FRAME_LEN, TOKEN_LEN, channel_for, frame_len,
     tokens_match,
@@ -31,6 +31,13 @@ const PERSIST_DEBOUNCE: Duration = Duration::from_millis(500);
 const SUBSCRIBE_INTERVAL: Duration = Duration::from_millis(100);
 const STALL_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 const USAGE_READ_INTERVAL: Duration = Duration::from_secs(2);
+const PLAN_RETRY_DELAYS: [Duration; 5] = [
+    Duration::ZERO,
+    Duration::from_millis(250),
+    Duration::from_millis(500),
+    Duration::from_millis(1000),
+    Duration::from_millis(1250),
+];
 
 pub struct CoreOptions {
     pub home: PathBuf,
@@ -148,6 +155,7 @@ fn run(
         tasks.spawn_local(check_stalls(shared.clone()));
         tasks.spawn_local(expire_snoozes(shared.clone()));
         tasks.spawn_local(read_usage(shared.clone()));
+        tasks.spawn_local(read_plans(shared.clone()));
         tasks.spawn_local(persist(shared.clone(), options.home.clone()));
         let mut shutdown_requested = shutdown.subscribe();
         tokio::select! {
@@ -590,6 +598,41 @@ async fn read_usage(shared: Rc<Shared>) -> io::Result<()> {
             }
         }
     }
+}
+
+async fn read_plans(shared: Rc<Shared>) -> io::Result<()> {
+    let mut changes = shared.engine.borrow().watch_changes();
+    while changes.changed().await.is_ok() {
+        let wanted = shared.engine.borrow_mut().take_plans_wanted();
+        for id in wanted {
+            tokio::task::spawn_local(fetch_plan(shared.clone(), id));
+        }
+    }
+    Ok(())
+}
+
+async fn fetch_plan(shared: Rc<Shared>, id: u64) {
+    for delay in PLAN_RETRY_DELAYS {
+        sleep(delay).await;
+        let Some((transcript, tool_use_id)) = shared.engine.borrow().plan_source(id) else {
+            return;
+        };
+        let found =
+            spawn_blocking(move || find_plan(Path::new(&transcript), tool_use_id.as_deref()))
+                .await
+                .map_err(io::Error::other)
+                .and_then(|found| found);
+        match found {
+            Ok(Some(plan)) => return shared.engine.borrow_mut().set_plan(id, plan),
+            Ok(None) => {}
+            Err(error) => shared.engine.borrow().log.debug(format_args!(
+                "plan of decision {id} not readable yet: {error}"
+            )),
+        }
+    }
+    shared.engine.borrow().log.info(format_args!(
+        "no plan text found in the transcript for decision {id}"
+    ));
 }
 
 async fn check_stalls(shared: Rc<Shared>) -> io::Result<()> {

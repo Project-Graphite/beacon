@@ -10,6 +10,7 @@ use std::time::Duration;
 const REDRAW_INTERVAL: Duration = Duration::from_secs(1);
 const SESSION_ID_CHARS: usize = 8;
 const ACTIVITY_CHARS: usize = 60;
+const EXPIRY_SHOWN_MS: u64 = 15 * 60 * 1000;
 
 pub fn run(home: &Path, watch: bool, json: bool) -> Result<ExitCode, String> {
     let mut client = connect(home)?;
@@ -128,7 +129,15 @@ pub fn render(snapshot: &Snapshot, now: u64) -> String {
                             .unwrap_or_else(|| "-".to_string()),
                         pending.tool_name.clone(),
                         pending.preview.clone(),
-                        age(now, pending.created_ms),
+                        if pending.expires_ms.saturating_sub(now) < EXPIRY_SHOWN_MS {
+                            format!(
+                                "{}, expires in {}",
+                                age(now, pending.created_ms),
+                                age(pending.expires_ms, now)
+                            )
+                        } else {
+                            age(now, pending.created_ms)
+                        },
                     ]
                 })
                 .collect(),
@@ -240,6 +249,11 @@ mod tests {
             kind: PermissionKind::Tool,
             created_ms: NOW - 5_000,
             tool_use_id: None,
+            cwd: None,
+            permission_mode: None,
+            agent_type: None,
+            expires_ms: NOW - 5_000 + 3_600_000,
+            plan: None,
         }
     }
 
@@ -330,6 +344,32 @@ ID  PROJECT  TOOL                    INPUT                                      
 5   -        Edit                    C:\\x\\a.rs                                    5s
 6   -        WebFetch                https://example.test/?api_key=***            5s
 7   -        AskUserQuestion         {\"questions\":[{\"question\":\"Which?\"}]}        5s
+"
+        );
+    }
+
+    #[test]
+    fn requests_show_their_time_left_under_fifteen_minutes() {
+        let mut late = pending(8, "nobody", "Bash", json!({"command": "ls"}));
+        late.created_ms = NOW - 2_880_000;
+        late.expires_ms = NOW + 720_000;
+        let mut edge = pending(9, "nobody", "Bash", json!({"command": "pwd"}));
+        edge.expires_ms = NOW + 900_000;
+        let snapshot = Snapshot {
+            sessions: Vec::new(),
+            pending: vec![late, edge],
+            resolved: Vec::new(),
+            snoozed_until_ms: None,
+            account_usage: None,
+        };
+        assert_eq!(
+            render(&snapshot, NOW),
+            "\
+No sessions.
+
+ID  PROJECT  TOOL  INPUT  AGE
+8   -        Bash  ls     48m00s, expires in 12m00s
+9   -        Bash  pwd    5s
 "
         );
     }

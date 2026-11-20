@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { redact } from './redact.ts';
+
+test('secret assignments keep the name and mask the value', () => {
+  assert.equal(redact('GITHUB_TOKEN=abc123 npm publish'), 'GITHUB_TOKEN=*** npm publish');
+  assert.equal(redact('$env:OPENAI_API_KEY="s3cr3t value"; run'), '$env:OPENAI_API_KEY=***; run');
+  assert.equal(redact("mysql --password='p w' db"), 'mysql --password=*** db');
+  assert.equal(redact('DB_PASSWD=hunter2'), 'DB_PASSWD=***');
+  assert.equal(redact('client_secret=xyz&a=1'), 'client_secret=***');
+  assert.equal(redact('set private_key=-----BEGIN'), 'set private_key=***');
+});
+
+test('ordinary assignments are left alone', () => {
+  for (const text of ['NODE_ENV=production npm start', 'count=3', 'KEY=', 'echo TOKEN is unset', 'cd C:\\keys && dir']) {
+    assert.equal(redact(text), text);
+  }
+});
+
+test('authorization headers and bearer tokens are masked', () => {
+  assert.equal(
+    redact('curl -H "Authorization: Basic dXNlcjpwYXNz" https://x.test'),
+    'curl -H "Authorization: ***" https://x.test',
+  );
+  assert.equal(redact('authorization: token abc\nnext line'), 'authorization: ***\nnext line');
+  assert.equal(redact("curl -H 'Bearer eyJhbGciOi.payload.sig' x"), "curl -H 'Bearer ***' x");
+  assert.equal(redact('Bearer'), 'Bearer');
+});
+
+test('long prefixed tokens are masked', () => {
+  assert.equal(redact('use sk-ant-api03-abcdefghijklmnop now'), 'use *** now');
+  assert.equal(
+    redact('git push https://ghp_0123456789abcdefABCDEF@github.com/x'),
+    'git push https://***@github.com/x',
+  );
+  assert.equal(redact('xoxb-123456789012-abcdefghij'), '***');
+  assert.equal(
+    redact('sk-short and task-sk-0123456789abcdefghij'),
+    'sk-short and task-sk-0123456789abcdefghij',
+  );
+});
+
+test('non-ASCII text survives', () => {
+  assert.equal(redact('é API_KEY=ж日本 ü'), 'é API_KEY=*** ü');
+});
+
+test('the preview vectors of the core match', () => {
+  assert.equal(redact('curl -H "Authorization: Bearer abc"\nhttps://x.test'), 'curl -H "Authorization: ***"\nhttps://x.test');
+  assert.equal(redact('API_KEY=abc123 npm run deploy'), 'API_KEY=*** npm run deploy');
+  assert.equal(redact('https://example.test/?api_key=k'), 'https://example.test/?api_key=***');
+});

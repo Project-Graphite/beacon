@@ -9,15 +9,25 @@ interface HeaderProps {
   accountUsage: AccountUsage | null;
   snoozedUntil: number | null;
   pinned: boolean;
+  queue: { position: number; total: number } | null;
   run: (action: Promise<unknown>) => void;
 }
 
-export function Header({ sessions, accountUsage, snoozedUntil, pinned, run }: HeaderProps) {
+export function Header({ sessions, accountUsage, snoozedUntil, pinned, queue, run }: HeaderProps) {
   return (
     <header className="relative z-20 flex h-10 shrink-0 items-center gap-2 border-b border-line-soft px-3">
       <h1 className="shrink-0 font-semibold text-ink">Beacon</h1>
       <p className="min-w-0 truncate text-secondary text-muted">{summary(sessions)}</p>
       <div className="ml-auto flex shrink-0 items-center gap-1">
+        {queue && (
+          <span
+            title="Tab and Shift+Tab move between requests"
+            className="mr-1 flex items-center gap-1.5 font-mono text-micro text-muted tabular-nums"
+          >
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-wip" />
+            {queue.position} of {queue.total}
+          </span>
+        )}
         {accountUsage && <UsageButton usage={accountUsage} />}
         <SnoozeMenu snoozedUntil={snoozedUntil} run={run} />
         {pinned && (

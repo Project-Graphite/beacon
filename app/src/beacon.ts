@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { AddRules } from './lib/rules.ts';
 
 export type SessionState =
   | 'starting'
@@ -65,6 +66,12 @@ export interface Session {
   alerting: boolean;
   editor: string | null;
   usage: SessionUsage | null;
+  mcp_request: McpRequest | null;
+}
+
+export interface McpRequest {
+  server: string;
+  message: string;
 }
 
 export interface PendingDecision {
@@ -78,6 +85,11 @@ export interface PendingDecision {
   created_ms: number;
   tool_use_id: string | null;
   preview: string;
+  cwd: string | null;
+  permission_mode: string | null;
+  agent_type: string | null;
+  expires_ms: number;
+  plan: string | null;
 }
 
 export interface ResolvedDecision {
@@ -117,6 +129,14 @@ export interface SessionDetail {
   last_message: string | null;
 }
 
+export type Decision =
+  | { type: 'allow' }
+  | { type: 'allow_with_input'; input: unknown }
+  | { type: 'allow_always'; permissions: AddRules[] }
+  | { type: 'answer'; answers: Record<string, string> }
+  | { type: 'deny'; message?: string }
+  | { type: 'deny_and_stop'; message?: string };
+
 export type PanelMode = 'hover' | 'sticky' | 'pinned';
 
 export interface Opened {
@@ -127,6 +147,7 @@ export interface Opened {
 export const getSnapshot = () => invoke<Snapshot>('get_snapshot');
 export const getDetail = (sessionId: string) => invoke<SessionDetail>('get_detail', { sessionId });
 export const acknowledge = (sessionId: string) => invoke<void>('acknowledge', { sessionId });
+export const decide = (id: number, decision: Decision) => invoke<void>('decide', { id, decision });
 export const snooze = (sessionId: string | null, minutes: number) =>
   invoke<void>('snooze', { sessionId, minutes });
 export const unsnooze = (sessionId: string | null) => invoke<void>('unsnooze', { sessionId });

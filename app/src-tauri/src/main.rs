@@ -46,10 +46,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         beacon_core::home_dir()
             .ok_or("cannot locate the Beacon home: set BEACON_HOME or LOCALAPPDATA")?,
     );
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+    let mut builder = tauri::Builder::default();
+    if std::env::var_os("BEACON_HOME").is_none() {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
             shell::post(app, Action::OpenPanel)
-        }))
+        }));
+    }
+    builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(feed.clone())
@@ -57,6 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             panel::get_snapshot,
             panel::get_detail,
             panel::acknowledge,
+            panel::decide,
             panel::snooze,
             panel::unsnooze,
             panel::refresh_usage,

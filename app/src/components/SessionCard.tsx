@@ -2,9 +2,10 @@ import { useState, type MouseEvent } from 'react';
 import type { PendingDecision, Session } from '../beacon';
 import { plainText } from '../lib/markdown.ts';
 import { cardId, metaItems, statePhrase, surface, turnTime, type Tone } from '../lib/sessions.ts';
+import type { ResolutionNotice } from '../lib/queue.ts';
 import { CardActions } from './CardActions';
 import { Icon } from './Icon';
-import { PendingRequest } from './PendingRequest';
+import { RequestCard } from './RequestCard';
 import { SessionDetails } from './SessionDetails';
 import { StateMark } from './StateMark';
 
@@ -18,6 +19,10 @@ const TONE_CLASSES: Record<Tone, string> = {
 interface SessionCardProps {
   session: Session;
   pending: PendingDecision[];
+  notices: ResolutionNotice[];
+  currentId: number | null;
+  queueSize: number;
+  keys: Map<number, (key: string) => void>;
   now: number;
   selected: boolean;
   expanded: boolean;
@@ -29,6 +34,10 @@ interface SessionCardProps {
 export function SessionCard({
   session,
   pending,
+  notices,
+  currentId,
+  queueSize,
+  keys,
   now,
   selected,
   expanded,
@@ -44,7 +53,7 @@ export function SessionCard({
   const time = turnTime(session, now);
   const meta = metaItems(session);
   const activate = (event: MouseEvent) => {
-    if (!(event.target instanceof Element && event.target.closest('button'))) onActivate();
+    if (!(event.target instanceof Element && event.target.closest('button, [id^="request-"]'))) onActivate();
   };
 
   return (
@@ -95,9 +104,32 @@ export function SessionCard({
               )}
             </p>
           )}
-          {pending.map((each) => (
-            <PendingRequest key={each.id} pending={each} now={now} />
+          {pending.map((request) => (
+            <RequestCard
+              key={request.id}
+              request={request}
+              now={now}
+              marked={queueSize > 1 && request.id === currentId}
+              currentId={currentId}
+              keys={keys}
+            />
           ))}
+          {notices.map((notice) => (
+            <p key={notice.id} className="mt-2 text-micro text-muted">
+              {notice.text}
+            </p>
+          ))}
+          {session.state === 'needs_mcp_input' && (
+            <div className="mt-2 rounded-field border border-line p-2">
+              <p className="text-secondary text-ink">
+                {session.mcp_request?.server || 'An MCP server'} is asking for input
+              </p>
+              {session.mcp_request?.message && (
+                <p className="mt-0.5 text-secondary text-muted [overflow-wrap:anywhere]">{session.mcp_request.message}</p>
+              )}
+              <p className="mt-1 text-micro text-muted">Answer in the session window: Beacon does not answer MCP forms.</p>
+            </div>
+          )}
           {meta.length > 0 && (
             <p className="mt-1 truncate font-mono text-micro text-faint">
               {meta.map((item, index) => (

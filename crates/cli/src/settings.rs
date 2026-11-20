@@ -1,3 +1,4 @@
+use beacon_protocol::DECISION_TIMEOUT_SECS;
 use serde::{Deserialize, Serialize};
 use serde_json::ser::{PrettyFormatter, Serializer};
 use serde_json::{Map, Value, json};
@@ -29,8 +30,11 @@ pub const EVENTS: [(&str, Shape); 22] = [
     ("CwdChanged", Shape::Async),
     ("PostModelSwitch", Shape::Async),
     ("ElicitationResult", Shape::Async),
-    ("PermissionRequest", Shape::Blocking(Some(3600))),
-    ("Elicitation", Shape::Blocking(Some(3600))),
+    (
+        "PermissionRequest",
+        Shape::Blocking(Some(DECISION_TIMEOUT_SECS)),
+    ),
+    ("Elicitation", Shape::Blocking(Some(DECISION_TIMEOUT_SECS))),
     ("Stop", Shape::Blocking(Some(10))),
     ("SessionEnd", Shape::Blocking(None)),
     ("StopFailure", Shape::Blocking(None)),
