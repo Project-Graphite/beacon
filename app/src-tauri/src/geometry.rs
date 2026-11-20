@@ -289,7 +289,7 @@ pub fn tab_rect(bounds: &Rect, placement: TabPlacement, depth: f64, scale: f64) 
     let (length, depth) = (px(TAB_LENGTH, scale), px(depth, scale));
     let (start, end) = span(bounds, placement.edge);
     let centre = start + (f64::from(end - start) * placement.offset.clamp(0.0, 1.0)).round() as i32;
-    let along = (centre - length / 2).clamp(start, end - length);
+    let along = (centre - length / 2).clamp(start, (end - length).max(start));
     match placement.edge {
         Edge::Left => Rect::sized(bounds.left, along, depth, length),
         Edge::Right => Rect::sized(bounds.right - depth, along, depth, length),
@@ -604,6 +604,17 @@ pub(crate) mod tests {
 
     fn at(edge: Edge, offset: f64) -> TabPlacement {
         TabPlacement { edge, offset }
+    }
+
+    #[test]
+    fn a_span_shorter_than_the_tab_starts_the_tab_at_its_origin() {
+        let empty = Rect::sized(0, 0, 0, 0);
+        for edge in [Edge::Left, Edge::Right] {
+            assert_eq!(tab_rect(&empty, at(edge, 0.5), 4.0, 1.0).top, 0);
+        }
+        for edge in [Edge::Top, Edge::Bottom] {
+            assert_eq!(tab_rect(&empty, at(edge, 0.5), 4.0, 1.0).left, 0);
+        }
     }
 
     #[test]
