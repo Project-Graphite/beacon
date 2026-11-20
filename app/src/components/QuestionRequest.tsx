@@ -11,7 +11,7 @@ const DISMISSED = 'The user dismissed the question.';
 interface QuestionRequestProps {
   request: PendingDecision;
   sending: boolean;
-  keys: Map<number, (key: string) => void>;
+  keys: Map<number, (key: string) => void> | null;
   send: (decision: Decision) => void;
   onJump: () => void;
 }
@@ -26,6 +26,7 @@ export function QuestionRequest({ request, sending, keys, send, onJump }: Questi
   const dismiss = () => send({ type: 'deny', message: DISMISSED });
 
   useEffect(() => {
+    if (!keys) return;
     keys.set(request.id, (key) => {
       if (sending) return;
       if (key === 'a') submit();
@@ -52,7 +53,7 @@ export function QuestionRequest({ request, sending, keys, send, onJump }: Questi
               {question.options.map((option) => (
                 <label
                   key={option.label}
-                  className="flex cursor-pointer items-baseline gap-2 rounded-field px-1.5 py-1 transition-colors duration-150 ease-settle hover:bg-surface"
+                  className="flex cursor-pointer items-baseline gap-2 rounded-field px-1.5 py-1 transition-colors duration-120 ease-settle hover:bg-surface"
                 >
                   <input
                     type={kind}

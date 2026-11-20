@@ -1,4 +1,4 @@
-import type { PendingDecision } from '../beacon';
+import type { Decision, PendingDecision } from '../beacon';
 import { formatDuration } from './format.ts';
 import { shortenPath } from './paths.ts';
 
@@ -18,6 +18,10 @@ export function requestMeta(request: PendingDecision, now: number): string[] {
   if (request.cwd === null) return rest;
   const used = rest.reduce((total, item) => total + item.length + 3, 0);
   return [shortenPath(request.cwd, Math.max(MIN_PATH_CHARS, META_CHARS - used)), ...rest];
+}
+
+export function decisionMark(decision: Decision): 'check' | 'cross' {
+  return decision.type === 'deny' || decision.type === 'deny_and_stop' ? 'cross' : 'check';
 }
 
 export function mcpTool(toolName: string): { server: string; tool: string } | null {

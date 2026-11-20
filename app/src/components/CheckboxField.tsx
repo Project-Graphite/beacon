@@ -19,7 +19,7 @@ export function CheckboxField({ label, help, checked, disabled, onChange }: Chec
           disabled={disabled}
           aria-describedby={help ? helpId : undefined}
           onChange={(event) => onChange(event.target.checked)}
-          className="peer absolute inset-0 m-0 cursor-[inherit] appearance-none rounded-[4px] border border-line bg-paper transition-colors duration-150 ease-settle checked:border-ink checked:bg-ink hover:border-muted"
+          className="peer absolute inset-0 m-0 cursor-[inherit] appearance-none rounded-[4px] border border-line bg-paper transition-colors duration-120 ease-settle checked:border-ink checked:bg-ink hover:border-muted"
         />
         <svg
           viewBox="0 0 16 16"

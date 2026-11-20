@@ -17,7 +17,7 @@ export function RuleEditor({ initialRule, initialDestination, disabled, onSave, 
   const rule = parseRule(ruleText);
   return (
     <div
-      className="mt-2 space-y-1.5"
+      className="mt-2 origin-top-left animate-appear space-y-1.5"
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.stopPropagation();

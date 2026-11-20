@@ -35,7 +35,7 @@ export function SessionDetails({ session, expanded, onJumpReport }: SessionDetai
   const timeline = [...(detail?.timeline ?? [])].sort((a, b) => b.t_ms - a.t_ms);
 
   return (
-    <div className="space-y-3 border-t border-line-soft pt-2.5 pr-3 pb-3 pl-[38px]">
+    <div className="space-y-3 border-t border-line-soft pt-2.5 pr-2.5 pb-3 pl-8">
       {failure && <p className="text-micro text-danger">Cannot load details: {failure}</p>}
       {detail?.last_message && (
         <section>
@@ -92,7 +92,7 @@ export function SessionDetails({ session, expanded, onJumpReport }: SessionDetai
           {!showAll && timeline.length > TIMELINE_LIMIT && (
             <button
               type="button"
-              className="mt-1 rounded-field text-micro text-muted hover:text-ink"
+              className="press mt-1 rounded-field text-micro text-muted hover:text-ink"
               onClick={() => setShowAll(true)}
             >
               Show all

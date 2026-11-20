@@ -14,6 +14,8 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [sentText, setSentText] = useState<{ id: number; text: string } | null>(null);
+  const [mountedAt] = useState(Date.now);
   const path = promptPath(session);
   const prompts = recentPrompts(session.prompts);
   if (!path && prompts.length === 0) return null;
@@ -32,7 +34,11 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
           });
     sent
       .then(
-        (succeeded) => succeeded && setText(''),
+        (succeeded) => {
+          if (!succeeded) return;
+          setSentText({ id: Date.now(), text });
+          setText('');
+        },
         (error) => setFailure(String(error)),
       )
       .finally(() => setSending(false));
@@ -42,21 +48,32 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
     <section>
       {path && (
         <>
-          <textarea
-            id={promptBoxId(session.session_id)}
-            aria-label="Prompt for this session"
-            placeholder="Send a prompt"
-            value={text}
-            readOnly={sending}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                send();
-              }
-            }}
-            className="block max-h-[calc(6lh+10px)] min-h-[calc(2lh+10px)] w-full resize-none rounded-field border border-line bg-paper px-2 py-1 text-secondary text-ink field-sizing-content placeholder:text-faint focus:border-muted focus:outline-none"
-          />
+          <div className="relative">
+            <textarea
+              id={promptBoxId(session.session_id)}
+              aria-label="Prompt for this session"
+              placeholder="Send a prompt"
+              value={text}
+              readOnly={sending}
+              onChange={(event) => setText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  send();
+                }
+              }}
+              className="block max-h-[calc(6lh+10px)] min-h-[calc(2lh+10px)] w-full resize-none rounded-field border border-line bg-paper px-2 py-1 text-secondary text-ink field-sizing-content placeholder:text-faint focus:border-muted focus:outline-none"
+            />
+            {sentText && (
+              <p
+                key={sentText.id}
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 top-0 animate-sent truncate border border-transparent px-2 py-1 text-secondary text-ink"
+              >
+                {sentText.text}
+              </p>
+            )}
+          </div>
           <div className="mt-1.5 flex items-start gap-2">
             <p className="min-w-0 flex-1 text-micro text-muted">{path.label}</p>
             <FilledButton disabled={sending || !text.trim()} onClick={send}>
@@ -69,7 +86,10 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
       {prompts.length > 0 && (
         <ol className="mt-2 space-y-1">
           {prompts.map((prompt) => (
-            <li key={prompt.id} className="min-w-0">
+            <li
+              key={prompt.id}
+              className={`min-w-0 ${prompt.created_ms > mountedAt ? 'origin-top-left animate-appear' : ''}`}
+            >
               <p className="truncate text-secondary text-ink">{prompt.preview}</p>
               <p className="flex items-baseline gap-2 text-micro">
                 <span className={`min-w-0 ${prompt.status === 'failed' ? 'text-danger' : 'text-muted'}`}>
