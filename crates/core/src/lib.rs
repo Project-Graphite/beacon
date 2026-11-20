@@ -8,6 +8,7 @@ pub mod lister;
 mod log;
 mod platform;
 mod preview;
+pub mod progress;
 pub mod prompts;
 mod redact;
 mod server;

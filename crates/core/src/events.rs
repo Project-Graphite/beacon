@@ -72,6 +72,7 @@ pub struct ToolUse {
     pub tool_name: String,
     pub tool_input: Option<Value>,
     pub tool_use_id: Option<String>,
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -106,8 +107,14 @@ pub enum Event {
         agent_type: Option<String>,
     },
     SubagentStop,
-    TaskCreated,
-    TaskCompleted,
+    TaskCreated {
+        task_id: Option<String>,
+        task_subject: Option<String>,
+    },
+    TaskCompleted {
+        task_id: Option<String>,
+        task_subject: Option<String>,
+    },
     Stop {
         last_assistant_message: Option<String>,
         background_tasks: Option<Vec<IgnoredAny>>,

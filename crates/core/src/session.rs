@@ -1,9 +1,11 @@
 use crate::focus::Host;
+use crate::progress::{CurrentStep, Step, Task};
 use crate::prompts::Prompt;
 use crate::state::{AgentStatus, Input, Overlays, SessionState, overlays_after, transition};
 use crate::usage::SessionUsage;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::path::Path;
 
 const COMMAND_CHARS: usize = 80;
@@ -68,6 +70,18 @@ pub struct Session {
     pub host: Option<Host>,
     #[serde(default)]
     pub prompts: Vec<Prompt>,
+    #[serde(default)]
+    pub tasks: Vec<Task>,
+    #[serde(default)]
+    pub task_current: Option<String>,
+    #[serde(skip)]
+    pub steps: VecDeque<Step>,
+    #[serde(default)]
+    pub step_current: Option<CurrentStep>,
+    #[serde(default)]
+    pub command_current: Option<String>,
+    #[serde(default)]
+    pub dismissed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -111,6 +125,12 @@ impl Session {
             mcp_request: None,
             host: None,
             prompts: Vec::new(),
+            tasks: Vec::new(),
+            task_current: None,
+            steps: VecDeque::new(),
+            step_current: None,
+            command_current: None,
+            dismissed: false,
         }
     }
 
@@ -126,12 +146,13 @@ impl Session {
             self.snoozed_until_ms = None;
         }
         self.attention = self.state.needs_attention();
+        let turn_ended = ends_turn(input, before, self.state);
+        if turn_ended {
+            self.stop_running_steps();
+        }
         if input == Input::PromptSubmitted {
             self.turn_ended_ms = None;
-        } else if self.turn_started_ms.is_some()
-            && self.turn_ended_ms.is_none()
-            && ends_turn(input, before, self.state)
-        {
+        } else if self.turn_started_ms.is_some() && self.turn_ended_ms.is_none() && turn_ended {
             self.turn_ended_ms = Some(now_ms);
         }
     }

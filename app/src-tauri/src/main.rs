@@ -12,6 +12,7 @@ mod positions;
 mod raster;
 mod settings;
 mod shell;
+mod sounds;
 mod toasts;
 mod tray;
 
@@ -72,6 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             panel::get_snapshot,
             panel::get_detail,
             panel::acknowledge,
+            panel::dismiss,
             panel::decide,
             panel::snooze,
             panel::unsnooze,

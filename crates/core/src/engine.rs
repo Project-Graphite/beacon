@@ -10,6 +10,7 @@ use crate::lister::ListedSession;
 use crate::log::{Logger, now_ms};
 use crate::platform::{ProcessWatch, process_alive, process_image_path};
 use crate::preview::input_preview;
+use crate::progress::{LABEL_CHARS, StepKind, step_kind};
 use crate::prompts::stop_output;
 use crate::redact::redact;
 use crate::session::{McpRequest, Session, activity_line, surface_from_image};
@@ -28,7 +29,6 @@ const RESOLVED_KEPT: usize = 32;
 const DOCTOR_REPLY: &[u8] = br#"{"beacon":"ok"}"#;
 const ENDED_KEPT_MS: u64 = 24 * 60 * 60 * 1000;
 const TIMELINE_KEPT: usize = 60;
-const LABEL_CHARS: usize = 200;
 const LAST_MESSAGE_BYTES: usize = 64 * 1024;
 const USAGE_EVENTS: [&str; 4] = ["Stop", "SubagentStop", "PostToolBatch", "SessionEnd"];
 const FOLLOWUP_DELIVERED: &str = "Follow-up delivered from Beacon";
@@ -185,7 +185,10 @@ impl Engine {
             sessions: self
                 .sessions
                 .values()
-                .map(Session::without_prompt_texts)
+                .map(|session| Session {
+                    steps: VecDeque::new(),
+                    ..session.without_prompt_texts()
+                })
                 .collect(),
             pending: self
                 .pending
@@ -227,6 +230,7 @@ impl Engine {
             }
             Request::Decide { id, decision } => self.decide(id, decision),
             Request::Acknowledge { session_id } => self.acknowledge(&session_id, now_ms()),
+            Request::Dismiss { session_id } => self.dismiss(&session_id, now_ms()),
             Request::Snooze { minutes: 0, .. } => {
                 Err("a snooze needs at least one minute".to_string())
             }
@@ -311,15 +315,18 @@ impl Engine {
         let globally_snoozed = self.snoozed_until_ms.is_some();
         for session in self.sessions.values_mut() {
             session.snoozed_until_ms = active(session.snoozed_until_ms);
-            session.alerting =
-                session.attention && session.snoozed_until_ms.is_none() && !globally_snoozed;
+            session.alerting = session.attention
+                && session.snoozed_until_ms.is_none()
+                && !globally_snoozed
+                && !session.dismissed;
         }
     }
 
     pub fn detail(&self, session_id: &str) -> Result<SessionDetail, String> {
-        if !self.sessions.contains_key(session_id) {
-            return Err(format!("no session {session_id}"));
-        }
+        let session = self
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| format!("no session {session_id}"))?;
         let runtime = self.runtime.get(session_id);
         Ok(SessionDetail {
             session_id: session_id.to_string(),
@@ -327,6 +334,8 @@ impl Engine {
                 .map(|runtime| runtime.timeline.iter().cloned().collect())
                 .unwrap_or_default(),
             last_message: runtime.and_then(|runtime| runtime.last_message.clone()),
+            steps: session.steps.iter().cloned().collect(),
+            tasks: session.tasks.clone(),
         })
     }
 
@@ -475,6 +484,20 @@ impl Engine {
             &event,
             session.cwd.as_deref(),
         ));
+        let mut kind = step_kind(
+            &common.hook_event_name,
+            match &event {
+                Event::PreToolUse(tool_use)
+                | Event::PostToolUse(tool_use)
+                | Event::PostToolUseFailure(tool_use) => Some(tool_use.tool_name.as_str()),
+                Event::PermissionRequest { tool_name, .. } => Some(tool_name.as_str()),
+                _ => None,
+            },
+        );
+        let tool_step = matches!(
+            event,
+            Event::PreToolUse(_) | Event::PostToolUse(_) | Event::PostToolUseFailure(_)
+        );
         let (input, followup) = match event {
             Event::SessionStart {
                 source,
@@ -483,6 +506,10 @@ impl Engine {
             } => {
                 session.model = model.or(session.model.take());
                 session.title = session_title.or(session.title.take());
+                session.dismissed = false;
+                if source.as_deref() == Some("clear") {
+                    session.clear_tasks();
+                }
                 (
                     start_source(source.as_deref()).map(Input::SessionStarted),
                     Followup::Nothing,
@@ -491,10 +518,12 @@ impl Engine {
             Event::UserPromptSubmit { session_title } => {
                 session.title = session_title.or(session.title.take());
                 session.turn_started_ms = Some(now);
+                session.dismissed = false;
                 (Some(Input::PromptSubmitted), Followup::Nothing)
             }
             Event::PreToolUse(tool_use) => {
                 session.activity = Some(label.clone());
+                session.start_step(&tool_use, kind, &label, now);
                 (
                     Some(Input::ToolActivity(ToolEvent::Tool)),
                     Followup::ToolUsed(tool_use),
@@ -502,6 +531,13 @@ impl Engine {
             }
             Event::PostToolUse(tool_use) | Event::PostToolUseFailure(tool_use) => {
                 session.activity = Some(label.clone());
+                session.finish_step(
+                    &tool_use,
+                    kind,
+                    &label,
+                    common.hook_event_name == "PostToolUseFailure",
+                    now,
+                );
                 (
                     Some(Input::ToolActivity(ToolEvent::Tool)),
                     Followup::ToolRan(tool_use.tool_use_id),
@@ -524,15 +560,27 @@ impl Engine {
                 Some(Input::ToolActivity(ToolEvent::SubagentStopped)),
                 Followup::Nothing,
             ),
-            Event::TaskCreated => {
-                session.tasks_created += 1;
+            Event::TaskCreated {
+                task_id,
+                task_subject,
+            } => {
+                session.create_task(
+                    task_id.unwrap_or_default(),
+                    task_subject.as_deref().unwrap_or_default(),
+                );
                 (
                     Some(Input::ToolActivity(ToolEvent::Task)),
                     Followup::Nothing,
                 )
             }
-            Event::TaskCompleted => {
-                session.tasks_completed += 1;
+            Event::TaskCompleted {
+                task_id,
+                task_subject,
+            } => {
+                session.complete_task(
+                    task_id.unwrap_or_default(),
+                    task_subject.as_deref().unwrap_or_default(),
+                );
                 (
                     Some(Input::ToolActivity(ToolEvent::Task)),
                     Followup::Nothing,
@@ -542,14 +590,17 @@ impl Engine {
                 tool_name,
                 tool_input,
                 permission_suggestions,
-            } if meta.event == "PermissionRequest" => (
-                None,
-                Followup::PermissionAsked {
-                    tool_name,
-                    tool_input: tool_input.unwrap_or(Value::Null),
-                    permission_suggestions: permission_suggestions.unwrap_or(Value::Null),
-                },
-            ),
+            } if meta.event == "PermissionRequest" => {
+                session.dismissed = false;
+                (
+                    None,
+                    Followup::PermissionAsked {
+                        tool_name,
+                        tool_input: tool_input.unwrap_or(Value::Null),
+                        permission_suggestions: permission_suggestions.unwrap_or(Value::Null),
+                    },
+                )
+            }
             Event::Stop {
                 last_assistant_message,
                 background_tasks,
@@ -568,6 +619,7 @@ impl Engine {
                 {
                     Some(text) => {
                         label = FOLLOWUP_DELIVERED.to_string();
+                        kind = StepKind::Prompt;
                         (
                             Some(Input::ToolActivity(ToolEvent::Tool)),
                             Followup::PromptDelivered(text),
@@ -597,6 +649,7 @@ impl Engine {
                 mcp_server_name,
                 message,
             } => {
+                session.dismissed = false;
                 session.mcp_request = Some(McpRequest {
                     server: mcp_server_name.unwrap_or_default(),
                     message: message.unwrap_or_default(),
@@ -620,6 +673,9 @@ impl Engine {
         };
         if let Some(input) = input {
             session.apply(input, now);
+        }
+        if !tool_step {
+            session.add_step(kind, &label, now);
         }
         if reads_usage && let Some(path) = &session.transcript_path {
             self.usage_wanted.insert(session_id.clone(), path.clone());
@@ -832,6 +888,13 @@ impl Engine {
             label,
             now_ms(),
         );
+        if let Some(session) = self.sessions.get_mut(&pending.view.session_id) {
+            session.add_step(
+                step_kind("PermissionResolved", Some(&pending.view.tool_name)),
+                label,
+                now_ms(),
+            );
+        }
         if self.resolved.len() == RESOLVED_KEPT {
             self.resolved.pop_front();
         }
@@ -866,6 +929,23 @@ impl Engine {
         self.apply(session_id, Input::Acknowledged);
         self.changed();
         Ok(())
+    }
+
+    pub fn dismiss(&mut self, session_id: &str, now: u64) -> Result<(), String> {
+        if self
+            .pending
+            .values()
+            .any(|pending| pending.view.session_id == session_id)
+        {
+            return Err(format!(
+                "session {session_id} is waiting for a decision; answer it before crossing the session off"
+            ));
+        }
+        self.sessions
+            .get_mut(session_id)
+            .ok_or_else(|| format!("no session {session_id}"))?
+            .dismissed = true;
+        self.acknowledge(session_id, now)
     }
 
     pub fn process_exited(&mut self, session_id: &str, pid: u32) {

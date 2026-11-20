@@ -21,6 +21,7 @@ use windows_sys::Win32::Graphics::Gdi::{
     HDC, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MONITORINFOEXW,
     MonitorFromPoint, MonitorFromWindow,
 };
+use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC, SND_NODEFAULT};
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, MONITORINFOF_PRIMARY, SM_CXSMICON, SPI_GETCLIENTAREAANIMATION,
@@ -246,6 +247,17 @@ pub fn tray_icon_size() -> usize {
 
 pub fn focus_window(hwnd: *mut c_void) {
     unsafe { SetForegroundWindow(hwnd) };
+}
+
+pub fn play_system_sound(alias: &str) {
+    let alias: Vec<u16> = alias.encode_utf16().chain([0]).collect();
+    unsafe {
+        PlaySoundW(
+            alias.as_ptr(),
+            null_mut(),
+            SND_ALIAS | SND_ASYNC | SND_NODEFAULT,
+        )
+    };
 }
 
 fn bitmap(dc: HDC, width: i32, height: i32) -> (HBITMAP, *mut u8) {

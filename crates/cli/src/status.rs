@@ -13,13 +13,13 @@ const SESSION_ID_CHARS: usize = 8;
 const ACTIVITY_CHARS: usize = 60;
 const EXPIRY_SHOWN_MS: u64 = 15 * 60 * 1000;
 
-pub fn run(home: &Path, watch: bool, json: bool) -> Result<ExitCode, String> {
+pub fn run(home: &Path, watch: bool, json: bool, all: bool) -> Result<ExitCode, String> {
     let mut client = connect(home)?;
     if !watch {
         let reply = client
             .request(&beacon_core::Request::Snapshot)
             .context("the Beacon core did not answer")?;
-        let snapshot = snapshot_of(reply)?;
+        let snapshot = shown(snapshot_of(reply)?, all);
         if json {
             println!("{}", to_json(&snapshot)?);
         } else {
@@ -43,9 +43,10 @@ pub fn run(home: &Path, watch: bool, json: bool) -> Result<ExitCode, String> {
     loop {
         let fresh = match receiver.recv_timeout(REDRAW_INTERVAL) {
             Ok(update) => {
-                latest = Some(snapshot_of(
-                    update.context("the Beacon core subscription failed")?,
-                )?);
+                latest = Some(shown(
+                    snapshot_of(update.context("the Beacon core subscription failed")?)?,
+                    all,
+                ));
                 true
             }
             Err(RecvTimeoutError::Timeout) => false,
@@ -72,6 +73,13 @@ fn snapshot_of(reply: Reply) -> Result<Snapshot, String> {
             .error
             .unwrap_or_else(|| "the Beacon core sent no snapshot".to_string())
     })
+}
+
+fn shown(mut snapshot: Snapshot, all: bool) -> Snapshot {
+    if !all {
+        snapshot.sessions.retain(|session| !session.dismissed);
+    }
+    snapshot
 }
 
 fn to_json(snapshot: &Snapshot) -> Result<String, String> {
@@ -174,6 +182,7 @@ fn flags(session: &Session) -> String {
         overlays.compacting.then(|| "compacting".to_string()),
         session.limited.then(|| "limited".to_string()),
         (session.queued_prompts() > 0).then(|| format!("q:{}", session.queued_prompts())),
+        session.dismissed.then(|| "dismissed".to_string()),
     ]
     .into_iter()
     .flatten()
@@ -403,6 +412,39 @@ ID  PROJECT  TOOL  INPUT  AGE
         assert_eq!(flags(&working), "q:2");
         working.prompts.truncate(1);
         assert_eq!(flags(&working), "");
+    }
+
+    #[test]
+    fn dismissed_sessions_are_shown_only_with_all() {
+        let mut crossed = session("66666666", SessionState::Idle, NOW - 1_000);
+        crossed.dismissed = true;
+        let snapshot = Snapshot {
+            sessions: vec![crossed, session("77777777", SessionState::Working, NOW)],
+            pending: Vec::new(),
+            resolved: Vec::new(),
+            snoozed_until_ms: None,
+            account_usage: None,
+            config: beacon_core::Config::default().live(),
+        };
+        assert_eq!(
+            render(&shown(snapshot.clone(), false), NOW),
+            "\
+SESSION   STATE    PROJECT  SURFACE  ACTIVITY  TURN  FLAGS
+77777777  working  -        unknown  -         -
+
+No pending decisions.
+"
+        );
+        assert_eq!(
+            render(&shown(snapshot, true), NOW),
+            "\
+SESSION   STATE    PROJECT  SURFACE  ACTIVITY  TURN  FLAGS
+77777777  working  -        unknown  -         -
+66666666  idle     -        unknown  -         -     dismissed
+
+No pending decisions.
+"
+        );
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use crate::account::AccountUsage;
 use crate::config::LiveConfig;
 use crate::platform;
+use crate::progress::{Step, Task};
 use crate::session::Session;
 use crate::state::PermissionKind;
 use beacon_protocol::{Channel, Endpoint, encode_preamble};
@@ -21,6 +22,9 @@ pub enum Request {
         decision: Decision,
     },
     Acknowledge {
+        session_id: String,
+    },
+    Dismiss {
         session_id: String,
     },
     Snooze {
@@ -125,6 +129,10 @@ pub struct SessionDetail {
     pub session_id: String,
     pub timeline: Vec<TimelineEntry>,
     pub last_message: Option<String>,
+    #[serde(default)]
+    pub steps: Vec<Step>,
+    #[serde(default)]
+    pub tasks: Vec<Task>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -309,6 +317,12 @@ mod tests {
                     session_id: "s".to_string(),
                 },
                 r#"{"op":"detail","session_id":"s"}"#,
+            ),
+            (
+                Request::Dismiss {
+                    session_id: "s".to_string(),
+                },
+                r#"{"op":"dismiss","session_id":"s"}"#,
             ),
             (Request::RefreshUsage, r#"{"op":"refresh_usage"}"#),
             (

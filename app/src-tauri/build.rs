@@ -4,6 +4,7 @@ fn main() {
             "get_snapshot",
             "get_detail",
             "acknowledge",
+            "dismiss",
             "decide",
             "snooze",
             "unsnooze",

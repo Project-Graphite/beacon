@@ -6,12 +6,13 @@ pub const USAGE: &str = "\
 Usage:
   beacon daemon
   beacon stop
-  beacon status [--watch] [--json]
+  beacon status [--watch] [--json] [--all]
   beacon decide <id> allow
   beacon decide <id> deny [--message <text>] [--stop]
   beacon decide <id> answer \"<question>=<label>\" ...
   beacon decide <id> always \"<Tool(specifier)>\" [--scope session|local|project|user]
   beacon ack <session-id-or-unique-prefix>
+  beacon dismiss <session-id-or-unique-prefix>
   beacon jump <session-id-or-unique-prefix>
   beacon where <session-id-or-unique-prefix>
   beacon prompt <session-id-or-unique-prefix> \"<text>\"
@@ -32,12 +33,16 @@ pub enum Command {
     Status {
         watch: bool,
         json: bool,
+        all: bool,
     },
     Decide {
         id: u64,
         decision: Decision,
     },
     Ack {
+        session: String,
+    },
+    Dismiss {
         session: String,
     },
     Jump {
@@ -118,14 +123,18 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         ("daemon", []) => Ok(Command::Daemon),
         ("stop", []) => Ok(Command::Stop),
         ("status", _) => {
-            let options = Options::parse(rest, &["--watch", "--json"], &[])?;
+            let options = Options::parse(rest, &["--watch", "--json", "--all"], &[])?;
             Ok(Command::Status {
                 watch: options.has("--watch"),
                 json: options.has("--json"),
+                all: options.has("--all"),
             })
         }
         ("decide", _) => parse_decide(rest),
         ("ack", [session]) => Ok(Command::Ack {
+            session: session.clone(),
+        }),
+        ("dismiss", [session]) => Ok(Command::Dismiss {
             session: session.clone(),
         }),
         ("jump", [session]) => Ok(Command::Jump {
@@ -274,14 +283,16 @@ mod tests {
             parsed(&["status"]),
             Ok(Command::Status {
                 watch: false,
-                json: false
+                json: false,
+                all: false
             })
         );
         assert_eq!(
             parsed(&["status", "--json", "--watch"]),
             Ok(Command::Status {
                 watch: true,
-                json: true
+                json: true,
+                all: false
             })
         );
         assert_eq!(
@@ -290,6 +301,29 @@ mod tests {
                 session: "4c2c".to_string()
             })
         );
+    }
+
+    #[test]
+    fn dismiss_and_status_all_parse() {
+        assert_eq!(
+            parsed(&["dismiss", "4c2c"]),
+            Ok(Command::Dismiss {
+                session: "4c2c".to_string()
+            })
+        );
+        assert_eq!(
+            parsed(&["status", "--all"]),
+            Ok(Command::Status {
+                watch: false,
+                json: false,
+                all: true
+            })
+        );
+        for line in [&["dismiss"][..], &["dismiss", "a", "b"], &["status", "all"]] {
+            assert!(parsed(line).is_err(), "{line:?}");
+        }
+        assert!(USAGE.contains("beacon dismiss <session-id-or-unique-prefix>"));
+        assert!(USAGE.contains("beacon status [--watch] [--json] [--all]"));
     }
 
     #[test]

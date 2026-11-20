@@ -56,13 +56,14 @@ fn run(command: Command) -> Result<ExitCode, String> {
             println!("Beacon core stopped.");
             Ok(ExitCode::SUCCESS)
         }
-        Command::Status { watch, json } => status::run(&beacon_home()?, watch, json),
+        Command::Status { watch, json, all } => status::run(&beacon_home()?, watch, json, all),
         Command::Decide { id, decision } => {
             request(&beacon_home()?, &Request::Decide { id, decision })?;
             println!("Decision {id} sent.");
             Ok(ExitCode::SUCCESS)
         }
         Command::Ack { session } => acknowledge(&beacon_home()?, &session),
+        Command::Dismiss { session } => dismiss(&beacon_home()?, &session),
         Command::Jump { session } => jump::jump(&beacon_home()?, &session),
         Command::Where { session } => jump::locate(&beacon_home()?, &session),
         Command::Prompt { session, text } => queue_prompt(&beacon_home()?, &session, text),
@@ -161,6 +162,18 @@ fn acknowledge(home: &Path, prefix: &str) -> Result<ExitCode, String> {
         },
     )?;
     println!("Session {session_id} acknowledged.");
+    Ok(ExitCode::SUCCESS)
+}
+
+fn dismiss(home: &Path, prefix: &str) -> Result<ExitCode, String> {
+    let session_id = resolve_session(home, prefix)?;
+    request(
+        home,
+        &Request::Dismiss {
+            session_id: session_id.clone(),
+        },
+    )?;
+    println!("Session {session_id} crossed off until it does something again.");
     Ok(ExitCode::SUCCESS)
 }
 

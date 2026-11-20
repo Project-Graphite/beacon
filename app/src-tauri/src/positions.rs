@@ -32,6 +32,8 @@ struct UiFile {
     toasts_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     toast_on_finished: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sounds_enabled: Option<bool>,
     #[serde(flatten)]
     choice: DisplayChoice,
 }
@@ -41,6 +43,7 @@ pub struct UiSettings {
     pub hotkey: String,
     pub toasts_enabled: bool,
     pub toast_on_finished: bool,
+    pub sounds_enabled: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -48,6 +51,7 @@ pub struct UiSettingsChange {
     pub hotkey: Option<String>,
     pub toasts_enabled: Option<bool>,
     pub toast_on_finished: Option<bool>,
+    pub sounds_enabled: Option<bool>,
 }
 
 fn read(home: &Path) -> UiFile {
@@ -74,6 +78,7 @@ pub fn ui_settings(home: &Path) -> UiSettings {
         hotkey: file.hotkey.unwrap_or_else(|| DEFAULT_HOTKEY.to_string()),
         toasts_enabled: file.toasts_enabled.unwrap_or(true),
         toast_on_finished: file.toast_on_finished.unwrap_or(true),
+        sounds_enabled: file.sounds_enabled.unwrap_or(false),
     }
 }
 
@@ -82,6 +87,7 @@ pub fn save_ui_settings(home: &Path, change: UiSettingsChange) -> io::Result<()>
         file.hotkey = change.hotkey.or(file.hotkey.take());
         file.toasts_enabled = change.toasts_enabled.or(file.toasts_enabled);
         file.toast_on_finished = change.toast_on_finished.or(file.toast_on_finished);
+        file.sounds_enabled = change.sounds_enabled.or(file.sounds_enabled);
     })
 }
 
@@ -230,6 +236,7 @@ mod tests {
                 hotkey: "Ctrl+Shift+B".to_string(),
                 toasts_enabled: true,
                 toast_on_finished: true,
+                sounds_enabled: false,
             }
         );
         save_ui_settings(
@@ -255,12 +262,51 @@ mod tests {
                 hotkey: "Ctrl+Alt+B".to_string(),
                 toasts_enabled: false,
                 toast_on_finished: false,
+                sounds_enabled: false,
             }
         );
         let mut expected: serde_json::Value = serde_json::from_str(existing).unwrap();
         expected["hotkey"] = "Ctrl+Alt+B".into();
         expected["toasts_enabled"] = false.into();
         expected["toast_on_finished"] = false.into();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &std::fs::read(home.join(UI_FILE)).unwrap()
+            )
+            .unwrap(),
+            expected
+        );
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn sounds_are_off_by_default_and_round_trip_beside_every_existing_key() {
+        let home = std::env::temp_dir().join(format!("beacon-sounds-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let existing = r#"{"pill_positions":{"a":{"left":1,"top":2,"right":4,"bottom":6}},"display_positions":{"philips":{"left":5,"top":6,"right":12,"bottom":14}},"style":"pill","tab_positions":{"philips":{"edge":"top","offset":0.25}},"hotkey":"Ctrl+Shift+B","toasts_enabled":false,"toast_on_finished":true,"display":"philips","avoid_displays":["oled"]}"#;
+        std::fs::write(home.join(UI_FILE), existing).unwrap();
+        assert!(!ui_settings(&home).sounds_enabled);
+        save_ui_settings(
+            &home,
+            UiSettingsChange {
+                sounds_enabled: Some(true),
+                ..UiSettingsChange::default()
+            },
+        )
+        .unwrap();
+        save(&home, "a", Rect::sized(1, 2, 3, 4)).unwrap();
+        assert_eq!(
+            ui_settings(&home),
+            UiSettings {
+                hotkey: "Ctrl+Shift+B".to_string(),
+                toasts_enabled: false,
+                toast_on_finished: true,
+                sounds_enabled: true,
+            }
+        );
+        let mut expected: serde_json::Value = serde_json::from_str(existing).unwrap();
+        expected["sounds_enabled"] = true.into();
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(
                 &std::fs::read(home.join(UI_FILE)).unwrap()

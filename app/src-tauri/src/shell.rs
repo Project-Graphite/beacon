@@ -11,6 +11,7 @@ use crate::platform::{
     pill::{PillEvent, TabModel},
 };
 use crate::positions::{self, Style};
+use crate::sounds::sound_for;
 use crate::toasts::Toaster;
 use crate::tray::Tray;
 use beacon_core::Snapshot;
@@ -410,6 +411,15 @@ impl Shell {
                 thread::sleep(TOAST_BATCH);
                 post(&app, Action::FlushToasts);
             });
+        }
+        if let Some(current) = &snapshot
+            && let Some(sound) = sound_for(
+                self.snapshot.as_ref(),
+                current,
+                positions::ui_settings(&self.feed.home).sounds_enabled,
+            )
+        {
+            platform::play_system_sound(sound.system_alias());
         }
         self.snapshot = snapshot;
         self.unseen.observe(self.snapshot.as_ref(), Instant::now());

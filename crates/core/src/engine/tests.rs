@@ -1,6 +1,7 @@
 use super::*;
 use crate::account::UsageSource;
 use crate::config::LogLevel;
+use crate::progress::{CurrentStep, StepStatus, Task};
 use crate::prompts::{self, PromptStatus};
 use serde_json::json;
 use std::path::PathBuf;
@@ -1646,4 +1647,476 @@ fn only_a_queued_prompt_can_be_cancelled_and_finished_ones_are_trimmed_to_five()
         previews,
         ["round 1", "round 2", "round 3", "round 4", "waiting"]
     );
+}
+
+fn task_event(event: &str, id: &str, subject: &str) -> Vec<u8> {
+    custom(event, json!({"task_id": id, "task_subject": subject}))
+}
+
+fn tool_event(event: &str, tool_name: &str, tool_input: Value, extra: Value) -> Vec<u8> {
+    let mut fields = json!({"tool_name": tool_name, "tool_input": tool_input});
+    fields
+        .as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    custom(event, fields)
+}
+
+impl Fixture {
+    fn tasks(&self) -> Vec<(String, String, bool)> {
+        self.session()
+            .tasks
+            .into_iter()
+            .map(|task| (task.id, task.subject, task.done))
+            .collect()
+    }
+
+    fn steps(&self) -> Vec<(StepKind, String, StepStatus, Option<u64>)> {
+        self.engine
+            .detail(SESSION)
+            .unwrap()
+            .steps
+            .into_iter()
+            .map(|step| (step.kind, step.label, step.status, step.duration_ms))
+            .collect()
+    }
+
+    fn dismiss(&mut self) -> Reply {
+        self.engine.control(Request::Dismiss {
+            session_id: SESSION.to_string(),
+        })
+    }
+}
+
+#[test]
+fn tasks_build_an_ordered_list_that_agrees_with_the_counts() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    fixture.send(&task_event("TaskCreated", "1", "Read the code"));
+    fixture.send(&task_event("TaskCreated", "2", "Write the fix"));
+    fixture.send(&task_event("TaskCreated", "3", "Run the tests"));
+    assert_eq!(
+        fixture.session().task_current.as_deref(),
+        Some("Read the code")
+    );
+    fixture.send(&task_event("TaskCompleted", "1", "Read the code"));
+    fixture.send(&task_event("TaskCompleted", "3", "Run the tests"));
+    fixture.send(&task_event("TaskCompleted", "9", "Started before Beacon"));
+    let session = fixture.session();
+    assert_eq!(
+        fixture.tasks(),
+        [
+            ("1".to_string(), "Read the code".to_string(), true),
+            ("2".to_string(), "Write the fix".to_string(), false),
+            ("3".to_string(), "Run the tests".to_string(), true),
+            ("9".to_string(), "Started before Beacon".to_string(), true),
+        ]
+    );
+    assert_eq!((session.tasks_created, session.tasks_completed), (4, 3));
+    assert_eq!(session.task_current.as_deref(), Some("Write the fix"));
+    fixture.send(&task_event("TaskCompleted", "2", "Write the fix"));
+    let session = fixture.session();
+    assert_eq!((session.tasks_created, session.tasks_completed), (4, 4));
+    assert_eq!(session.task_current, None);
+    assert_eq!(fixture.engine.detail(SESSION).unwrap().tasks, session.tasks);
+}
+
+#[test]
+fn task_subjects_are_redacted_and_cut_to_one_hundred_and_twenty_characters() {
+    let mut fixture = fixture();
+    fixture.send(&task_event(
+        "TaskCreated",
+        "1",
+        "Rotate API_KEY=abc123 in the vault",
+    ));
+    fixture.send(&task_event("TaskCreated", "2", &"ж".repeat(500)));
+    let tasks = fixture.session().tasks;
+    assert_eq!(tasks[0].subject, "Rotate API_KEY=*** in the vault");
+    assert_eq!(tasks[1].subject.chars().count(), 120);
+}
+
+#[test]
+fn a_new_prompt_keeps_the_tasks_and_a_clear_drops_them() {
+    let mut fixture = fixture();
+    fixture.send(&task_event("TaskCreated", "1", "First"));
+    fixture.send(&task_event("TaskCompleted", "1", "First"));
+    fixture.send(&task_event("TaskCreated", "2", "Second"));
+    fixture.send(STOP);
+    fixture.send(USER_PROMPT_SUBMIT);
+    assert_eq!(fixture.session().tasks.len(), 2);
+    fixture.send(&custom("SessionStart", json!({"source": "compact"})));
+    fixture.send(&custom("SessionStart", json!({"source": "resume"})));
+    assert_eq!(fixture.session().tasks.len(), 2);
+    fixture.send(&custom("SessionStart", json!({"source": "clear"})));
+    let session = fixture.session();
+    assert!(session.tasks.is_empty());
+    assert_eq!((session.tasks_created, session.tasks_completed), (0, 0));
+    assert_eq!(session.task_current, None);
+}
+
+#[test]
+fn tasks_survive_a_restart_and_old_state_still_loads() {
+    let mut fixture = fixture();
+    fixture.send(&task_event("TaskCreated", "1", "Keep me"));
+    let persisted = fixture.engine.persisted_state().unwrap();
+    let restored = fixture_with(
+        Config::default(),
+        Engine::load_sessions(&persisted).unwrap(),
+    );
+    let session = restored.session();
+    assert_eq!(
+        session.tasks,
+        [Task {
+            id: "1".to_string(),
+            subject: "Keep me".to_string(),
+            done: false
+        }]
+    );
+    assert_eq!(session.task_current.as_deref(), Some("Keep me"));
+    let mut legacy = serde_json::to_value(fixture.session()).unwrap();
+    for field in [
+        "tasks",
+        "task_current",
+        "step_current",
+        "command_current",
+        "dismissed",
+    ] {
+        legacy.as_object_mut().unwrap().remove(field);
+    }
+    let legacy: Session = serde_json::from_value(legacy).unwrap();
+    assert!(legacy.tasks.is_empty());
+    assert!(!legacy.dismissed);
+}
+
+#[test]
+fn a_tool_call_is_one_step_paired_by_its_tool_use_id() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    fixture.send(&tool_event(
+        "PreToolUse",
+        "Bash",
+        json!({"command": "GITHUB_TOKEN=abc123 gh pr list"}),
+        json!({"tool_use_id": "t1"}),
+    ));
+    fixture.send(&tool_event(
+        "PreToolUse",
+        "Read",
+        json!({"file_path": r"C:\nowhere\a.rs"}),
+        json!({"tool_use_id": "t2"}),
+    ));
+    let session = fixture.session();
+    assert_eq!(
+        session.step_current,
+        Some(CurrentStep {
+            kind: StepKind::Read,
+            label: "Reading a.rs".to_string()
+        })
+    );
+    assert_eq!(
+        session.command_current.as_deref(),
+        Some("GITHUB_TOKEN=*** gh pr list")
+    );
+    fixture.send(&tool_event(
+        "PostToolUse",
+        "Read",
+        json!({"file_path": r"C:\nowhere\a.rs"}),
+        json!({"tool_use_id": "t2", "duration_ms": 12}),
+    ));
+    let session = fixture.session();
+    assert_eq!(
+        session.step_current,
+        Some(CurrentStep {
+            kind: StepKind::Run,
+            label: "Running GITHUB_TOKEN=*** gh pr list".to_string()
+        })
+    );
+    assert_eq!(
+        session.command_current.as_deref(),
+        Some("GITHUB_TOKEN=*** gh pr list")
+    );
+    fixture.send(&tool_event(
+        "PostToolUseFailure",
+        "Bash",
+        json!({"command": "GITHUB_TOKEN=abc123 gh pr list"}),
+        json!({"tool_use_id": "t1"}),
+    ));
+    let session = fixture.session();
+    assert_eq!(session.step_current, None);
+    assert_eq!(session.command_current, None);
+    let steps = fixture.steps();
+    assert_eq!(steps.len(), 3);
+    assert_eq!(
+        steps[0],
+        (
+            StepKind::Prompt,
+            "Prompt submitted".to_string(),
+            StepStatus::Done,
+            None
+        )
+    );
+    assert_eq!(
+        (steps[1].0, steps[1].1.as_str(), steps[1].2),
+        (
+            StepKind::Run,
+            "Running GITHUB_TOKEN=*** gh pr list",
+            StepStatus::Failed
+        )
+    );
+    assert!(steps[1].3.is_some());
+    assert_eq!(
+        steps[2],
+        (
+            StepKind::Read,
+            "Reading a.rs".to_string(),
+            StepStatus::Done,
+            Some(12)
+        )
+    );
+    let ids: Vec<u64> = fixture
+        .engine
+        .detail(SESSION)
+        .unwrap()
+        .steps
+        .iter()
+        .map(|step| step.id)
+        .collect();
+    assert_eq!(ids, [1, 2, 3]);
+}
+
+#[test]
+fn a_finish_that_arrives_before_its_start_makes_one_finished_step() {
+    let mut fixture = fixture();
+    let grep = |event| {
+        tool_event(
+            event,
+            "Grep",
+            json!({"pattern": "x"}),
+            json!({"tool_use_id": "t3", "duration_ms": 7}),
+        )
+    };
+    fixture.send(&grep("PostToolUse"));
+    fixture.send(&grep("PreToolUse"));
+    assert_eq!(
+        fixture.steps(),
+        [(
+            StepKind::Search,
+            "Searching".to_string(),
+            StepStatus::Done,
+            Some(7)
+        )]
+    );
+    assert_eq!(fixture.session().step_current, None);
+}
+
+#[test]
+fn running_steps_stop_when_the_turn_ends() {
+    for ending in [
+        custom("Stop", json!({})),
+        custom("StopFailure", json!({"error": "rate_limit"})),
+        custom("SessionEnd", json!({"reason": "logout"})),
+    ] {
+        let mut fixture = fixture();
+        fixture.send(USER_PROMPT_SUBMIT);
+        fixture.send(PRE_TOOL_USE);
+        assert!(fixture.session().command_current.is_some());
+        fixture.send(&ending);
+        let session = fixture.session();
+        assert_eq!(session.step_current, None);
+        assert_eq!(session.command_current, None);
+        assert_eq!(fixture.steps()[1].2, StepStatus::Stopped);
+    }
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    fixture.send(PRE_TOOL_USE);
+    let (id, _receiver) = fixture.ask(PERMISSION_REQUEST);
+    fixture
+        .engine
+        .decide(id, Decision::DenyAndStop { message: None })
+        .unwrap();
+    assert_eq!(fixture.state(), SessionState::Idle);
+    assert_eq!(fixture.steps()[1].2, StepStatus::Stopped);
+    assert_eq!(fixture.session().step_current, None);
+}
+
+#[test]
+fn a_stop_that_delivers_a_prompt_keeps_the_step_running() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    fixture.send(PRE_TOOL_USE);
+    assert!(fixture.queue("go on").ok);
+    fixture.send(STOP);
+    let steps = fixture.steps();
+    assert_eq!(steps[1].2, StepStatus::Running);
+    assert_eq!(
+        (steps[2].0, steps[2].1.as_str()),
+        (StepKind::Prompt, "Follow-up delivered from Beacon")
+    );
+    assert!(fixture.session().step_current.is_some());
+}
+
+#[test]
+fn the_running_command_is_cut_to_two_thousand_characters() {
+    let mut fixture = fixture();
+    fixture.send(&tool_event(
+        "PreToolUse",
+        "PowerShell",
+        json!({"command": "é".repeat(5_000)}),
+        json!({"tool_use_id": "t5"}),
+    ));
+    assert_eq!(
+        fixture.session().command_current.unwrap().chars().count(),
+        2_000
+    );
+    fixture.send(&tool_event(
+        "PreToolUse",
+        "Read",
+        json!({"command": "not a command"}),
+        json!({"tool_use_id": "t6"}),
+    ));
+    fixture.send(&tool_event(
+        "PostToolUse",
+        "PowerShell",
+        json!({}),
+        json!({"tool_use_id": "t5"}),
+    ));
+    assert_eq!(fixture.session().command_current, None);
+}
+
+#[test]
+fn permissions_and_turn_ends_become_steps_and_the_list_keeps_sixty() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    let (id, _receiver) = fixture.ask(PERMISSION_REQUEST);
+    fixture.engine.decide(id, Decision::Allow).unwrap();
+    fixture.send(STOP);
+    fixture.send(&custom("StopFailure", json!({"error": "overloaded"})));
+    let kinds: Vec<(StepKind, String)> = fixture
+        .steps()
+        .into_iter()
+        .map(|(kind, label, ..)| (kind, label))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            (StepKind::Prompt, "Prompt submitted".to_string()),
+            (
+                StepKind::Permission,
+                "Permission requested: Bash".to_string()
+            ),
+            (StepKind::Permission, "Allowed".to_string()),
+            (StepKind::Finish, "Turn finished".to_string()),
+            (StepKind::Error, "API error: overloaded".to_string()),
+        ]
+    );
+    for index in 0..100 {
+        fixture.send(&tool_event(
+            "PreToolUse",
+            "Glob",
+            json!({}),
+            json!({"tool_use_id": format!("g{index}")}),
+        ));
+    }
+    let steps = fixture.engine.detail(SESSION).unwrap().steps;
+    assert_eq!(steps.len(), 60);
+    assert_eq!(steps.last().unwrap().id, 105);
+}
+
+#[test]
+fn a_dismissed_session_is_acknowledged_and_never_alerting() {
+    for (ending, before) in [
+        (custom("Stop", json!({})), SessionState::Done),
+        (
+            custom("StopFailure", json!({"error": "rate_limit"})),
+            SessionState::Error,
+        ),
+    ] {
+        let mut fixture = fixture();
+        fixture.send(USER_PROMPT_SUBMIT);
+        fixture.send(&ending);
+        assert_eq!(fixture.state(), before);
+        assert!(fixture.session().alerting);
+        assert!(fixture.dismiss().ok);
+        let session = fixture.session();
+        assert_eq!(session.state, SessionState::Idle);
+        assert!(session.dismissed);
+        assert!(!session.alerting);
+    }
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    let start = fixture.session().last_event_ms;
+    fixture.engine.check_stalls(start + 10 * 60_000);
+    assert_eq!(fixture.state(), SessionState::Stalled);
+    assert!(fixture.dismiss().ok);
+    assert_eq!(fixture.state(), SessionState::Working);
+    fixture.engine.check_stalls(start + 30 * 60_000);
+    let session = fixture.session();
+    assert_eq!(session.state, SessionState::Stalled);
+    assert!(session.attention);
+    assert!(!session.alerting);
+    assert!(fixture.engine.snapshot().sessions[0].dismissed);
+}
+
+#[test]
+fn the_next_prompt_request_elicitation_or_start_brings_a_session_back() {
+    let returning = [
+        custom("UserPromptSubmit", json!({})),
+        custom(
+            "Elicitation",
+            json!({"mcp_server_name": "m", "message": "?"}),
+        ),
+        custom("SessionStart", json!({"source": "resume"})),
+        PERMISSION_REQUEST.to_vec(),
+    ];
+    for event in returning {
+        let mut fixture = fixture();
+        fixture.send(STOP);
+        assert!(fixture.dismiss().ok);
+        for quiet in [
+            custom("Notification", json!({"notification_type": "idle_prompt"})),
+            custom("PreToolUse", json!({"tool_name": "Read"})),
+            custom("Stop", json!({})),
+        ] {
+            fixture.send(&quiet);
+            assert!(fixture.session().dismissed);
+            assert!(!fixture.session().alerting);
+        }
+        fixture.send(&event);
+        assert!(!fixture.session().dismissed, "{}", event_name(&event));
+    }
+}
+
+#[test]
+fn a_session_waiting_for_a_decision_cannot_be_dismissed() {
+    let mut fixture = fixture();
+    let (id, _receiver) = fixture.ask(PERMISSION_REQUEST);
+    assert_eq!(
+        fixture.dismiss().error.as_deref(),
+        Some(
+            "session 4c2c3535-edec-4bb7-90b7-38049912db27 is waiting for a decision; answer it before crossing the session off"
+        )
+    );
+    assert!(!fixture.session().dismissed);
+    fixture.engine.decide(id, Decision::Allow).unwrap();
+    assert!(fixture.dismiss().ok);
+    assert_eq!(
+        fixture.engine.control(Request::Dismiss {
+            session_id: "missing".to_string()
+        }),
+        Reply::failed("no session missing")
+    );
+}
+
+#[test]
+fn dismissal_survives_a_restart() {
+    let mut fixture = fixture();
+    fixture.send(STOP);
+    assert!(fixture.dismiss().ok);
+    let persisted = fixture.engine.persisted_state().unwrap();
+    let restored = fixture_with(
+        Config::default(),
+        Engine::load_sessions(&persisted).unwrap(),
+    );
+    let session = restored.session();
+    assert!(session.dismissed);
+    assert!(!session.alerting);
 }
