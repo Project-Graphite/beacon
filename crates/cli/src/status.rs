@@ -1,6 +1,5 @@
 use crate::{Context, connect, platform};
-use beacon_core::{PendingDecision, Reply, Session, Snapshot, now_ms, redact};
-use serde_json::Value;
+use beacon_core::{Reply, Session, Snapshot, now_ms, one_line};
 use std::cmp::Reverse;
 use std::io::Write;
 use std::path::Path;
@@ -11,7 +10,6 @@ use std::time::Duration;
 const REDRAW_INTERVAL: Duration = Duration::from_secs(1);
 const SESSION_ID_CHARS: usize = 8;
 const ACTIVITY_CHARS: usize = 60;
-const INPUT_CHARS: usize = 80;
 
 pub fn run(home: &Path, watch: bool, json: bool) -> Result<ExitCode, String> {
     let mut client = connect(home)?;
@@ -98,7 +96,7 @@ pub fn render(snapshot: &Snapshot, now: u64) -> String {
                         surface_label(session.entrypoint.as_deref()).to_string(),
                         session.activity.as_deref().map_or_else(
                             || "-".to_string(),
-                            |activity| one_line(&redact(activity), ACTIVITY_CHARS),
+                            |activity| one_line(activity, ACTIVITY_CHARS),
                         ),
                         session.turn_started_ms.map_or_else(
                             || "-".to_string(),
@@ -129,7 +127,7 @@ pub fn render(snapshot: &Snapshot, now: u64) -> String {
                             .and_then(|session| session.project.clone())
                             .unwrap_or_else(|| "-".to_string()),
                         pending.tool_name.clone(),
-                        input_preview(pending),
+                        pending.preview.clone(),
                         age(now, pending.created_ms),
                     ]
                 })
@@ -161,7 +159,7 @@ fn state_label(session: &Session) -> String {
         .collect()
 }
 
-fn project_label(session: &Session) -> String {
+pub fn project_label(session: &Session) -> String {
     match (&session.project, &session.branch) {
         (Some(project), Some(branch)) => format!("{project} ({branch})"),
         (Some(project), None) => project.clone(),
@@ -183,40 +181,7 @@ fn flags(session: &Session) -> String {
     .join(" ")
 }
 
-fn input_preview(pending: &PendingDecision) -> String {
-    let field = |name: &str| pending.tool_input.get(name).and_then(Value::as_str);
-    let subject = match pending.tool_name.as_str() {
-        "Bash" | "PowerShell" => field("command").map(str::to_string),
-        "Edit" | "Write" | "Read" => field("file_path").map(str::to_string),
-        "WebFetch" => field("url").map(str::to_string),
-        tool => tool
-            .strip_prefix("mcp__")
-            .map(|server_and_tool| server_and_tool.replacen("__", "/", 1)),
-    };
-    one_line(
-        &redact(&subject.unwrap_or_else(|| pending.tool_input.to_string())),
-        INPUT_CHARS,
-    )
-}
-
-fn one_line(text: &str, limit: usize) -> String {
-    let flat: Vec<char> = text
-        .chars()
-        .map(|character| {
-            if character.is_control() {
-                ' '
-            } else {
-                character
-            }
-        })
-        .collect();
-    if flat.len() <= limit {
-        return flat.into_iter().collect();
-    }
-    flat[..limit - 3].iter().chain(&['.'; 3]).collect()
-}
-
-fn age(now: u64, since: u64) -> String {
+pub fn age(now: u64, since: u64) -> String {
     let seconds = now.saturating_sub(since) / 1000;
     match seconds {
         0..60 => format!("{seconds}s"),
@@ -226,7 +191,7 @@ fn age(now: u64, since: u64) -> String {
     }
 }
 
-fn table(headers: &[&str], rows: Vec<Vec<String>>) -> String {
+pub fn table(headers: &[&str], rows: Vec<Vec<String>>) -> String {
     let mut widths: Vec<usize> = headers.iter().map(|header| header.len()).collect();
     for row in &rows {
         for (width, cell) in widths.iter_mut().zip(row) {
@@ -250,8 +215,8 @@ fn table(headers: &[&str], rows: Vec<Vec<String>>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use beacon_core::{PermissionKind, SessionState};
-    use serde_json::json;
+    use beacon_core::{PendingDecision, PermissionKind, SessionState, input_preview};
+    use serde_json::{Value, json};
 
     const NOW: u64 = 1_795_100_000_000;
 
@@ -269,6 +234,7 @@ mod tests {
             session_id: session_id.to_string(),
             agent_id: None,
             tool_name: tool_name.to_string(),
+            preview: input_preview(tool_name, &tool_input),
             tool_input,
             permission_suggestions: Value::Null,
             kind: PermissionKind::Tool,
@@ -287,7 +253,7 @@ mod tests {
         working.project = Some("beacon".to_string());
         working.branch = Some("main".to_string());
         working.entrypoint = Some("cli".to_string());
-        working.activity = Some("Running GITHUB_TOKEN=abc123 gh pr list".to_string());
+        working.activity = Some("Running GITHUB_TOKEN=*** gh pr list".to_string());
         working.turn_started_ms = Some(NOW - 125_000);
         working.overlays.subagents = 2;
         working.overlays.compacting = true;
@@ -346,6 +312,8 @@ mod tests {
                 ),
             ],
             resolved: Vec::new(),
+            snoozed_until_ms: None,
+            account_usage: None,
         };
         assert_eq!(
             render(&snapshot, NOW),
@@ -372,6 +340,8 @@ ID  PROJECT  TOOL                    INPUT                                      
             sessions: Vec::new(),
             pending: Vec::new(),
             resolved: Vec::new(),
+            snoozed_until_ms: None,
+            account_usage: None,
         };
         assert_eq!(
             render(&snapshot, NOW),
@@ -380,11 +350,7 @@ ID  PROJECT  TOOL                    INPUT                                      
     }
 
     #[test]
-    fn long_inputs_are_cut_to_one_line() {
-        let long = format!("echo {}", "x".repeat(200));
-        let preview = input_preview(&pending(1, "s", "PowerShell", json!({ "command": long })));
-        assert_eq!(preview.chars().count(), 80);
-        assert!(preview.ends_with("xx..."));
+    fn ages_switch_units_and_never_go_negative() {
         assert_eq!(age(NOW, NOW - 2 * 86_400_000 - 3_600_000), "2d01h");
         assert_eq!(age(NOW, NOW + 5), "0s");
     }

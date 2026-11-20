@@ -101,7 +101,9 @@ pub enum Event {
         tool_input: Option<Value>,
         permission_suggestions: Option<Value>,
     },
-    SubagentStart,
+    SubagentStart {
+        agent_type: Option<String>,
+    },
     SubagentStop,
     TaskCreated,
     TaskCompleted,
@@ -112,7 +114,9 @@ pub enum Event {
     StopFailure {
         error: Option<String>,
     },
-    SessionEnd,
+    SessionEnd {
+        reason: Option<String>,
+    },
     Notification {
         notification_type: Option<String>,
     },

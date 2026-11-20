@@ -1,0 +1,90 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-paper: #0c0c0e;
+  --color-surface: #131316;
+  --color-line: #26262c;
+  --color-line-soft: #1c1c21;
+  --color-ink: #e8e8ea;
+  --color-muted: #8b8b95;
+  --color-faint: #7d7d87;
+  --color-danger: #f2a09a;
+  --color-live: #46b97a;
+  --color-wip: #d7a54a;
+  --color-dormant: #6e6e78;
+  --color-highlight: #d7b24a;
+  --color-raised: #18181c;
+  --color-overlay: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --radius-mark: 0.3rem;
+  --radius-field: 0.5rem;
+  --radius-panel: 0.75rem;
+  --radius-card: 1rem;
+  --shadow-popover: 0 18px 40px -12px rgb(0 0 0 / 0.7);
+  --ease-settle: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --text-body: 13px;
+  --text-body--line-height: 1.45;
+  --text-secondary: 12px;
+  --text-secondary--line-height: 1.45;
+  --text-micro: 11px;
+  --text-micro--line-height: 1.45;
+  --animate-turn: turn 1.2s linear infinite;
+  --animate-halo: halo 1.6s linear infinite;
+
+  @keyframes turn {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes halo {
+    from {
+      r: 4.5px;
+      opacity: 1;
+    }
+    to {
+      r: 7px;
+      opacity: 0;
+    }
+  }
+}
+
+@layer base {
+  button:focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+}
+
+.scroll-thin::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 5px;
+  background: var(--color-line) padding-box;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted) padding-box;
+}
+
+.scroll-thin::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -3,6 +3,95 @@
 Decisions taken while building Beacon, newest phase first. Evidence for the phase 0 entries is in
 [SPIKES.md](SPIKES.md). An entry marked **needs Amr** is a proposal until he answers.
 
+## M2: tray, pill and panel (2026-11-20)
+
+### The pill is native; the panel is a WebView that exists only while it is open
+
+Measured on this machine with a release build, 60 s of sampling after a 60 s warm-up:
+
+| State | Processes | Private memory | Working set | CPU over 60 s |
+|---|---|---|---|---|
+| WebView2 pill, visible | 7 to 8 | 164 MB | 380 MB | 0.05 s |
+| WebView2 pill, hidden | 7 to 8 | 159 MB | 372 MB | 0.02 s |
+| Native pill and tray, no sessions | 1 | 4.2 MB | 18 MB | 0.00 s |
+| Native pill animating, panel closed | 1 | 8.7 MB | 39 MB | 0.33 s |
+| Panel open | 7 | 170 MB | 386 MB | 0.23 s |
+
+A live WebView2 window costs about 160 MB whether it is shown or hidden, against an idle budget of
+80 MB, so the collapsed pill is a Win32 layered window painted by Beacon's own rasterizer. The panel
+window is created when it opens and destroyed when it closes, never hidden. Opening it from cold
+takes about 0.3 s. While a session needs the user the panel is pinned open, and the app is over the
+idle budget for as long as that lasts.
+
+### Pill
+
+- One mark per session, at most ten and then `+N`, each state with its own shape as well as colour:
+  working is a rotating arc, the four needs-input states a solid amber circle with a halo, stalled a
+  pause glyph, done a green check, error a red triangle, idle a hollow ring. A count of the sessions
+  that need the user follows the marks.
+- The animation timer runs only while something on the pill animates and reduced motion is off.
+- Fully transparent pixels pass clicks through. The pill never takes focus.
+- It hides while a fullscreen window is in the foreground on its monitor. That is driven by the
+  foreground-change hook, so a window that goes fullscreen while already in the foreground is not
+  noticed until the foreground changes.
+- Its position is stored per monitor layout in `ui.json` and snaps to edges and corners.
+
+### Panel
+
+- Three modes. Hover closes 400 ms after the cursor leaves the pill and the panel. Sticky (a click,
+  the hotkey, the tray, a second launch) stays until dismissed. Pinned applies while any session is
+  alerting and cannot be dismissed; when alerting ends the panel returns to the mode it was opened
+  in.
+- Hover and alert opens do not take focus.
+- The page can call eight commands and nothing else, restricted to the panel window by a capability
+  file. The CSP is `default-src 'self'` plus the `connect-src` Tauri's own IPC needs.
+- Everything from a session is rendered as text nodes. The last message goes through a hand-written
+  renderer for a Markdown subset; there is no HTML injection path and no Markdown dependency.
+- The panel is a solid Graphite surface. The brief's OS blur is not used, because Graphite is flat.
+- Pending requests are shown read-only. Allow and Deny are M3.
+
+### Attention, acknowledge and snooze
+
+- `alerting` means in an attention state and not snoozed. The pill count, the pinned panel, the tray
+  icon and toasts all follow it.
+- Acknowledge clears `done`, `error` and `stalled`. The brief had it only for `done`, which would
+  leave an API error pinning the panel until the next prompt.
+- Snooze is per session or global, for 5 or 15 minutes, held in the core so the CLI and the app
+  agree, and it survives a restart.
+
+### Toasts
+
+- The first snapshot after start is a baseline. Sessions that start alerting or finish within 2 s of
+  each other become one toast. Snoozed sessions produce none.
+- Until the app is packaged (M7), Windows attributes the toasts to Windows PowerShell.
+- The "not while that window has focus" rule needs window identity and arrives with M4. Action
+  buttons arrive with M3.
+
+### Hotkey
+
+`Ctrl+Alt+Space` is already registered by another program on this machine, so it never fired. The
+accelerator is read from an optional `hotkey` in `ui.json`. **Needs Amr:** the default.
+
+### Usage, as built
+
+- Per session: tokens and context size from the transcript, one usage per `message.id`, subagent
+  files included, read only at turn boundaries. There is no price table; a cost is shown only when
+  the transcript itself reports one, which Claude Code writes when a session closes.
+- Account: the 5-hour and weekly windows come from the cached value in `~/.claude.json`. A refresh
+  runs one Haiku request and only when asked for. There is no automatic probing.
+
+### Other
+
+- The app hosts the core but reads it through the same control subscription the CLI uses, so there
+  is one data path. If a `beacon daemon` is already running, the app connects to it instead.
+- A session known only from `claude agents --json` gets its surface from its process image path:
+  VS Code and its forks, or the desktop app. A terminal and a headless run share one binary and stay
+  unknown until a hook fires.
+- The one-line preview of a pending request and the activity line are redacted in the core, so no
+  front end sees the raw text.
+- Deferred: the edge-reveal form and the settings screen (M7). A light theme is not planned, because
+  Graphite is dark only.
+
 ## M1: helper, core, installer and CLI (2026-11-19)
 
 ### Shape
@@ -68,8 +157,7 @@ Twenty-two events, kept in one constant that install, uninstall, doctor and the 
 
 - A malformed `state.json` or `config.json` stops the core with an error instead of being discarded.
 - Ended sessions are dropped from the registry 24 hours after their last event.
-- A session known only from `claude agents --json` is marked limited and has no surface until one of
-  its hooks fires. Inferring the surface from the process image is left to M4.
+- A session known only from `claude agents --json` is marked limited until one of its hooks fires.
 - The end-to-end check ran against a real `claude -p` session with a temporary settings file: allow
   from `beacon decide` ran the tool, deny returned the message to Claude, and uninstall restored the
   file byte for byte.
@@ -163,11 +251,11 @@ nothing; its message format is undocumented, so it is not used.
 
 - **Per session:** tokens and context fill come from transcripts, one usage per `message.id`, with
   `<session>/subagents/` included. The reader is an isolated adapter with a self-test, because the
-  format is internal. Cost is shown as a list-price estimate and labelled so.
+  format is internal. M2 dropped the cost estimate: there is no reliable price table.
 - **Overall 5-hour and weekly limit %:** read `cachedUsageUtilization` from `~/.claude.json` and show
-  its age. Refresh on demand with one `claude -p` Haiku run that reads `rate_limit_event`, and at most
-  every 15 minutes while a session is working. Both are internal or undocumented, so this sits behind
-  the same kind of adapter. **Needs Amr:** the refresh cadence, since each refresh spends quota.
+  its age. Refresh on demand with one `claude -p` Haiku run that reads `rate_limit_event`. Both are
+  internal or undocumented, so this sits behind the same kind of adapter. M2 built it without any
+  automatic refresh, since each one spends quota.
 - **Overall spend:** not shown as a bill. No local source is authoritative.
 - OpenTelemetry to a loopback receiver is the documented alternative for per-session numbers. It is
   not the default: it needs `env` entries in the user settings, sends the account email in every

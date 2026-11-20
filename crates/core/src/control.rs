@@ -1,3 +1,4 @@
+use crate::account::AccountUsage;
 use crate::platform;
 use crate::session::Session;
 use crate::state::PermissionKind;
@@ -14,8 +15,24 @@ use std::time::Duration;
 pub enum Request {
     Snapshot,
     Subscribe,
-    Decide { id: u64, decision: Decision },
-    Acknowledge { session_id: String },
+    Decide {
+        id: u64,
+        decision: Decision,
+    },
+    Acknowledge {
+        session_id: String,
+    },
+    Snooze {
+        session_id: Option<String>,
+        minutes: u64,
+    },
+    Unsnooze {
+        session_id: Option<String>,
+    },
+    Detail {
+        session_id: String,
+    },
+    RefreshUsage,
     Shutdown,
 }
 
@@ -49,6 +66,8 @@ pub struct Reply {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot: Option<Snapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<SessionDetail>,
 }
 
 impl Reply {
@@ -57,6 +76,7 @@ impl Reply {
             ok: true,
             error: None,
             snapshot: None,
+            detail: None,
         }
     }
 
@@ -64,7 +84,7 @@ impl Reply {
         Reply {
             ok: false,
             error: Some(error.into()),
-            snapshot: None,
+            ..Reply::ok()
         }
     }
 
@@ -81,6 +101,22 @@ pub struct Snapshot {
     pub sessions: Vec<Session>,
     pub pending: Vec<PendingDecision>,
     pub resolved: Vec<ResolvedDecision>,
+    pub snoozed_until_ms: Option<u64>,
+    pub account_usage: Option<AccountUsage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionDetail {
+    pub session_id: String,
+    pub timeline: Vec<TimelineEntry>,
+    pub last_message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimelineEntry {
+    pub t_ms: u64,
+    pub event: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -94,6 +130,8 @@ pub struct PendingDecision {
     pub kind: PermissionKind,
     pub created_ms: u64,
     pub tool_use_id: Option<String>,
+    #[serde(default)]
+    pub preview: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,5 +250,46 @@ mod tests {
             serde_json::to_string(&Reply::failed("nope")).unwrap(),
             r#"{"ok":false,"error":"nope"}"#
         );
+    }
+
+    #[test]
+    fn usage_snooze_and_detail_requests_have_the_documented_shapes() {
+        let shapes = [
+            (
+                Request::Snooze {
+                    session_id: Some("s".to_string()),
+                    minutes: 30,
+                },
+                r#"{"op":"snooze","session_id":"s","minutes":30}"#,
+            ),
+            (
+                Request::Snooze {
+                    session_id: None,
+                    minutes: 5,
+                },
+                r#"{"op":"snooze","session_id":null,"minutes":5}"#,
+            ),
+            (
+                Request::Unsnooze {
+                    session_id: Some("s".to_string()),
+                },
+                r#"{"op":"unsnooze","session_id":"s"}"#,
+            ),
+            (
+                Request::Unsnooze { session_id: None },
+                r#"{"op":"unsnooze","session_id":null}"#,
+            ),
+            (
+                Request::Detail {
+                    session_id: "s".to_string(),
+                },
+                r#"{"op":"detail","session_id":"s"}"#,
+            ),
+            (Request::RefreshUsage, r#"{"op":"refresh_usage"}"#),
+        ];
+        for (request, json) in shapes {
+            assert_eq!(serde_json::to_string(&request).unwrap(), json);
+            assert_eq!(serde_json::from_str::<Request>(json).unwrap(), request);
+        }
     }
 }

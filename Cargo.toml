@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/protocol", "crates/hook", "crates/core", "crates/cli"]
+members = ["crates/protocol", "crates/hook", "crates/core", "crates/cli", "app/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,8 @@ beacon-protocol = { path = "crates/protocol" }
 beacon-core = { path = "crates/core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-build = { version = "2" }
 tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "time", "macros", "process"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",

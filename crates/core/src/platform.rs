@@ -21,8 +21,9 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
 use windows_sys::Win32::System::Threading::{
     CREATE_NO_WINDOW, CreateMutexW, GetCurrentProcess, OpenProcess, OpenProcessToken,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, RegisterWaitForSingleObject,
-    UnregisterWaitEx, WT_EXECUTEONLYONCE, WaitForSingleObject,
+    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    QueryFullProcessImageNameW, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEONLYONCE,
+    WaitForSingleObject,
 };
 
 pub const PIPE_PREFIX: &str = r"\\.\pipe\beacon-";
@@ -176,6 +177,26 @@ pub fn open_pipe(name: &str, timeout: Duration) -> io::Result<File> {
             opened => return opened,
         }
     }
+}
+
+pub fn process_image_path(pid: u32) -> io::Result<String> {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let mut buffer = vec![0u16; 32_768];
+    let mut length = buffer.len() as u32;
+    let queried = check(unsafe {
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            buffer.as_mut_ptr(),
+            &mut length,
+        )
+    });
+    unsafe { CloseHandle(process) };
+    queried?;
+    Ok(String::from_utf16_lossy(&buffer[..length as usize]))
 }
 
 pub fn process_alive(pid: u32) -> bool {

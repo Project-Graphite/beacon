@@ -1,13 +1,18 @@
+use crate::account::AccountUsage;
 use crate::config::Config;
 use crate::control::{
-    Decision, PendingDecision, Reply, Request, Resolution, ResolvedDecision, Snapshot,
+    Decision, PendingDecision, Reply, Request, Resolution, ResolvedDecision, SessionDetail,
+    Snapshot, TimelineEntry,
 };
 use crate::events::{self, Common, Event, Meta, ToolUse};
 use crate::lister::ListedSession;
 use crate::log::{Logger, now_ms};
-use crate::platform::{ProcessWatch, process_alive};
-use crate::session::{Session, activity_line};
+use crate::platform::{ProcessWatch, process_alive, process_image_path};
+use crate::preview::input_preview;
+use crate::redact::redact;
+use crate::session::{Session, activity_line, surface_from_image};
 use crate::state::{AgentStatus, Input, PermissionKind, SessionState, StartSource, ToolEvent};
+use crate::usage::{SessionUsage, UsageStatus};
 use beacon_protocol::{DOCTOR_EVENT, HookReply, is_waiting_event};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -19,6 +24,10 @@ const RECENT_TOOL_USES: usize = 16;
 const RESOLVED_KEPT: usize = 32;
 const DOCTOR_REPLY: &[u8] = br#"{"beacon":"ok"}"#;
 const ENDED_KEPT_MS: u64 = 24 * 60 * 60 * 1000;
+const TIMELINE_KEPT: usize = 60;
+const LABEL_CHARS: usize = 200;
+const LAST_MESSAGE_BYTES: usize = 64 * 1024;
+const USAGE_EVENTS: [&str; 4] = ["Stop", "SubagentStop", "PostToolBatch", "SessionEnd"];
 
 pub type ProcessExit = (String, u32);
 
@@ -47,6 +56,9 @@ struct Runtime {
     watch: Option<ProcessWatch>,
     transcript_len: Option<u64>,
     quiet_since_ms: u64,
+    timeline: VecDeque<TimelineEntry>,
+    last_message: Option<String>,
+    image_read: bool,
 }
 
 enum Followup {
@@ -64,6 +76,8 @@ enum Followup {
 #[derive(Serialize, Deserialize)]
 struct PersistedState {
     sessions: Vec<Session>,
+    #[serde(default)]
+    snoozed_until_ms: Option<u64>,
 }
 
 pub struct Engine {
@@ -76,6 +90,9 @@ pub struct Engine {
     next_id: u64,
     changes: watch::Sender<u64>,
     process_exits: mpsc::UnboundedSender<ProcessExit>,
+    snoozed_until_ms: Option<u64>,
+    account_usage: Option<AccountUsage>,
+    usage_wanted: BTreeMap<String, String>,
 }
 
 impl Engine {
@@ -98,8 +115,19 @@ impl Engine {
             next_id: 1,
             changes: watch::channel(0).0,
             process_exits,
+            snoozed_until_ms: None,
+            account_usage: None,
+            usage_wanted: BTreeMap::new(),
         };
         engine.prune_ended(now_ms());
+        engine.settle_snoozes(now_ms());
+        engine.usage_wanted = engine
+            .sessions
+            .values()
+            .filter_map(|session| {
+                Some((session.session_id.clone(), session.transcript_path.clone()?))
+            })
+            .collect();
         let live: Vec<ProcessExit> = engine
             .sessions
             .values()
@@ -116,9 +144,14 @@ impl Engine {
         Ok(serde_json::from_slice::<PersistedState>(bytes)?.sessions)
     }
 
+    pub fn load_global_snooze(bytes: &[u8]) -> io::Result<Option<u64>> {
+        Ok(serde_json::from_slice::<PersistedState>(bytes)?.snoozed_until_ms)
+    }
+
     pub fn persisted_state(&self) -> io::Result<Vec<u8>> {
         Ok(serde_json::to_vec_pretty(&PersistedState {
             sessions: self.sessions.values().cloned().collect(),
+            snoozed_until_ms: self.snoozed_until_ms,
         })?)
     }
 
@@ -141,17 +174,133 @@ impl Engine {
                 .map(|pending| pending.view.clone())
                 .collect(),
             resolved: self.resolved.iter().cloned().collect(),
+            snoozed_until_ms: self.snoozed_until_ms,
+            account_usage: self.account_usage.clone(),
         }
     }
 
     pub fn control(&mut self, request: Request) -> Reply {
         let result = match request {
             Request::Snapshot | Request::Subscribe => return Reply::with_snapshot(self.snapshot()),
+            Request::Detail { session_id } => {
+                return self
+                    .detail(&session_id)
+                    .map_or_else(Reply::failed, |detail| Reply {
+                        detail: Some(detail),
+                        ..Reply::ok()
+                    });
+            }
             Request::Decide { id, decision } => self.decide(id, decision),
-            Request::Acknowledge { session_id } => self.acknowledge(&session_id),
-            Request::Shutdown => Ok(()),
+            Request::Acknowledge { session_id } => self.acknowledge(&session_id, now_ms()),
+            Request::Snooze { minutes: 0, .. } => {
+                Err("a snooze needs at least one minute".to_string())
+            }
+            Request::Snooze {
+                session_id,
+                minutes,
+            } => self.snooze(
+                session_id.as_deref(),
+                Some(now_ms().saturating_add(minutes.saturating_mul(60_000))),
+            ),
+            Request::Unsnooze { session_id } => self.snooze(session_id.as_deref(), None),
+            Request::RefreshUsage | Request::Shutdown => Ok(()),
         };
         result.map_or_else(Reply::failed, |()| Reply::ok())
+    }
+
+    pub fn snooze(
+        &mut self,
+        session_id: Option<&str>,
+        until_ms: Option<u64>,
+    ) -> Result<(), String> {
+        match session_id {
+            None => self.snoozed_until_ms = until_ms,
+            Some(session_id) => {
+                self.sessions
+                    .get_mut(session_id)
+                    .ok_or_else(|| format!("no session {session_id}"))?
+                    .snoozed_until_ms = until_ms;
+            }
+        }
+        self.changed();
+        Ok(())
+    }
+
+    pub fn next_snooze_expiry(&self) -> Option<u64> {
+        self.sessions
+            .values()
+            .filter_map(|session| session.snoozed_until_ms)
+            .chain(self.snoozed_until_ms)
+            .min()
+    }
+
+    pub fn expire_snoozes(&mut self, now: u64) {
+        if self
+            .next_snooze_expiry()
+            .is_some_and(|expiry| expiry <= now)
+        {
+            self.changed_at(now);
+        }
+    }
+
+    fn settle_snoozes(&mut self, now: u64) {
+        let active = |until: Option<u64>| until.filter(|until| *until > now);
+        self.snoozed_until_ms = active(self.snoozed_until_ms);
+        let globally_snoozed = self.snoozed_until_ms.is_some();
+        for session in self.sessions.values_mut() {
+            session.snoozed_until_ms = active(session.snoozed_until_ms);
+            session.alerting =
+                session.attention && session.snoozed_until_ms.is_none() && !globally_snoozed;
+        }
+    }
+
+    pub fn detail(&self, session_id: &str) -> Result<SessionDetail, String> {
+        if !self.sessions.contains_key(session_id) {
+            return Err(format!("no session {session_id}"));
+        }
+        let runtime = self.runtime.get(session_id);
+        Ok(SessionDetail {
+            session_id: session_id.to_string(),
+            timeline: runtime
+                .map(|runtime| runtime.timeline.iter().cloned().collect())
+                .unwrap_or_default(),
+            last_message: runtime.and_then(|runtime| runtime.last_message.clone()),
+        })
+    }
+
+    pub fn has_session(&self, session_id: &str) -> bool {
+        self.sessions.contains_key(session_id)
+    }
+
+    pub fn take_usage_wanted(&mut self) -> BTreeMap<String, String> {
+        std::mem::take(&mut self.usage_wanted)
+    }
+
+    pub fn set_usage(&mut self, session_id: &str, usage: SessionUsage) {
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return;
+        };
+        if usage.status == UsageStatus::Unrecognized
+            && session.usage.as_ref().map(|usage| usage.status) != Some(UsageStatus::Unrecognized)
+        {
+            self.log.warn(format_args!(
+                "the transcript of session {session_id} has assistant lines without a recognised usage object"
+            ));
+        }
+        session.usage = Some(usage);
+        self.changed();
+    }
+
+    pub fn offer_account_usage(&mut self, usage: AccountUsage) {
+        if self
+            .account_usage
+            .as_ref()
+            .is_some_and(|current| current.fetched_ms > usage.fetched_ms || *current == usage)
+        {
+            return;
+        }
+        self.account_usage = Some(usage);
+        self.changed();
     }
 
     pub fn handle_hook(&mut self, meta: &[u8], payload: &[u8]) -> HookOutcome {
@@ -216,9 +365,13 @@ impl Engine {
         if let Some(cwd) = &common.cwd {
             session.set_location(cwd, meta.env("CLAUDE_PROJECT_DIR"));
         }
-        if common.transcript_path.is_some() {
+        let transcript_changed =
+            common.transcript_path.is_some() && common.transcript_path != session.transcript_path;
+        if transcript_changed {
             session.transcript_path = common.transcript_path;
         }
+        let reads_usage =
+            transcript_changed || USAGE_EVENTS.contains(&common.hook_event_name.as_str());
         if common.permission_mode.is_some() {
             session.permission_mode = common.permission_mode;
         }
@@ -234,6 +387,11 @@ impl Engine {
         if pid.is_some() {
             session.claude_pid = pid;
         }
+        let label = redact(&timeline_label(
+            &common.hook_event_name,
+            &event,
+            session.cwd.as_deref(),
+        ));
         let (input, followup) = match event {
             Event::SessionStart {
                 source,
@@ -253,22 +411,14 @@ impl Engine {
                 (Some(Input::PromptSubmitted), Followup::Nothing)
             }
             Event::PreToolUse(tool_use) => {
-                session.activity = Some(activity_line(
-                    &tool_use.tool_name,
-                    tool_use.tool_input.as_ref(),
-                    session.cwd.as_deref(),
-                ));
+                session.activity = Some(label.clone());
                 (
                     Some(Input::ToolActivity(ToolEvent::Tool)),
                     Followup::ToolUsed(tool_use),
                 )
             }
             Event::PostToolUse(tool_use) | Event::PostToolUseFailure(tool_use) => {
-                session.activity = Some(activity_line(
-                    &tool_use.tool_name,
-                    tool_use.tool_input.as_ref(),
-                    session.cwd.as_deref(),
-                ));
+                session.activity = Some(label.clone());
                 (
                     Some(Input::ToolActivity(ToolEvent::Tool)),
                     Followup::ToolRan(tool_use.tool_use_id),
@@ -283,7 +433,7 @@ impl Engine {
                         .collect(),
                 ),
             ),
-            Event::SubagentStart => (
+            Event::SubagentStart { .. } => (
                 Some(Input::ToolActivity(ToolEvent::SubagentStarted)),
                 Followup::Nothing,
             ),
@@ -321,8 +471,13 @@ impl Engine {
                 last_assistant_message,
                 background_tasks,
             } => {
-                if let Some(message) = &last_assistant_message {
-                    session.set_preview(message);
+                if let Some(mut message) = last_assistant_message {
+                    session.set_preview(&message);
+                    message.truncate(message.floor_char_boundary(LAST_MESSAGE_BYTES));
+                    self.runtime
+                        .entry(session_id.clone())
+                        .or_default()
+                        .last_message = Some(message);
                 }
                 let background_tasks = background_tasks.map_or(0, |tasks| tasks.len() as u32);
                 (Some(Input::Stopped { background_tasks }), Followup::Nothing)
@@ -331,7 +486,7 @@ impl Engine {
                 session.last_error = error;
                 (Some(Input::StopFailed), Followup::Nothing)
             }
-            Event::SessionEnd => (Some(Input::SessionEnded), Followup::Nothing),
+            Event::SessionEnd { .. } => (Some(Input::SessionEnded), Followup::Nothing),
             Event::Notification { notification_type } => (
                 match notification_type.as_deref() {
                     Some("elicitation_dialog") => Some(Input::ElicitationRequested),
@@ -359,6 +514,10 @@ impl Engine {
         if let Some(input) = input {
             session.apply(input, now);
         }
+        if reads_usage && let Some(path) = &session.transcript_path {
+            self.usage_wanted.insert(session_id.clone(), path.clone());
+        }
+        self.record(&session_id, &common.hook_event_name, &label, now);
         if let Some(pid) = pid {
             self.watch_process(&session_id, pid);
         }
@@ -387,6 +546,7 @@ impl Engine {
                 PendingDecision {
                     id: 0,
                     kind: permission_kind(&tool_name),
+                    preview: input_preview(&tool_name, &tool_input),
                     session_id,
                     agent_id: common.agent_id,
                     tool_name,
@@ -469,7 +629,7 @@ impl Engine {
                 && pending.view.tool_use_id.as_deref() == Some(tool_use_id)
         });
         if let Some(id) = joined.map(|(id, _)| *id) {
-            self.finish(id, resolution, Some(HookReply::NoDecision));
+            self.finish(id, resolution, Some(HookReply::NoDecision), None);
         }
     }
 
@@ -485,7 +645,12 @@ impl Engine {
         }
         let output = hook_output(&decision, &pending.view.tool_input);
         let session_id = pending.view.session_id.clone();
-        if !self.finish(id, Resolution::Decided, Some(HookReply::Stdout(output))) {
+        if !self.finish(
+            id,
+            Resolution::Decided,
+            Some(HookReply::Stdout(output)),
+            Some(&decision),
+        ) {
             self.changed();
             return Err(format!("decision {id} expired before it was delivered"));
         }
@@ -497,11 +662,17 @@ impl Engine {
     }
 
     pub fn helper_gone(&mut self, id: u64) {
-        self.finish(id, Resolution::Expired, None);
+        self.finish(id, Resolution::Expired, None, None);
         self.changed();
     }
 
-    fn finish(&mut self, id: u64, resolution: Resolution, reply: Option<HookReply>) -> bool {
+    fn finish(
+        &mut self,
+        id: u64,
+        resolution: Resolution,
+        reply: Option<HookReply>,
+        decision: Option<&Decision>,
+    ) -> bool {
         let Some(pending) = self.pending.remove(&id) else {
             return false;
         };
@@ -512,6 +683,26 @@ impl Engine {
         };
         self.log
             .info(format_args!("decision {id} resolved: {resolution:?}"));
+        let label = match resolution {
+            Resolution::Decided
+                if matches!(
+                    decision,
+                    Some(Decision::Deny { .. } | Decision::DenyAndStop { .. })
+                ) =>
+            {
+                "Denied"
+            }
+            Resolution::Decided => "Allowed",
+            Resolution::AllowedInSession => "Allowed in session",
+            Resolution::DeniedInSession => "Denied in session",
+            Resolution::Expired => "Request expired",
+        };
+        self.record(
+            &pending.view.session_id,
+            "PermissionResolved",
+            label,
+            now_ms(),
+        );
         if self.resolved.len() == RESOLVED_KEPT {
             self.resolved.pop_front();
         }
@@ -533,9 +724,15 @@ impl Engine {
         delivered
     }
 
-    pub fn acknowledge(&mut self, session_id: &str) -> Result<(), String> {
-        if !self.sessions.contains_key(session_id) {
+    pub fn acknowledge(&mut self, session_id: &str, now: u64) -> Result<(), String> {
+        let Some(session) = self.sessions.get(session_id) else {
             return Err(format!("no session {session_id}"));
+        };
+        if session.state == SessionState::Stalled {
+            self.runtime
+                .entry(session_id.to_string())
+                .or_default()
+                .quiet_since_ms = now;
         }
         self.apply(session_id, Input::Acknowledged);
         self.changed();
@@ -576,6 +773,22 @@ impl Engine {
                 session.claude_pid = entry.pid.or(session.claude_pid);
             } else {
                 session.claude_pid = session.claude_pid.or(entry.pid);
+            }
+            if session.entrypoint.is_none()
+                && let Some(pid) = session.claude_pid
+            {
+                let runtime = self.runtime.entry(entry.session_id.clone()).or_default();
+                if !runtime.image_read {
+                    runtime.image_read = true;
+                    if let Some((entrypoint, editor)) = process_image_path(pid)
+                        .ok()
+                        .as_deref()
+                        .and_then(surface_from_image)
+                    {
+                        session.entrypoint = Some(entrypoint.to_string());
+                        session.editor = editor.map(str::to_string);
+                    }
+                }
             }
             session.listed_name = entry.name;
             if let Some(status) = agent_status(entry.status.as_deref()) {
@@ -689,8 +902,55 @@ impl Engine {
         }
     }
 
-    fn changed(&self) {
+    fn record(&mut self, session_id: &str, event: &str, label: &str, now: u64) {
+        let timeline = &mut self
+            .runtime
+            .entry(session_id.to_string())
+            .or_default()
+            .timeline;
+        if timeline.len() == TIMELINE_KEPT {
+            timeline.pop_front();
+        }
+        timeline.push_back(TimelineEntry {
+            t_ms: now,
+            event: event.to_string(),
+            label: redact(label).chars().take(LABEL_CHARS).collect(),
+        });
+    }
+
+    fn changed(&mut self) {
+        self.changed_at(now_ms());
+    }
+
+    fn changed_at(&mut self, now: u64) {
+        self.settle_snoozes(now);
         self.changes.send_modify(|version| *version += 1);
+    }
+}
+
+fn timeline_label(event_name: &str, event: &Event, cwd: Option<&str>) -> String {
+    let described = |text: &str, detail: &Option<String>, shown: fn(&str, &str) -> String| {
+        detail
+            .as_deref()
+            .map_or_else(|| text.to_string(), |detail| shown(text, detail))
+    };
+    let colon = |text: &str, detail: &str| format!("{text}: {detail}");
+    let parenthesised = |text: &str, detail: &str| format!("{text} ({detail})");
+    match event {
+        Event::PreToolUse(tool_use)
+        | Event::PostToolUse(tool_use)
+        | Event::PostToolUseFailure(tool_use) => {
+            activity_line(&tool_use.tool_name, tool_use.tool_input.as_ref(), cwd)
+        }
+        Event::UserPromptSubmit { .. } => "Prompt submitted".to_string(),
+        Event::PermissionRequest { tool_name, .. } => format!("Permission requested: {tool_name}"),
+        Event::Stop { .. } => "Turn finished".to_string(),
+        Event::StopFailure { error } => described("API error", error, colon),
+        Event::PreCompact => "Compacting".to_string(),
+        Event::SessionStart { source, .. } => described("Session started", source, parenthesised),
+        Event::SessionEnd { reason } => described("Session ended", reason, parenthesised),
+        Event::SubagentStart { agent_type } => described("Subagent started", agent_type, colon),
+        _ => event_name.to_string(),
     }
 }
 

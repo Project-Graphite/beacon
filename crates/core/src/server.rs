@@ -1,24 +1,27 @@
+use crate::account::{self, AccountSources, UsageProber};
 use crate::config::Config;
 use crate::control::{Reply, Request};
 use crate::engine::{Engine, HookOutcome, ProcessExit};
 use crate::lister::SessionLister;
 use crate::log::{Logger, now_ms};
 use crate::platform::{self, InstanceLock, PIPE_PREFIX, PipeSecurity};
+use crate::usage::TranscriptReader;
 use beacon_protocol::{
     Channel, ENDPOINT_FILE, Endpoint, HookReply, MAX_FRAME_LEN, TOKEN_LEN, channel_for, frame_len,
     tokens_match,
 };
 use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tokio::sync::{mpsc, watch};
-use tokio::task::JoinSet;
+use tokio::task::{JoinSet, spawn_blocking};
 use tokio::time::{Instant, sleep, sleep_until, timeout};
 
 const LISTENERS: usize = 2;
@@ -27,6 +30,7 @@ const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(500);
 const SUBSCRIBE_INTERVAL: Duration = Duration::from_millis(100);
 const STALL_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+const USAGE_READ_INTERVAL: Duration = Duration::from_secs(2);
 
 pub struct CoreOptions {
     pub home: PathBuf,
@@ -44,12 +48,16 @@ pub struct CoreHandle {
 
 impl Core {
     pub fn start(options: CoreOptions) -> io::Result<CoreHandle> {
+        Core::start_with(options, AccountSources::default())
+    }
+
+    pub fn start_with(options: CoreOptions, account: AccountSources) -> io::Result<CoreHandle> {
         let shutdown = Arc::new(watch::channel(false).0);
         let (ready, started) = std::sync::mpsc::channel();
         let thread_shutdown = shutdown.clone();
         let thread = std::thread::Builder::new()
             .name("beacon-core".to_string())
-            .spawn(move || run(options, thread_shutdown, ready))?;
+            .spawn(move || run(options, account, thread_shutdown, ready))?;
         match started.recv() {
             Ok(Ok(endpoint)) => Ok(CoreHandle {
                 shutdown,
@@ -91,6 +99,7 @@ struct Shared {
     pipe_name: String,
     security: PipeSecurity,
     shutdown: Arc<watch::Sender<bool>>,
+    prober: Option<Box<dyn UsageProber>>,
 }
 
 struct Started {
@@ -103,6 +112,7 @@ struct Started {
 
 fn run(
     options: CoreOptions,
+    account: AccountSources,
     shutdown: Arc<watch::Sender<bool>>,
     ready: std::sync::mpsc::Sender<io::Result<Endpoint>>,
 ) -> io::Result<()> {
@@ -111,7 +121,7 @@ fn run(
         .build()?;
     let started = {
         let _context = runtime.enter();
-        start(&options, shutdown.clone())
+        start(&options, account.prober, shutdown.clone())
     };
     let started = match started {
         Ok(started) => started,
@@ -129,8 +139,15 @@ fn run(
             tasks.spawn_local(listen(shared.clone(), listener));
         }
         tasks.spawn_local(watch_process_exits(shared.clone(), started.exits));
-        tasks.spawn_local(reconcile(shared.clone(), options.lister, options.config.reconcile_seconds));
+        tasks.spawn_local(reconcile(
+            shared.clone(),
+            options.lister,
+            options.config.reconcile_seconds,
+            account.claude_json,
+        ));
         tasks.spawn_local(check_stalls(shared.clone()));
+        tasks.spawn_local(expire_snoozes(shared.clone()));
+        tasks.spawn_local(read_usage(shared.clone()));
         tasks.spawn_local(persist(shared.clone(), options.home.clone()));
         let mut shutdown_requested = shutdown.subscribe();
         tokio::select! {
@@ -152,16 +169,23 @@ fn run(
     result
 }
 
-fn start(options: &CoreOptions, shutdown: Arc<watch::Sender<bool>>) -> io::Result<Started> {
+fn start(
+    options: &CoreOptions,
+    prober: Option<Box<dyn UsageProber>>,
+    shutdown: Arc<watch::Sender<bool>>,
+) -> io::Result<Started> {
     std::fs::create_dir_all(&options.home)?;
     let lock = InstanceLock::acquire(&options.home)?;
     let log = Logger::open(
         &options.home.join("logs").join("core.log"),
         options.config.log_level,
     )?;
-    let sessions = match std::fs::read(options.home.join("state.json")) {
-        Ok(bytes) => Engine::load_sessions(&bytes)?,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+    let (sessions, global_snooze) = match std::fs::read(options.home.join("state.json")) {
+        Ok(bytes) => (
+            Engine::load_sessions(&bytes)?,
+            Engine::load_global_snooze(&bytes)?,
+        ),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => (Vec::new(), None),
         Err(error) => return Err(error),
     };
     let endpoint = Endpoint {
@@ -181,7 +205,10 @@ fn start(options: &CoreOptions, shutdown: Arc<watch::Sender<bool>>) -> io::Resul
         endpoint.pipe_name,
         sessions.len()
     ));
-    let (engine, exits) = Engine::new(options.config.clone(), log, sessions);
+    let (mut engine, exits) = Engine::new(options.config.clone(), log, sessions);
+    engine
+        .snooze(None, global_snooze)
+        .map_err(io::Error::other)?;
     let mut token = [0u8; TOKEN_LEN];
     token.copy_from_slice(endpoint.token.as_bytes());
     Ok(Started {
@@ -191,6 +218,7 @@ fn start(options: &CoreOptions, shutdown: Arc<watch::Sender<bool>>) -> io::Resul
             pipe_name: endpoint.pipe_name.clone(),
             security,
             shutdown,
+            prober,
         }),
         listeners,
         exits,
@@ -333,6 +361,7 @@ async fn serve_control(shared: &Shared, pipe: NamedPipeServer) -> io::Result<()>
                 shared.shutdown.send_replace(true);
                 return Ok(());
             }
+            Ok(Request::RefreshUsage) => refresh_usage(shared).await,
             Ok(request) => shared.engine.borrow_mut().control(request),
             Err(error) => Reply::failed(format!("bad request: {error}")),
         };
@@ -393,12 +422,37 @@ async fn watch_process_exits(
     Ok(())
 }
 
+async fn refresh_usage(shared: &Shared) -> Reply {
+    let Some(prober) = &shared.prober else {
+        return Reply::failed("this core has no usage prober");
+    };
+    let probed = prober.probe().await.and_then(|stdout| {
+        account::parse_probe(&stdout, now_ms()).ok_or_else(|| {
+            io::Error::other("the probe output had no rate_limit_event with unifiedWindows")
+        })
+    });
+    match probed {
+        Ok(usage) => {
+            shared.engine.borrow_mut().offer_account_usage(usage);
+            Reply::ok()
+        }
+        Err(error) => Reply::failed(format!("usage refresh failed: {error}")),
+    }
+}
+
 async fn reconcile(
     shared: Rc<Shared>,
     lister: Box<dyn SessionLister>,
     reconcile_seconds: u64,
+    claude_json: Option<PathBuf>,
 ) -> io::Result<()> {
     let interval = Duration::from_secs(reconcile_seconds.max(1));
+    let mut cache = CacheWatch {
+        path: claude_json,
+        modified: None,
+        warned: false,
+    };
+    cache.refresh(&shared).await?;
     loop {
         match lister.list().await {
             Ok(listed) => shared.engine.borrow_mut().reconcile(listed),
@@ -410,8 +464,129 @@ async fn reconcile(
         }
         loop {
             sleep(interval).await;
+            cache.refresh(&shared).await?;
             if shared.engine.borrow().has_live_sessions() {
                 break;
+            }
+        }
+    }
+}
+
+struct CacheWatch {
+    path: Option<PathBuf>,
+    modified: Option<SystemTime>,
+    warned: bool,
+}
+
+impl CacheWatch {
+    async fn refresh(&mut self, shared: &Shared) -> io::Result<()> {
+        let Some(path) = self.path.clone() else {
+            return Ok(());
+        };
+        let modified = std::fs::metadata(&path)
+            .and_then(|metadata| metadata.modified())
+            .ok();
+        if modified.is_some() && modified == self.modified {
+            return Ok(());
+        }
+        self.modified = modified;
+        match spawn_blocking(move || account::read_cache(&path))
+            .await
+            .map_err(io::Error::other)?
+        {
+            Some(usage) => {
+                self.warned = false;
+                shared.engine.borrow_mut().offer_account_usage(usage);
+            }
+            None if !self.warned => {
+                self.warned = true;
+                shared
+                    .engine
+                    .borrow()
+                    .log
+                    .warn("the Claude Code config has no readable cachedUsageUtilization");
+            }
+            None => {}
+        }
+        Ok(())
+    }
+}
+
+async fn expire_snoozes(shared: Rc<Shared>) -> io::Result<()> {
+    let mut changes = shared.engine.borrow().watch_changes();
+    loop {
+        let expiry = shared.engine.borrow().next_snooze_expiry();
+        let until_expiry =
+            Duration::from_millis(expiry.unwrap_or(u64::MAX).saturating_sub(now_ms()));
+        tokio::select! {
+            changed = changes.changed() => {
+                if changed.is_err() {
+                    return Ok(());
+                }
+            }
+            () = sleep(until_expiry), if expiry.is_some() => {
+                shared.engine.borrow_mut().expire_snoozes(now_ms());
+            }
+        }
+    }
+}
+
+async fn read_usage(shared: Rc<Shared>) -> io::Result<()> {
+    let mut changes = shared.engine.borrow().watch_changes();
+    let mut readers: HashMap<String, TranscriptReader> = HashMap::new();
+    let mut last_read: HashMap<String, Instant> = HashMap::new();
+    let mut due: BTreeMap<String, (Instant, String)> = BTreeMap::new();
+    loop {
+        let wanted = shared.engine.borrow_mut().take_usage_wanted();
+        for (session_id, transcript) in wanted {
+            let earliest = last_read
+                .get(&session_id)
+                .map_or_else(Instant::now, |read_at| *read_at + USAGE_READ_INTERVAL);
+            due.entry(session_id)
+                .and_modify(|entry| entry.1 = transcript.clone())
+                .or_insert((earliest, transcript));
+        }
+        let next = due.values().map(|(at, _)| *at).min();
+        tokio::select! {
+            changed = changes.changed() => {
+                if changed.is_err() {
+                    return Ok(());
+                }
+            }
+            () = sleep_until(next.unwrap_or_else(Instant::now)), if next.is_some() => {
+                let now = Instant::now();
+                let ready: Vec<String> = due
+                    .iter()
+                    .filter(|(_, (at, _))| *at <= now)
+                    .map(|(session_id, _)| session_id.clone())
+                    .collect();
+                for session_id in ready {
+                    let Some((_, transcript)) = due.remove(&session_id) else {
+                        continue;
+                    };
+                    last_read.insert(session_id.clone(), Instant::now());
+                    let mut reader = readers
+                        .remove(&session_id)
+                        .filter(|reader| reader.transcript() == Path::new(&transcript))
+                        .unwrap_or_else(|| TranscriptReader::new(&session_id, Path::new(&transcript)));
+                    let (reader, read) = spawn_blocking(move || {
+                        let read = reader.read(now_ms());
+                        (reader, read)
+                    })
+                    .await
+                    .map_err(io::Error::other)?;
+                    readers.insert(session_id.clone(), reader);
+                    let mut engine = shared.engine.borrow_mut();
+                    match read {
+                        Ok(usage) => engine.set_usage(&session_id, usage),
+                        Err(error) => engine.log.warn(format_args!(
+                            "usage of session {session_id} gave no information: {error}"
+                        )),
+                    }
+                }
+                let engine = shared.engine.borrow();
+                readers.retain(|session_id, _| engine.has_session(session_id));
+                last_read.retain(|session_id, _| engine.has_session(session_id));
             }
         }
     }

@@ -11,6 +11,9 @@ Usage:
   beacon decide <id> deny [--message <text>] [--stop]
   beacon decide <id> answer \"<question>=<label>\" ...
   beacon ack <session-id-or-unique-prefix>
+  beacon snooze <session-id-or-unique-prefix|all> <minutes>
+  beacon unsnooze <session-id-or-unique-prefix|all>
+  beacon usage [--refresh]
   beacon install [--settings <path>] [--yes]
   beacon uninstall [--settings <path>] [--yes]
   beacon doctor [--settings <path>]
@@ -32,6 +35,16 @@ pub enum Command {
     },
     Ack {
         session: String,
+    },
+    Snooze {
+        session: Option<String>,
+        minutes: u64,
+    },
+    Unsnooze {
+        session: Option<String>,
+    },
+    Usage {
+        refresh: bool,
     },
     Install {
         settings: Option<PathBuf>,
@@ -101,6 +114,20 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         ("ack", [session]) => Ok(Command::Ack {
             session: session.clone(),
         }),
+        ("snooze", [session, minutes]) => Ok(Command::Snooze {
+            session: session_or_all(session),
+            minutes: minutes
+                .parse::<u64>()
+                .ok()
+                .filter(|minutes| *minutes > 0)
+                .ok_or_else(|| format!("not a number of minutes: {minutes}"))?,
+        }),
+        ("unsnooze", [session]) => Ok(Command::Unsnooze {
+            session: session_or_all(session),
+        }),
+        ("usage", _) => Ok(Command::Usage {
+            refresh: Options::parse(rest, &["--refresh"], &[])?.has("--refresh"),
+        }),
         ("install" | "uninstall", _) => {
             let options = Options::parse(rest, &["--yes"], &["--settings"])?;
             let settings = options.value("--settings").map(PathBuf::from);
@@ -118,6 +145,10 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         }),
         _ => Err(format!("unknown command: {}", args.join(" "))),
     }
+}
+
+fn session_or_all(session: &str) -> Option<String> {
+    (session != "all").then(|| session.to_string())
 }
 
 fn parse_decide(args: &[String]) -> Result<Command, String> {
@@ -193,6 +224,52 @@ mod tests {
                 session: "4c2c".to_string()
             })
         );
+    }
+
+    #[test]
+    fn snooze_and_usage_commands_parse() {
+        assert_eq!(
+            parsed(&["snooze", "4c2c", "30"]),
+            Ok(Command::Snooze {
+                session: Some("4c2c".to_string()),
+                minutes: 30
+            })
+        );
+        assert_eq!(
+            parsed(&["snooze", "all", "5"]),
+            Ok(Command::Snooze {
+                session: None,
+                minutes: 5
+            })
+        );
+        assert_eq!(
+            parsed(&["unsnooze", "4c2c"]),
+            Ok(Command::Unsnooze {
+                session: Some("4c2c".to_string())
+            })
+        );
+        assert_eq!(
+            parsed(&["unsnooze", "all"]),
+            Ok(Command::Unsnooze { session: None })
+        );
+        assert_eq!(parsed(&["usage"]), Ok(Command::Usage { refresh: false }));
+        assert_eq!(
+            parsed(&["usage", "--refresh"]),
+            Ok(Command::Usage { refresh: true })
+        );
+        for line in [
+            &["snooze"][..],
+            &["snooze", "all"],
+            &["snooze", "all", "0"],
+            &["snooze", "all", "-5"],
+            &["snooze", "all", "soon"],
+            &["snooze", "a", "5", "extra"],
+            &["unsnooze"],
+            &["unsnooze", "a", "b"],
+            &["usage", "--json"],
+        ] {
+            assert!(parsed(line).is_err(), "{line:?}");
+        }
     }
 
     #[test]

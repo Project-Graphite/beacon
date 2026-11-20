@@ -131,6 +131,8 @@ fn surfaces_are_counted_with_limited_sessions() {
         ],
         pending: Vec::new(),
         resolved: Vec::new(),
+        snoozed_until_ms: None,
+        account_usage: None,
     };
     assert_eq!(
         surfaces(Some(&snapshot)),

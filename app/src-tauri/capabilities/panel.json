@@ -1,0 +1,16 @@
+{
+  "identifier": "panel",
+  "windows": ["panel"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-get-snapshot",
+    "allow-get-detail",
+    "allow-acknowledge",
+    "allow-snooze",
+    "allow-unsnooze",
+    "allow-refresh-usage",
+    "allow-close-panel",
+    "allow-set-panel-height"
+  ]
+}

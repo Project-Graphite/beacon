@@ -33,28 +33,37 @@ pub struct ClaudeAgentsLister;
 impl SessionLister for ClaudeAgentsLister {
     fn list(&self) -> ListFuture<'_> {
         Box::pin(async {
-            let mut command = tokio::process::Command::new("claude");
-            command
-                .args(["agents", "--json"])
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .kill_on_drop(true);
-            platform::hide_console_window(&mut command);
-            let output = tokio::time::timeout(LIST_TIMEOUT, command.output())
-                .await
-                .map_err(|_| {
-                    io::Error::new(io::ErrorKind::TimedOut, "claude agents --json timed out")
-                })??;
-            if !output.status.success() {
-                return Err(io::Error::other(format!(
-                    "claude agents --json exited with {}",
-                    output.status
-                )));
-            }
-            Ok(serde_json::from_slice(&output.stdout)?)
+            Ok(serde_json::from_slice(
+                &run_claude(&["agents", "--json"], LIST_TIMEOUT).await?,
+            )?)
         })
     }
+}
+
+pub async fn run_claude(args: &[&str], limit: Duration) -> io::Result<Vec<u8>> {
+    let mut command = tokio::process::Command::new("claude");
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    platform::hide_console_window(&mut command);
+    let output = tokio::time::timeout(limit, command.output())
+        .await
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("claude {} timed out", args[0]),
+            )
+        })??;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "claude {} exited with {}",
+            args[0], output.status
+        )));
+    }
+    Ok(output.stdout)
 }
 
 #[cfg(test)]

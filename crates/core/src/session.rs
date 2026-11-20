@@ -1,10 +1,28 @@
 use crate::state::{AgentStatus, Input, Overlays, SessionState, overlays_after, transition};
+use crate::usage::SessionUsage;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
 
 const COMMAND_CHARS: usize = 80;
 const PREVIEW_CHARS: usize = 400;
+const IMAGE_SURFACES: [(&str, &str, Option<&str>); 7] = [
+    (r"\.vscode\extensions\", "claude-vscode", Some("VS Code")),
+    (
+        r"\.vscode-insiders\extensions\",
+        "claude-vscode",
+        Some("VS Code Insiders"),
+    ),
+    (r"\.cursor\extensions\", "claude-vscode", Some("Cursor")),
+    (r"\.windsurf\extensions\", "claude-vscode", Some("Windsurf")),
+    (
+        r"\.antigravity\extensions\",
+        "claude-vscode",
+        Some("Antigravity"),
+    ),
+    (r"\anthropicclaude\", "claude-desktop", None),
+    (r"\appdata\roaming\claude\", "claude-desktop", None),
+];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
@@ -34,6 +52,14 @@ pub struct Session {
     pub tasks_created: u32,
     pub tasks_completed: u32,
     pub limited: bool,
+    #[serde(default)]
+    pub snoozed_until_ms: Option<u64>,
+    #[serde(default)]
+    pub alerting: bool,
+    #[serde(default)]
+    pub editor: Option<String>,
+    #[serde(default)]
+    pub usage: Option<SessionUsage>,
 }
 
 impl Session {
@@ -64,6 +90,10 @@ impl Session {
             tasks_created: 0,
             tasks_completed: 0,
             limited: false,
+            snoozed_until_ms: None,
+            alerting: false,
+            editor: None,
+            usage: None,
         }
     }
 
@@ -71,6 +101,9 @@ impl Session {
         let before = self.state;
         self.state = transition(self.state, input);
         self.overlays = overlays_after(self.overlays, input);
+        if self.attention && !self.state.needs_attention() {
+            self.snoozed_until_ms = None;
+        }
         self.attention = self.state.needs_attention();
         if input == Input::PromptSubmitted {
             self.turn_ended_ms = None;
@@ -91,6 +124,14 @@ impl Session {
     pub fn set_preview(&mut self, message: &str) {
         self.last_message_preview = Some(message.chars().take(PREVIEW_CHARS).collect());
     }
+}
+
+pub fn surface_from_image(image_path: &str) -> Option<(&'static str, Option<&'static str>)> {
+    let lowered = image_path.to_lowercase();
+    IMAGE_SURFACES
+        .iter()
+        .find(|(marker, ..)| lowered.contains(marker))
+        .map(|&(_, entrypoint, editor)| (entrypoint, editor))
 }
 
 fn ends_turn(input: Input, before: SessionState, after: SessionState) -> bool {
@@ -240,6 +281,45 @@ mod tests {
         std::fs::write(root.join(".git").join("HEAD"), "0123456789abcdef\n").unwrap();
         assert_eq!(git_branch(&nested).as_deref(), Some("0123456"));
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn image_paths_map_to_surfaces() {
+        let cases = [
+            (
+                r"C:\Users\x\.vscode\extensions\anthropic.claude-code-2.1.0-win32-x64\resources\native-binary\claude.exe",
+                Some(("claude-vscode", Some("VS Code"))),
+            ),
+            (
+                r"C:\Users\x\.VSCODE-INSIDERS\Extensions\anthropic.claude-code\claude.exe",
+                Some(("claude-vscode", Some("VS Code Insiders"))),
+            ),
+            (
+                r"C:\Users\x\.cursor\extensions\a\claude.exe",
+                Some(("claude-vscode", Some("Cursor"))),
+            ),
+            (
+                r"C:\Users\x\.windsurf\extensions\a\claude.exe",
+                Some(("claude-vscode", Some("Windsurf"))),
+            ),
+            (
+                r"C:\Users\x\.antigravity\extensions\a\claude.exe",
+                Some(("claude-vscode", Some("Antigravity"))),
+            ),
+            (
+                r"C:\Users\x\AppData\Local\AnthropicClaude\app-1.0.0\resources\claude.exe",
+                Some(("claude-desktop", None)),
+            ),
+            (
+                r"C:\Users\x\AppData\Roaming\Claude\claude-code\2.1.0\claude.exe",
+                Some(("claude-desktop", None)),
+            ),
+            (r"C:\Users\x\.local\bin\claude.exe", None),
+            (r"C:\Users\x\.vscode\claude.exe", None),
+        ];
+        for (path, expected) in cases {
+            assert_eq!(surface_from_image(path), expected, "{path}");
+        }
     }
 
     #[test]

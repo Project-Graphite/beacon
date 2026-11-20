@@ -1,4 +1,5 @@
 use super::*;
+use crate::account::UsageSource;
 use crate::config::LogLevel;
 use serde_json::json;
 use std::path::PathBuf;
@@ -471,12 +472,12 @@ fn the_fixture_sequence_walks_the_state_machine() {
     fixture.send(STOP);
     assert_eq!(fixture.state(), SessionState::Done);
     assert!(fixture.session().attention);
-    fixture.engine.acknowledge(SESSION).unwrap();
+    fixture.engine.acknowledge(SESSION, now_ms()).unwrap();
     assert_eq!(fixture.state(), SessionState::Idle);
     fixture.send(POST_MODEL_SWITCH);
     fixture.send(SESSION_END);
     assert_eq!(fixture.state(), SessionState::Ended);
-    assert!(fixture.engine.acknowledge("missing").is_err());
+    assert!(fixture.engine.acknowledge("missing", now_ms()).is_err());
 }
 
 #[test]
@@ -858,6 +859,305 @@ fn ended_sessions_are_pruned_by_the_periodic_check() {
 }
 
 #[test]
+fn snoozes_silence_alerting_until_they_expire() {
+    let mut fixture = fixture();
+    fixture.send(STOP);
+    assert!(fixture.session().attention && fixture.session().alerting);
+    let reply = fixture.engine.control(Request::Snooze {
+        session_id: Some(SESSION.to_string()),
+        minutes: 10,
+    });
+    assert!(reply.ok);
+    let until = fixture.session().snoozed_until_ms.unwrap();
+    assert!(fixture.session().attention && !fixture.session().alerting);
+    assert_eq!(fixture.engine.next_snooze_expiry(), Some(until));
+    let mut changes = fixture.engine.watch_changes();
+    changes.borrow_and_update();
+    fixture.engine.expire_snoozes(until - 1);
+    assert!(!changes.has_changed().unwrap());
+    fixture.engine.expire_snoozes(until);
+    assert!(changes.has_changed().unwrap());
+    assert_eq!(fixture.session().snoozed_until_ms, None);
+    assert!(fixture.session().alerting);
+    assert_eq!(fixture.engine.next_snooze_expiry(), None);
+}
+
+#[test]
+fn a_global_snooze_silences_every_session_and_persists() {
+    let mut fixture = fixture();
+    fixture.send(STOP);
+    assert!(
+        fixture
+            .engine
+            .control(Request::Snooze {
+                session_id: None,
+                minutes: 5
+            })
+            .ok
+    );
+    let until = fixture.engine.snapshot().snoozed_until_ms.unwrap();
+    assert!(!fixture.session().alerting);
+    assert_eq!(fixture.session().snoozed_until_ms, None);
+    let persisted = fixture.engine.persisted_state().unwrap();
+    assert_eq!(Engine::load_global_snooze(&persisted).unwrap(), Some(until));
+    assert_eq!(
+        Engine::load_global_snooze(br#"{"sessions":[]}"#).unwrap(),
+        None
+    );
+    assert!(
+        fixture
+            .engine
+            .control(Request::Unsnooze { session_id: None })
+            .ok
+    );
+    assert_eq!(fixture.engine.snapshot().snoozed_until_ms, None);
+    assert!(fixture.session().alerting);
+}
+
+#[test]
+fn leaving_every_attention_state_clears_the_session_snooze() {
+    let mut fixture = fixture();
+    fixture.send(STOP);
+    fixture
+        .engine
+        .snooze(Some(SESSION), Some(u64::MAX))
+        .unwrap();
+    fixture.send(&custom("StopFailure", json!({"error": "rate_limit"})));
+    assert_eq!(fixture.session().snoozed_until_ms, Some(u64::MAX));
+    assert!(!fixture.session().alerting);
+    fixture.send(USER_PROMPT_SUBMIT);
+    assert_eq!(fixture.session().snoozed_until_ms, None);
+    assert!(!fixture.session().alerting);
+    fixture.send(STOP);
+    assert!(fixture.session().alerting);
+}
+
+#[test]
+fn snooze_requests_are_checked() {
+    let mut fixture = fixture();
+    fixture.send(STOP);
+    let zero = fixture.engine.control(Request::Snooze {
+        session_id: None,
+        minutes: 0,
+    });
+    assert!(!zero.ok);
+    let missing = fixture.engine.control(Request::Unsnooze {
+        session_id: Some("missing".to_string()),
+    });
+    assert_eq!(missing, Reply::failed("no session missing"));
+}
+
+#[test]
+fn the_detail_timeline_has_safe_labels_and_keeps_the_last_message() {
+    let mut fixture = fixture();
+    let secret = "PROMPT-TEXT-NEVER-SHOWN";
+    fixture.send(&custom(
+        "SessionStart",
+        json!({"source": "startup", "model": "m"}),
+    ));
+    fixture.send(&custom(
+        "UserPromptSubmit",
+        json!({"prompt": secret, "session_title": "t"}),
+    ));
+    fixture.send(&custom(
+        "PreToolUse",
+        json!({"tool_name": "Bash", "tool_input": {"command": "GITHUB_TOKEN=abc123 gh pr list", "description": secret}, "tool_use_id": "t1"}),
+    ));
+    fixture.send(&custom(
+        "PostToolUse",
+        json!({"tool_name": "Bash", "tool_input": {"command": "GITHUB_TOKEN=abc123 gh pr list"}, "tool_use_id": "t1", "tool_response": {"stdout": secret}}),
+    ));
+    fixture.send(&custom(
+        "SubagentStart",
+        json!({"agent_id": "a", "agent_type": "Explore"}),
+    ));
+    fixture.send(&custom(
+        "Notification",
+        json!({"notification_type": "idle_prompt", "message": secret}),
+    ));
+    let (allowed, _allowed_receiver) = fixture.ask(PERMISSION_REQUEST);
+    fixture.engine.decide(allowed, Decision::Allow).unwrap();
+    let (denied, _denied_receiver) = fixture.ask(PERMISSION_REQUEST);
+    fixture
+        .engine
+        .decide(denied, Decision::Deny { message: None })
+        .unwrap();
+    let (expired, _) = fixture.ask(PERMISSION_REQUEST);
+    fixture.engine.helper_gone(expired);
+    fixture.send(&custom("PreCompact", json!({"trigger": "auto"})));
+    fixture.send(&custom(
+        "StopFailure",
+        json!({"error": "rate_limit", "error_details": secret}),
+    ));
+    let message = format!("{secret}{}", "ж".repeat(40_000));
+    fixture.send(&custom("Stop", json!({"last_assistant_message": message})));
+    fixture.send(&custom("SessionEnd", json!({"reason": "logout"})));
+    let reply = fixture.engine.control(Request::Detail {
+        session_id: SESSION.to_string(),
+    });
+    let detail = reply.detail.unwrap();
+    assert_eq!(detail.session_id, SESSION);
+    let labels: Vec<(&str, &str)> = detail
+        .timeline
+        .iter()
+        .map(|entry| (entry.event.as_str(), entry.label.as_str()))
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            ("SessionStart", "Session started (startup)"),
+            ("UserPromptSubmit", "Prompt submitted"),
+            ("PreToolUse", "Running GITHUB_TOKEN=*** gh pr list"),
+            ("PostToolUse", "Running GITHUB_TOKEN=*** gh pr list"),
+            ("SubagentStart", "Subagent started: Explore"),
+            ("Notification", "Notification"),
+            ("PermissionRequest", "Permission requested: Bash"),
+            ("PermissionResolved", "Allowed"),
+            ("PermissionRequest", "Permission requested: Bash"),
+            ("PermissionResolved", "Denied"),
+            ("PermissionRequest", "Permission requested: Bash"),
+            ("PermissionResolved", "Request expired"),
+            ("PreCompact", "Compacting"),
+            ("StopFailure", "API error: rate_limit"),
+            ("Stop", "Turn finished"),
+            ("SessionEnd", "Session ended (logout)"),
+        ]
+    );
+    assert!(
+        detail
+            .timeline
+            .iter()
+            .all(|entry| !entry.label.contains(secret))
+    );
+    let last_message = detail.last_message.unwrap();
+    assert!(last_message.starts_with(secret));
+    assert_eq!(last_message.len(), 64 * 1024 - 1);
+    assert!(
+        fixture
+            .engine
+            .control(Request::Detail {
+                session_id: "missing".to_string()
+            })
+            .detail
+            .is_none()
+    );
+}
+
+#[test]
+fn the_timeline_keeps_sixty_entries_and_marks_answers_given_elsewhere() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    fixture.send(PRE_TOOL_USE);
+    let (_allowed, _allowed_receiver) = fixture.ask(PERMISSION_REQUEST);
+    fixture.send(POST_TOOL_USE);
+    let (_denied, _denied_receiver) = fixture.ask(PERMISSION_REQUEST);
+    fixture.send(PRE_TOOL_USE);
+    fixture.send(POST_TOOL_BATCH);
+    let labels: Vec<String> = fixture
+        .engine
+        .detail(SESSION)
+        .unwrap()
+        .timeline
+        .into_iter()
+        .filter(|entry| entry.event == "PermissionResolved")
+        .map(|entry| entry.label)
+        .collect();
+    assert_eq!(labels, ["Allowed in session", "Denied in session"]);
+    for _ in 0..100 {
+        fixture.send(&custom("TaskCreated", json!({})));
+    }
+    let timeline = fixture.engine.detail(SESSION).unwrap().timeline;
+    assert_eq!(timeline.len(), 60);
+    assert!(timeline.iter().all(|entry| entry.label == "TaskCreated"));
+}
+
+#[test]
+fn usage_is_wanted_for_a_new_transcript_and_after_turn_events() {
+    let mut fixture = fixture();
+    let transcript = r"C:\nowhere\t.jsonl";
+    let with_transcript = |event: &str| custom(event, json!({"transcript_path": transcript}));
+    fixture.send(&custom("SessionStart", json!({"source": "startup"})));
+    assert!(fixture.engine.take_usage_wanted().is_empty());
+    fixture.send(&with_transcript("UserPromptSubmit"));
+    assert_eq!(
+        fixture.engine.take_usage_wanted(),
+        BTreeMap::from([(SESSION.to_string(), transcript.to_string())])
+    );
+    for event in ["PreToolUse", "PostToolUse", "Notification", "SubagentStart"] {
+        fixture.send(&custom(
+            event,
+            json!({"tool_name": "Read", "transcript_path": transcript}),
+        ));
+        assert!(fixture.engine.take_usage_wanted().is_empty(), "{event}");
+    }
+    for event in ["Stop", "SubagentStop", "PostToolBatch", "SessionEnd"] {
+        fixture.send(&with_transcript(event));
+        assert_eq!(fixture.engine.take_usage_wanted().len(), 1, "{event}");
+    }
+    let restored = fixture_with(Config::default(), fixture.engine.snapshot().sessions);
+    let mut restored = restored;
+    assert_eq!(restored.engine.take_usage_wanted().len(), 1);
+}
+
+#[test]
+fn usage_and_account_readings_reach_the_snapshot() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    let usage = SessionUsage {
+        input_tokens: 1,
+        output_tokens: 2,
+        cache_creation_tokens: 3,
+        cache_read_tokens: 4,
+        context_tokens: 8,
+        subagent_tokens: 0,
+        reported_cost_usd: None,
+        model: Some("m".to_string()),
+        updated_ms: 5,
+        status: UsageStatus::Ok,
+    };
+    fixture.engine.set_usage(SESSION, usage.clone());
+    fixture.engine.set_usage("missing", usage.clone());
+    assert_eq!(fixture.session().usage, Some(usage));
+    let reading = |fetched_ms: u64, source: UsageSource| AccountUsage {
+        five_hour_percent: Some(fetched_ms as f64),
+        five_hour_resets_at: None,
+        seven_day_percent: None,
+        seven_day_resets_at: None,
+        fetched_ms: Some(fetched_ms),
+        source,
+    };
+    fixture
+        .engine
+        .offer_account_usage(reading(20, UsageSource::Probe));
+    fixture
+        .engine
+        .offer_account_usage(reading(10, UsageSource::Cache));
+    assert_eq!(
+        fixture.engine.snapshot().account_usage,
+        Some(reading(20, UsageSource::Probe))
+    );
+    fixture
+        .engine
+        .offer_account_usage(reading(30, UsageSource::Cache));
+    assert_eq!(
+        fixture.engine.snapshot().account_usage,
+        Some(reading(30, UsageSource::Cache))
+    );
+}
+
+#[test]
+fn a_listed_session_whose_image_names_no_surface_keeps_no_entrypoint() {
+    let mut fixture = fixture();
+    fixture
+        .engine
+        .reconcile(vec![listed("listed", Some(std::process::id()), "idle")]);
+    let session = &fixture.engine.sessions["listed"];
+    assert_eq!(session.entrypoint, None);
+    assert_eq!(session.editor, None);
+    assert!(fixture.engine.runtime["listed"].image_read);
+}
+
+#[test]
 fn working_sessions_stall_only_when_quiet_and_the_transcript_is_unchanged() {
     let mut fixture = fixture();
     let transcript = fixture.home.0.join("transcript.jsonl");
@@ -880,4 +1180,57 @@ fn working_sessions_stall_only_when_quiet_and_the_transcript_is_unchanged() {
     assert_eq!(fixture.state(), SessionState::Stalled);
     fixture.send(PRE_TOOL_USE);
     assert_eq!(fixture.state(), SessionState::Working);
+}
+
+#[test]
+fn acknowledging_clears_done_error_and_stalled_and_restarts_the_stall_clock() {
+    let mut fixture = fixture();
+    fixture.send(&custom("StopFailure", json!({"error": "rate_limit"})));
+    assert_eq!(fixture.state(), SessionState::Error);
+    fixture.engine.acknowledge(SESSION, now_ms()).unwrap();
+    assert_eq!(fixture.state(), SessionState::Idle);
+    fixture.send(&custom("UserPromptSubmit", json!({})));
+    let start = fixture.session().last_event_ms;
+    let ten_minutes = 10 * 60_000;
+    fixture.engine.check_stalls(start + ten_minutes);
+    assert_eq!(fixture.state(), SessionState::Stalled);
+    fixture
+        .engine
+        .acknowledge(SESSION, start + 2 * ten_minutes)
+        .unwrap();
+    assert_eq!(fixture.state(), SessionState::Working);
+    fixture.engine.check_stalls(start + 3 * ten_minutes - 1);
+    assert_eq!(fixture.state(), SessionState::Working);
+    fixture.engine.check_stalls(start + 3 * ten_minutes);
+    assert_eq!(fixture.state(), SessionState::Stalled);
+}
+
+#[test]
+fn activity_lines_and_timeline_labels_are_redacted() {
+    let mut fixture = fixture();
+    fixture.send(&custom(
+        "PreToolUse",
+        json!({"tool_name": "Bash", "tool_input": {"command": "API_KEY=abc123 npm run deploy"}, "tool_use_id": "t1"}),
+    ));
+    assert_eq!(
+        fixture.session().activity.as_deref(),
+        Some("Running API_KEY=*** npm run deploy")
+    );
+    let detail = fixture
+        .engine
+        .control(Request::Detail {
+            session_id: SESSION.to_string(),
+        })
+        .detail
+        .unwrap();
+    assert!(
+        detail
+            .timeline
+            .iter()
+            .all(|entry| !entry.label.contains("abc123"))
+    );
+    assert_eq!(
+        detail.timeline.last().map(|entry| entry.label.as_str()),
+        Some("Running API_KEY=*** npm run deploy")
+    );
 }
