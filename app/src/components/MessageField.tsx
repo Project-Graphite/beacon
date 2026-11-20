@@ -16,7 +16,7 @@ export function MessageField({ label, placeholder, sendLabel, disabled, onSend, 
     if (message.trim()) onSend(message.trim());
   };
   return (
-    <div className="mt-2 flex items-center gap-1.5">
+    <div className="mt-2 flex origin-top-left animate-appear items-center gap-1.5">
       <input
         autoFocus
         aria-label={label}

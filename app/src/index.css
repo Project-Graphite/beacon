@@ -23,6 +23,7 @@
   --radius-card: 1rem;
   --shadow-popover: 0 18px 40px -12px rgb(0 0 0 / 0.7);
   --ease-settle: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --text-body: 13px;
   --text-body--line-height: 1.45;
   --text-secondary: 12px;
@@ -30,7 +31,16 @@
   --text-micro: 11px;
   --text-micro--line-height: 1.45;
   --animate-turn: turn 1.2s linear infinite;
-  --animate-halo: halo 1.6s linear infinite;
+  --animate-halo: halo 1.6s ease-out infinite;
+  --animate-panel-in: panel-in 180ms var(--ease-settle) both;
+  --animate-panel-out: panel-in 140ms var(--ease-settle) reverse both;
+  --animate-pop: pop 180ms var(--ease-spring) both;
+  --animate-fade-out: fade-out 180ms var(--ease-settle) forwards;
+  --animate-appear: appear 140ms var(--ease-settle) both;
+  --animate-view-in: view-in 200ms var(--ease-settle) both;
+  --animate-roll-in: roll-in 160ms var(--ease-settle) both;
+  --animate-roll-out: roll-out 160ms var(--ease-settle) forwards;
+  --animate-sent: sent 200ms var(--ease-settle) forwards;
 
   @keyframes turn {
     to {
@@ -40,13 +50,84 @@
 
   @keyframes halo {
     from {
-      r: 4.5px;
+      scale: 1;
       opacity: 1;
     }
     to {
-      r: 7px;
+      scale: 1.6;
       opacity: 0;
     }
+  }
+
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      translate: var(--enter-x) var(--enter-y);
+      scale: 0.98;
+    }
+  }
+
+  @keyframes pop {
+    from {
+      opacity: 0;
+      scale: 0.6;
+    }
+  }
+
+  @keyframes fade-out {
+    to {
+      opacity: 0;
+      scale: 0.8;
+    }
+  }
+
+  @keyframes appear {
+    from {
+      opacity: 0;
+      scale: 0.96;
+    }
+  }
+
+  @keyframes view-in {
+    from {
+      opacity: 0;
+      translate: var(--view-from) 0;
+    }
+  }
+
+  @keyframes roll-in {
+    from {
+      opacity: 0;
+      translate: 0 var(--roll);
+    }
+  }
+
+  @keyframes roll-out {
+    to {
+      opacity: 0;
+      translate: 0 calc(-1 * var(--roll));
+    }
+  }
+
+  @keyframes sent {
+    to {
+      opacity: 0;
+      translate: 0 -8px;
+    }
+  }
+}
+
+@utility press {
+  transition:
+    color 120ms var(--ease-settle),
+    background-color 120ms var(--ease-settle),
+    border-color 120ms var(--ease-settle),
+    opacity 150ms var(--ease-settle),
+    scale 200ms var(--ease-spring);
+
+  &:active {
+    scale: 0.96;
+    transition-duration: 100ms;
   }
 }
 
@@ -59,8 +140,8 @@
 }
 
 .scroll-thin::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
 }
 
 .scroll-thin::-webkit-scrollbar-track {
@@ -68,8 +149,8 @@
 }
 
 .scroll-thin::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 5px;
+  border: 1px solid transparent;
+  border-radius: 3px;
   background: var(--color-line) padding-box;
 }
 
@@ -81,11 +162,24 @@
   background: transparent;
 }
 
+.session-list > li:not(:first-child, [data-group] + li) {
+  border-top: 1px solid var(--color-line-soft);
+}
+
+:root[data-hidden] *,
+[data-offscreen] * {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,
   ::after {
     animation: none !important;
     transition: none !important;
+  }
+
+  .press:active {
+    scale: none;
   }
 }

@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import type { SessionState } from '../beacon';
+import { useOffscreenPause } from '../hooks/useOffscreenPause.ts';
 
 const RING = { fill: 'none', strokeWidth: 1.25, cx: 8, cy: 8 } as const;
 
-function shape(state: SessionState, snoozed: boolean) {
+function shape(state: SessionState) {
   switch (state) {
     case 'starting':
       return <circle cx="8" cy="8" r="2" className="fill-dormant" />;
@@ -14,7 +16,7 @@ function shape(state: SessionState, snoozed: boolean) {
             fill="none"
             strokeWidth="1.5"
             strokeLinecap="round"
-            className="origin-[8px_8px] animate-turn stroke-ink motion-reduce:hidden"
+            className="stroke-ink motion-reduce:hidden"
           />
           <circle {...RING} r="4" strokeWidth="1.5" className="hidden stroke-ink motion-reduce:inline" />
         </>
@@ -23,12 +25,7 @@ function shape(state: SessionState, snoozed: boolean) {
     case 'needs_answer':
     case 'needs_plan_approval':
     case 'needs_mcp_input':
-      return (
-        <>
-          {!snoozed && <circle {...RING} r="4.5" className="animate-halo stroke-wip motion-reduce:hidden" />}
-          <circle cx="8" cy="8" r="4.5" className="fill-wip" />
-        </>
-      );
+      return <circle cx="8" cy="8" r="4.5" className="fill-wip" />;
     case 'stalled':
       return (
         <>
@@ -56,10 +53,39 @@ function shape(state: SessionState, snoozed: boolean) {
   }
 }
 
+const glyph = (state: SessionState) => (
+  <svg
+    viewBox="0 0 16 16"
+    width="14"
+    height="14"
+    aria-hidden="true"
+    className={`absolute inset-0 ${state === 'working' ? 'animate-turn' : ''}`}
+  >
+    {shape(state)}
+  </svg>
+);
+
 export function StateMark({ state, snoozed }: { state: SessionState; snoozed: boolean }) {
+  const [marks, setMarks] = useState<{ state: SessionState; previous: SessionState | null }>({ state, previous: null });
+  if (marks.state !== state) setMarks({ state, previous: marks.state });
+  const watched = useOffscreenPause<HTMLSpanElement>();
   return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" className={snoozed ? 'opacity-45' : undefined}>
-      {shape(state, snoozed)}
-    </svg>
+    <span ref={watched} className={`relative size-3.5 shrink-0 ${snoozed ? 'opacity-45' : ''}`}>
+      {marks.previous && (
+        <span
+          key={`${marks.previous}-${marks.state}`}
+          className="absolute inset-0 animate-fade-out motion-reduce:hidden"
+          onAnimationEnd={(event) => event.target === event.currentTarget && setMarks({ state, previous: null })}
+        >
+          {glyph(marks.previous)}
+        </span>
+      )}
+      <span key={state} className={`absolute inset-0 ${marks.previous ? 'animate-pop' : ''}`}>
+        {glyph(state)}
+      </span>
+      {state.startsWith('needs_') && !snoozed && (
+        <span className="absolute inset-[3px] animate-halo rounded-full border border-wip motion-reduce:hidden" />
+      )}
+    </span>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Decision, PendingDecision } from '../beacon';
+import { useArmed } from '../hooks/useArmed.ts';
 import { suggestedRule } from '../lib/rules.ts';
 import { FilledButton } from './FilledButton';
 import { JumpButton } from './JumpButton';
@@ -9,30 +10,20 @@ import { OutlineButton } from './OutlineButton';
 import { RuleEditor } from './RuleEditor';
 import { TextButton } from './TextButton';
 
-const ARMED_MS = 4000;
-
 interface ToolActionsProps {
   request: PendingDecision;
   destructive: boolean;
   currentId: number | null;
   sending: boolean;
-  keys: Map<number, (key: string) => void>;
+  keys: Map<number, (key: string) => void> | null;
   send: (decision: Decision) => void;
   onJump: () => void;
 }
 
 export function ToolActions({ request, destructive, currentId, sending, keys, send, onJump }: ToolActionsProps) {
   const [mode, setMode] = useState<'buttons' | 'rule' | 'message'>('buttons');
-  const [armed, setArmed] = useState(false);
+  const [armed, setArmed] = useArmed(currentId);
   const [more, setMore] = useState(false);
-
-  useEffect(() => {
-    if (!armed) return;
-    const timer = window.setTimeout(() => setArmed(false), ARMED_MS);
-    return () => window.clearTimeout(timer);
-  }, [armed]);
-
-  useEffect(() => setArmed(false), [currentId]);
 
   const allow = () => {
     if (destructive && !armed) setArmed(true);
@@ -40,6 +31,7 @@ export function ToolActions({ request, destructive, currentId, sending, keys, se
   };
 
   useEffect(() => {
+    if (!keys) return;
     keys.set(request.id, (key) => {
       if (mode !== 'buttons' || sending) return;
       if (key === 'a') allow();

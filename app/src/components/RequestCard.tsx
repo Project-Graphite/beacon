@@ -3,7 +3,8 @@ import { decide, type Decision, type PendingDecision } from '../beacon';
 import { destructiveReason } from '../lib/destructive.ts';
 import { requestId } from '../lib/queue.ts';
 import { redact } from '../lib/redact.ts';
-import { mcpTool, requestMeta } from '../lib/requests.ts';
+import { decisionMark, mcpTool, requestMeta } from '../lib/requests.ts';
+import { DecisionMark } from './DecisionMark';
 import { PlanRequest } from './PlanRequest';
 import { QuestionRequest } from './QuestionRequest';
 import { TextButton } from './TextButton';
@@ -15,23 +16,24 @@ interface RequestCardProps {
   now: number;
   marked: boolean;
   currentId: number | null;
-  keys: Map<number, (key: string) => void>;
+  keys: Map<number, (key: string) => void> | null;
   onJump: () => void;
 }
 
 const unchanged = (text: string) => text;
 
 export function RequestCard({ request, now, marked, currentId, keys, onJump }: RequestCardProps) {
-  const [sending, setSending] = useState(false);
+  const [outcome, setOutcome] = useState<'check' | 'cross' | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [unmasked, setUnmasked] = useState(false);
   const destructive = request.kind === 'tool' ? destructiveReason(request.tool_name, request.tool_input, request.cwd) : null;
   const rawInput = JSON.stringify(request.tool_input) ?? '';
+  const sending = outcome !== null;
   const send = (decision: Decision) => {
-    setSending(true);
+    setOutcome(decisionMark(decision));
     setFailure(null);
     decide(request.id, decision).catch((error) => {
-      setSending(false);
+      setOutcome(null);
       setFailure(String(error));
     });
   };
@@ -40,10 +42,15 @@ export function RequestCard({ request, now, marked, currentId, keys, onJump }: R
 
   return (
     <div
-      id={requestId(request.id)}
+      id={keys ? requestId(request.id) : undefined}
       className={`relative mt-2 scroll-my-2 rounded-field border bg-paper p-2 ${destructive ? 'border-danger' : 'border-line'}`}
     >
       {marked && <span aria-hidden="true" className="absolute inset-y-2 -left-px w-0.5 rounded-full bg-wip" />}
+      {outcome && (
+        <span className="absolute top-1 right-1">
+          <DecisionMark mark={outcome} />
+        </span>
+      )}
       <div className="flex items-baseline gap-2">
         <span className="min-w-0 truncate font-semibold text-ink">{title}</span>
         {request.kind === 'tool' && redact(rawInput) !== rawInput && (

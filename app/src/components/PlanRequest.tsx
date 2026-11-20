@@ -13,7 +13,7 @@ const KEEP_PLANNING = 'The user wants to keep planning.';
 interface PlanRequestProps {
   request: PendingDecision;
   sending: boolean;
-  keys: Map<number, (key: string) => void>;
+  keys: Map<number, (key: string) => void> | null;
   send: (decision: Decision) => void;
   onJump: () => void;
 }
@@ -32,6 +32,7 @@ export function PlanRequest({ request, sending, keys, send, onJump }: PlanReques
   const keepPlanning = () => send({ type: 'deny', message: KEEP_PLANNING });
 
   useEffect(() => {
+    if (!keys) return;
     keys.set(request.id, (key) => {
       if (sending || feedback) return;
       if (key === 'a') approve();

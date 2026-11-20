@@ -7,8 +7,10 @@ import {
   groupSessions,
   metaItems,
   needsInput,
+  rowPhrase,
   statePhrase,
   summary,
+  summaryParts,
   surface,
   turnRunning,
   turnTime,
@@ -84,6 +86,34 @@ test('the summary counts sessions needing you and working, or says all quiet', (
   assert.equal(summary([working]), '1 working');
   assert.equal(summary([session({}), session({ state: 'needs_answer', attention: true })]), 'All quiet');
   assert.equal(summary([]), 'All quiet');
+});
+
+test('summary parts keep their kind so each count can roll on its own', () => {
+  const alerting = session({ state: 'done', attention: true, alerting: true });
+  const working = session({ state: 'working' });
+  assert.deepEqual(summaryParts([alerting, working, working]), [
+    { kind: 'alerting', count: 1, text: 'needs you' },
+    { kind: 'working', count: 2, text: 'working' },
+  ]);
+  assert.deepEqual(summaryParts([working]), [{ kind: 'working', count: 1, text: 'working' }]);
+  assert.deepEqual(summaryParts([session({})]), []);
+});
+
+test('a collapsed row shows the activity of a working session, else its state phrase', () => {
+  const row = (fields: Partial<Session>) => rowPhrase(session(fields));
+  assert.deepEqual(row({ state: 'working', activity: 'Running npm test' }), { kind: 'command', text: 'npm test' });
+  assert.deepEqual(row({ state: 'working', activity: 'Reading App.tsx' }), { kind: 'activity', text: 'Reading App.tsx' });
+  assert.deepEqual(row({ state: 'working' }), { kind: 'state', text: 'working', tone: 'muted' });
+  assert.deepEqual(row({ state: 'needs_permission', activity: 'Running rm -rf dist' }), {
+    kind: 'state',
+    text: 'needs permission',
+    tone: 'wip',
+  });
+  assert.deepEqual(row({ state: 'error', last_error: 'overloaded' }), {
+    kind: 'state',
+    text: 'API error: overloaded',
+    tone: 'danger',
+  });
 });
 
 test('surfaces map entrypoints to labels and icons', () => {

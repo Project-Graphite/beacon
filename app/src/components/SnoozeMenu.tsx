@@ -45,14 +45,14 @@ export function SnoozeMenu({ snoozedUntil, run }: SnoozeMenuProps) {
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className={`grid size-[26px] place-items-center rounded-field transition-colors duration-150 ease-settle hover:bg-surface hover:text-ink ${snoozedUntil === null ? 'text-muted' : 'text-ink'}`}
+        className={`press grid size-6 place-items-center rounded-field hover:bg-surface hover:text-ink ${snoozedUntil === null ? 'text-muted' : 'text-ink'}`}
       >
         <Icon name="bell-off" />
       </button>
       {open && (
         <div
           role="menu"
-          className="absolute top-full right-0 z-20 mt-1 w-56 rounded-field border border-line bg-raised p-1 text-secondary"
+          className="absolute top-full right-0 z-20 mt-1 w-56 origin-top-right animate-appear rounded-field border border-line bg-raised p-1 text-secondary"
         >
           {[5, 15].map((minutes) => (
             <button
@@ -60,7 +60,7 @@ export function SnoozeMenu({ snoozedUntil, run }: SnoozeMenuProps) {
               type="button"
               role="menuitem"
               onClick={() => choose(snooze(null, minutes))}
-              className="flex h-7 w-full items-center rounded-[6px] px-2 text-left text-ink transition-colors duration-150 ease-settle hover:bg-line-soft"
+              className="flex h-7 w-full items-center rounded-[6px] px-2 text-left text-ink transition-colors duration-120 ease-settle hover:bg-line-soft"
             >
               Snooze all for {minutes} minutes
             </button>

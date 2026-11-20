@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { openedFrom, type OpenedPayload } from './lib/panel.ts';
 import type { AddRules } from './lib/rules.ts';
 
 export type SessionState =
@@ -188,11 +189,14 @@ export type Decision =
   | { type: 'deny'; message?: string }
   | { type: 'deny_and_stop'; message?: string };
 
-export type PanelMode = 'hover' | 'sticky' | 'pinned';
+export type PanelMode = 'hover' | 'sticky';
+
+export type PanelEdge = 'left' | 'right' | 'top' | 'bottom';
 
 export interface Opened {
   mode: PanelMode;
   focused: boolean;
+  edge: PanelEdge | null;
 }
 
 export type HooksState = 'installed' | 'not_installed' | 'needs_repair';
@@ -248,4 +252,6 @@ export const onSnapshot = (handler: (snapshot: Snapshot | null) => void): Promis
   listen<Snapshot | null>('beacon://snapshot', (event) => handler(event.payload));
 
 export const onOpened = (handler: (opened: Opened) => void): Promise<UnlistenFn> =>
-  listen<Opened>('beacon://opened', (event) => handler(event.payload));
+  listen<OpenedPayload>('beacon://opened', (event) => handler(openedFrom(event.payload)));
+
+export const onClosing = (handler: () => void): Promise<UnlistenFn> => listen('beacon://closing', handler);

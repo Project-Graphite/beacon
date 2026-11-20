@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { PendingDecision } from '../beacon';
-import { argumentEntries, mcpTool, requestMeta, splitUrl } from './requests.ts';
+import { argumentEntries, decisionMark, mcpTool, requestMeta, splitUrl } from './requests.ts';
+
+test('allowing or answering shows a check, any deny shows a cross', () => {
+  assert.equal(decisionMark({ type: 'allow' }), 'check');
+  assert.equal(decisionMark({ type: 'allow_with_input', input: {} }), 'check');
+  assert.equal(decisionMark({ type: 'allow_always', permissions: [] }), 'check');
+  assert.equal(decisionMark({ type: 'answer', answers: {} }), 'check');
+  assert.equal(decisionMark({ type: 'deny' }), 'cross');
+  assert.equal(decisionMark({ type: 'deny_and_stop', message: 'stop' }), 'cross');
+});
 
 const NOW = 1_795_100_000_000;
 

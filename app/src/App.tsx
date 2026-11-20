@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   acknowledge,
   closePanel,
   getSnapshot,
   jump,
+  onClosing,
   onOpened,
   onSnapshot,
   setPanelHeight,
@@ -17,7 +18,9 @@ import { Header } from './components/Header';
 import { SessionCard } from './components/SessionCard';
 import { SessionList } from './components/SessionList';
 import { SettingsView } from './components/SettingsView';
+import { useListMotion } from './hooks/useListMotion.ts';
 import { jumpReport, type JumpReport } from './lib/jump.ts';
+import { entryOffset } from './lib/panel.ts';
 import { promptBoxId, promptPath } from './lib/prompts.ts';
 import {
   currentRequest,
@@ -29,6 +32,7 @@ import {
   type ResolutionNotice,
 } from './lib/queue.ts';
 import { canAcknowledge, canSnooze, cardId, groupSessions, turnRunning } from './lib/sessions.ts';
+import { flashRow } from './motion.ts';
 
 const NOTICE_MS = 4000;
 
@@ -49,9 +53,14 @@ export function App() {
   const [chosenRequestId, setChosenRequestId] = useState<number | null>(null);
   const [notices, setNotices] = useState<ResolutionNotice[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [viewSwitched, setViewSwitched] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [entrance, setEntrance] = useState(0);
   const panel = useRef<HTMLElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
+  const ghosts = useRef<HTMLDivElement>(null);
+  const shown = useRef(false);
   const pendingIds = useRef<number[]>([]);
   const requestKeys = useRef(new Map<number, (key: string) => void>());
   const nextJumpNoticeId = useRef(-1);
@@ -78,7 +87,17 @@ export function App() {
       setSnapshot(next);
       setNow(Date.now());
     };
-    const subscriptions = Promise.all([onSnapshot(receive), onOpened(setOpened)]);
+    const open = (next: Opened) => {
+      if (!shown.current) setEntrance((count) => count + 1);
+      shown.current = true;
+      setClosing(false);
+      setOpened(next);
+    };
+    const close = () => {
+      shown.current = false;
+      setClosing(true);
+    };
+    const subscriptions = Promise.all([onSnapshot(receive), onOpened(open), onClosing(close)]);
     run(
       subscriptions.then(() => {
         setListening(true);
@@ -106,6 +125,25 @@ export function App() {
   const ticking = queue.length > 0 || sessions.some((session) => session.state !== 'ended' && turnRunning(session));
 
   useEffect(() => {
+    const syncHidden = () => document.documentElement.toggleAttribute('data-hidden', document.hidden);
+    document.addEventListener('visibilitychange', syncHidden);
+    return () => document.removeEventListener('visibilitychange', syncHidden);
+  }, []);
+
+  useListMotion(
+    content,
+    ghosts,
+    settingsOpen
+      ? null
+      : [
+          ...groups.map((group) => `${group.label}:${group.sessions.map((session) => session.session_id)}`),
+          endedOpen && `ended:${ended.map((session) => session.session_id)}`,
+          queue.map((request) => request.id),
+        ].join('|'),
+    entrance,
+  );
+
+  useEffect(() => {
     if (!ticking) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
@@ -131,15 +169,22 @@ export function App() {
     if (succeeded) run(closePanel());
   };
 
-  const jumpTo = (sessionId: string) =>
+  const jumpTo = (sessionId: string) => {
+    flashRow(sessionId);
     run(jump(sessionId).then((outcome) => reportJump(sessionId, jumpReport(outcome))));
+  };
+
+  const showSettings = (open: boolean) => {
+    setViewSwitched(true);
+    setSettingsOpen(open);
+  };
 
   useEffect(() => {
     const index = visible.findIndex((session) => session.session_id === selectedId);
     const selected: Session | undefined = visible[index];
     const handleKey = (event: KeyboardEvent) => {
       if (settingsOpen) {
-        if (event.key === 'Escape') setSettingsOpen(false);
+        if (event.key === 'Escape') showSettings(false);
         return;
       }
       if (event.ctrlKey || event.altKey || event.metaKey || isTextField(event.target)) return;
@@ -199,68 +244,81 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKey);
   });
 
+  const offset = entryOffset(opened?.edge ?? null);
+
   return (
     <section
       ref={panel}
-      className="flex h-screen flex-col overflow-hidden rounded-panel border border-line bg-paper font-sans text-body text-ink"
+      style={{ '--enter-x': `${offset.x}px`, '--enter-y': `${offset.y}px` } as CSSProperties}
+      className={`flex h-screen flex-col overflow-hidden rounded-panel border border-line bg-paper font-sans text-body text-ink ${opened === null ? 'opacity-0' : closing ? 'animate-panel-out' : 'animate-panel-in'}`}
     >
       <Header
         sessions={sessions}
         accountUsage={snapshot?.account_usage ?? null}
         snoozedUntil={snapshot?.snoozed_until_ms ?? null}
-        pinned={opened?.mode === 'pinned'}
         queue={current && queue.length > 1 ? { position: queue.indexOf(current) + 1, total: queue.length } : null}
         settingsOpen={settingsOpen}
-        onToggleSettings={() => setSettingsOpen(!settingsOpen)}
+        onToggleSettings={() => showSettings(!settingsOpen)}
         run={run}
       />
-      <div ref={scroller} className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        <div ref={content}>
+      <div ref={scroller} className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable_both-edges]">
+        <div ref={content} className="relative">
           {failure && (
-            <p title={failure} className="truncate border-b border-line-soft px-3 py-1.5 text-micro text-danger">
+            <p title={failure} className="truncate border-b border-line-soft px-2.5 py-1.5 text-micro text-danger">
               {failure}
             </p>
           )}
-          {settingsOpen ? (
-            <SettingsView config={snapshot?.config ?? null} />
-          ) : (
-            <>
-              {snapshot === null && (
-                <EmptyState title="Not connected to the Beacon core." detail="Sessions appear once it is running." />
-              )}
-              {snapshot?.sessions.length === 0 && (
-                <EmptyState title="No Claude sessions running." detail="Sessions appear here when Claude Code starts." />
-              )}
-              <SessionList
-                groups={groups}
-                ended={ended}
-                endedOpen={endedOpen}
-                onToggleEnded={() => setEndedOpen(!endedOpen)}
-                renderCard={(session) => (
-                  <SessionCard
-                    key={session.session_id}
-                    session={session}
-                    pending={queue.filter((request) => request.session_id === session.session_id)}
-                    notices={notices.filter((notice) => notice.sessionId === session.session_id)}
-                    currentId={current?.id ?? null}
-                    queueSize={queue.length}
-                    keys={requestKeys.current}
-                    now={now}
-                    selected={session.session_id === selectedId}
-                    expanded={session.session_id === expandedId}
-                    globalSnoozedUntil={snapshot?.snoozed_until_ms ?? null}
-                    onActivate={() => {
-                      setSelectedId(session.session_id);
-                      toggle(session.session_id);
-                    }}
-                    onJump={() => jumpTo(session.session_id)}
-                    onJumpReport={(report) => reportJump(session.session_id, report)}
-                    run={run}
-                  />
+          <div
+            key={settingsOpen ? 'settings' : 'list'}
+            style={{ '--view-from': settingsOpen ? '24px' : '-24px' } as CSSProperties}
+            className={viewSwitched ? 'animate-view-in' : undefined}
+          >
+            {settingsOpen ? (
+              <SettingsView config={snapshot?.config ?? null} />
+            ) : (
+              <>
+                {snapshot === null && (
+                  <EmptyState title="Not connected to the Beacon core." detail="Sessions appear once it is running." />
                 )}
-              />
-            </>
-          )}
+                {snapshot?.sessions.length === 0 && (
+                  <EmptyState title="No Claude sessions running." detail="Sessions appear here when Claude Code starts." />
+                )}
+                <SessionList
+                  groups={groups}
+                  ended={ended}
+                  endedOpen={endedOpen}
+                  onToggleEnded={() => setEndedOpen(!endedOpen)}
+                  renderCard={(session) => (
+                    <SessionCard
+                      key={session.session_id}
+                      session={session}
+                      pending={queue.filter((request) => request.session_id === session.session_id)}
+                      notices={notices.filter((notice) => notice.sessionId === session.session_id)}
+                      currentId={current?.id ?? null}
+                      queueSize={queue.length}
+                      keys={requestKeys.current}
+                      now={now}
+                      selected={session.session_id === selectedId}
+                      expanded={session.session_id === expandedId}
+                      globalSnoozedUntil={snapshot?.snoozed_until_ms ?? null}
+                      onActivate={() => {
+                        setSelectedId(session.session_id);
+                        toggle(session.session_id);
+                      }}
+                      onExpand={() => {
+                        setSelectedId(session.session_id);
+                        setExpandedId(session.session_id);
+                      }}
+                      onJump={() => jumpTo(session.session_id)}
+                      onJumpReport={(report) => reportJump(session.session_id, report)}
+                      run={run}
+                    />
+                  )}
+                />
+              </>
+            )}
+          </div>
+          <div ref={ghosts} aria-hidden="true" className="pointer-events-none absolute inset-0" />
         </div>
       </div>
     </section>

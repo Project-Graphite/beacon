@@ -15,7 +15,20 @@ export interface MetaItem {
   title?: string;
 }
 
+export interface SummaryPart {
+  kind: 'alerting' | 'working';
+  count: number;
+  text: string;
+}
+
+export type RowPhrase =
+  | { kind: 'command'; text: string }
+  | { kind: 'activity'; text: string }
+  | { kind: 'state'; text: string; tone: Tone };
+
 export const cardId = (sessionId: string) => `session-${sessionId}`;
+
+const RUNNING = 'Running ';
 
 const GROUP_LABELS =['Needs you', 'Snoozed', 'Working', 'Idle'];
 
@@ -54,14 +67,24 @@ export function groupSessions(sessions: Session[]): { groups: SessionGroup[]; en
   };
 }
 
-export function summary(sessions: Session[]): string {
+export function summaryParts(sessions: Session[]): SummaryPart[] {
   const alerting = sessions.filter((session) => session.alerting).length;
   const working = sessions.filter((session) => session.state === 'working').length;
-  const parts = [
-    alerting > 0 && `${alerting} ${alerting === 1 ? 'needs' : 'need'} you`,
-    working > 0 && `${working} working`,
-  ].filter(Boolean);
-  return parts.length > 0 ? parts.join(' · ') : 'All quiet';
+  return [
+    { kind: 'alerting' as const, count: alerting, text: alerting === 1 ? 'needs you' : 'need you' },
+    { kind: 'working' as const, count: working, text: 'working' },
+  ].filter((part) => part.count > 0);
+}
+
+export function summary(sessions: Session[]): string {
+  return summaryParts(sessions).map(({ count, text }) => `${count} ${text}`).join(' · ') || 'All quiet';
+}
+
+export function rowPhrase(session: Session): RowPhrase {
+  const activity = session.state === 'working' ? session.activity : null;
+  if (activity?.startsWith(RUNNING)) return { kind: 'command', text: activity.slice(RUNNING.length) };
+  if (activity) return { kind: 'activity', text: activity };
+  return { kind: 'state', ...statePhrase(session) };
 }
 
 export function surface(session: Session): { icon: SurfaceIcon; label: string } {
