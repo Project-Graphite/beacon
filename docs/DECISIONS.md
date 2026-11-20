@@ -26,7 +26,21 @@ Changed on Amr's feedback after using v1.
   238 Hz with no slow frames on expand, reorder and view switch. The native tab is paced by a
   high-resolution timer at its display's refresh rate, computed from elapsed time, and the timer is
   parked when nothing moves: 0.00 CPU seconds over 60 s idle and 0.2 while pulsing.
-- The list reserves a scrollbar gutter on both sides so its margins stay equal.
+- **The panel grows instead of scrolling.** Its height follows its content up to the display's work
+  area, and nothing inside it scrolls by itself; a block over 40 lines is cut with a "Show all"
+  button. When the whole panel does overflow, native scrollbars stay hidden and an overlay thumb and
+  edge fades, driven by a CSS scroll timeline, show the position.
+- **Sessions have a face, a title and progress** (adapted from a reference widget Amr sent). Each
+  session gets an avatar whose colour is fixed by its id and whose expression follows its state,
+  with the state mark as a badge. A row leads with the session's title and shows task progress from
+  Claude's own task list. Opening a row replaces the list with a detail view: the plan as a
+  checklist, each tool call as one step with its status and duration, and the command running now.
+- **A session can be crossed off.** It leaves the list and stops alerting until its next prompt or
+  request. A session with a pending request cannot be crossed off.
+- **Sounds are optional and off by default:** Windows' own notification sounds when a session starts
+  needing the user or finishes.
+- Before content grows, the page sizes the window to the target height and then animates inside it,
+  so the window never trails its content.
 
 ## M3 to M5 and display targeting (2026-11-20)
 

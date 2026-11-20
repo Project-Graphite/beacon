@@ -83,12 +83,36 @@ The panel has two modes:
 - Sticky: opened with a click on the tab or pill, the hotkey, the tray or a second launch.
 
 The panel never opens by itself and never stays open. It closes on a press outside it, when the
-cursor leaves it (hover), on Escape, or when a sticky panel loses focus.
+cursor leaves it (hover), on Escape in the list, or when a sticky panel loses focus.
 
-The panel is compact: one row per session, and a second row with `Allow` and `Deny` for a session
-that is waiting. The branch, usage, last message, timeline, prompt box and the full request view are
-behind expanding the row. Sessions are grouped by state. Arrow keys select a session, Enter expands it, `a` acknowledges, `s`
-snoozes it for 5 minutes, `j` jumps to its window and `/` opens the prompt box.
+The panel is compact: each session is a 40 px row, with a second row carrying `Allow` and `Deny`
+when it is waiting. A row starts with the session's avatar, whose colour is fixed per session and
+whose face follows its state, with the state mark as a badge. Next come the session's title, or the
+project name when it has none, and a second line with task progress such as `3/7` and the current
+task, or else the current step, or else the state. A session with tasks has a thin progress bar
+along the bottom of its row. Two icon buttons jump to the session's window and cross it off.
+Sessions are grouped by state.
+
+Opening a row, with a click or Enter, replaces the list with the session's detail view: avatar tabs
+for the other sessions, the header, any pending request, a `Terminal` block with the command running
+now, the `Plan` checklist, the `Activity` steps with their status and duration, and then the prompt
+box, the last message and usage.
+
+In the list, arrow keys select a session and Enter opens it; `a` acknowledges it, `s` snoozes it for
+5 minutes, `j` jumps to its window, `x` crosses it off and `/` opens its prompt box. In the detail
+view, Escape, Backspace or ArrowLeft go back to the list, `[` and `]` switch to the previous or next
+session, `/` opens the prompt box, `j` jumps and `x` crosses the session off.
+
+The panel grows with its content up to the display's work area, and nothing inside it scrolls. A
+block over 40 lines is cut short with `Show all (N lines)`. Scrollbars are never visible: when the
+panel itself overflows, an overlay thumb and fades at its edges show the position.
+
+### Cross off
+
+Crossing a session off (`x`, the cross button or `beacon dismiss`) acknowledges it, moves it out of
+the list and stops it alerting. It is refused while the session has a pending request. The session
+comes back on its next prompt or request. Crossed-off sessions are counted in a collapsed
+`Crossed off (n)` row at the end of the list.
 
 ### Answering requests
 
@@ -116,7 +140,7 @@ found through the process tree. For a VS Code session it then opens the session'
 
 ### Sending a prompt
 
-The prompt box in an expanded session sends text by one of three paths:
+The prompt box in a session's detail view sends text by one of three paths:
 
 | Session | Path |
 |---|---|
@@ -139,12 +163,16 @@ Windows notifications announce sessions that start needing you or finish. Sessio
 within 2 seconds of each other share one notification, and the session whose window is in front
 gets none. Both kinds can be turned off in the settings view.
 
+Sounds are off by default. The speaker button in the panel header, or `Play a sound when a session
+needs you or finishes` under `Notifications` in the settings view, turns them on; they are Windows'
+own notification sounds, played when a session starts needing you or finishes.
+
 ### Settings
 
 The gear icon in the panel header opens the settings view; Escape returns to the sessions. It holds
 the hooks status with install, repair and uninstall; whether headless runs are answered from
-Beacon; the stall time; notifications; the panel shortcut; start at sign-in; and the version, the
-Beacon home and its logs folder.
+Beacon; the stall time; notifications and sounds; the panel shortcut; start at sign-in; and the
+version, the Beacon home and its logs folder.
 
 ### Tray menu
 
@@ -160,12 +188,13 @@ style) and `Quit`.
 |---|---|
 | `beacon daemon` | Runs the core without the app |
 | `beacon stop` | Stops the core |
-| `beacon status [--watch] [--json]` | Lists sessions and pending requests |
+| `beacon status [--watch] [--json] [--all]` | Lists sessions and pending requests; `--all` includes crossed-off sessions |
 | `beacon decide <id> allow` | Allows a pending request |
 | `beacon decide <id> deny [--message <text>] [--stop]` | Denies it, optionally with a message or stopping Claude |
 | `beacon decide <id> answer "<question>=<label>" ...` | Answers a question |
 | `beacon decide <id> always "<Tool(specifier)>" [--scope session\|local\|project\|user]` | Allows it and saves a rule |
 | `beacon ack <session>` | Acknowledges a session |
+| `beacon dismiss <session>` | Crosses a session off |
 | `beacon jump <session>` | Raises the session's window |
 | `beacon where <session>` | Prints the window the session runs in |
 | `beacon prompt <session> "<text>"` | Queues a prompt for the end of the current turn |
@@ -236,7 +265,7 @@ What is stored where:
 
 | Place | Contents |
 |---|---|
-| `%LOCALAPPDATA%\Beacon` (or `BEACON_HOME`) | `endpoint` (pipe name and token, removed on a clean stop), `state.json` (sessions, snoozes, queued prompts), `config.json`, `ui.json` (style, tab placement, pill positions, displays, shortcut, notification choices), `install.json`, `bin\beacon-hook.exe`, `backups\` (copies of the settings file), `logs\core.log`, `icon.png` |
+| `%LOCALAPPDATA%\Beacon` (or `BEACON_HOME`) | `endpoint` (pipe name and token, removed on a clean stop), `state.json` (sessions, snoozes, queued prompts), `config.json`, `ui.json` (style, tab placement, pill positions, displays, shortcut, notification and sound choices), `install.json`, `bin\beacon-hook.exe`, `backups\` (copies of the settings file), `logs\core.log`, `icon.png` |
 | Claude Code `settings.json` | The Beacon hook handlers |
 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `Beacon` | Only while `Start Beacon when I sign in` is on |
 | `HKCU\Software\Classes\AppUserModelId\com.project-graphite.beacon` | The name and icon Windows shows on Beacon's notifications |
