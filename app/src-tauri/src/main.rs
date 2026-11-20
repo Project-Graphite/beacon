@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod displays;
 mod feed;
 mod geometry;
 mod model;
@@ -19,20 +20,23 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 struct Options {
     tray_only: bool,
     open_panel: bool,
+    list_displays: bool,
 }
 
 fn options() -> Result<Options, String> {
     let mut options = Options {
         tray_only: false,
         open_panel: false,
+        list_displays: false,
     };
     for argument in std::env::args().skip(1) {
         match argument.as_str() {
             "--tray-only" => options.tray_only = true,
             "--open-panel" => options.open_panel = true,
+            "--list-displays" => options.list_displays = true,
             other => {
                 return Err(format!(
-                    "unknown option {other}; expected --tray-only or --open-panel"
+                    "unknown option {other}; expected --tray-only, --open-panel or --list-displays"
                 ));
             }
         }
@@ -42,14 +46,23 @@ fn options() -> Result<Options, String> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = options()?;
+    if options.list_displays {
+        for line in displays::listing(&platform::monitors()) {
+            println!("{line}");
+        }
+        return Ok(());
+    }
     let feed = Feed::new(
         beacon_core::home_dir()
             .ok_or("cannot locate the Beacon home: set BEACON_HOME or LOCALAPPDATA")?,
     );
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+    let mut builder = tauri::Builder::default();
+    if std::env::var_os("BEACON_HOME").is_none() {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
             shell::post(app, Action::OpenPanel)
-        }))
+        }));
+    }
+    builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(feed.clone())
