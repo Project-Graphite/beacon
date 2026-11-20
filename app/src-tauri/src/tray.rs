@@ -1,17 +1,20 @@
+use crate::displays::{self, AVOID, CORNER, DisplayMenu, MenuEntry, SHOW_ON, corner};
 use crate::feed;
 use crate::model::{TrayState, tooltip, tray_state};
-use crate::platform::{GdiText, tray_icon_size};
+use crate::platform::{self, GdiText, tray_icon_size};
+use crate::positions;
 use crate::raster::render_tray;
 use crate::shell::{self, Action};
 use beacon_core::{Request, Snapshot};
 use std::path::{Path, PathBuf};
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuEvent, MenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Wry};
 
 pub struct Tray {
     icon: TrayIcon,
+    home: PathBuf,
     pill_item: MenuItem<Wry>,
     state: TrayState,
     tooltip: String,
@@ -31,15 +34,40 @@ fn image(state: TrayState, text: &GdiText) -> Image<'static> {
     )
 }
 
-pub fn build(app: &AppHandle, home: PathBuf, pill_shown: bool) -> tauri::Result<Tray> {
-    let pill_item = MenuItem::with_id(
-        app,
-        "toggle-pill",
-        pill_label(pill_shown),
-        true,
-        None::<&str>,
-    )?;
-    let menu = Menu::with_items(
+fn display_menu(home: &Path) -> DisplayMenu {
+    displays::menu(&platform::monitors(), &positions::display_choice(home))
+}
+
+fn submenu(app: &AppHandle, title: &str, entries: &[MenuEntry]) -> tauri::Result<Submenu<Wry>> {
+    let submenu = Submenu::new(app, title, true)?;
+    for entry in entries {
+        match entry.checked {
+            Some(checked) => submenu.append(&CheckMenuItem::with_id(
+                app,
+                &entry.id,
+                &entry.label,
+                entry.enabled,
+                checked,
+                None::<&str>,
+            )?)?,
+            None => submenu.append(&MenuItem::with_id(
+                app,
+                &entry.id,
+                &entry.label,
+                entry.enabled,
+                None::<&str>,
+            )?)?,
+        }
+    }
+    Ok(submenu)
+}
+
+fn menu(
+    app: &AppHandle,
+    pill_item: &MenuItem<Wry>,
+    displays: &DisplayMenu,
+) -> tauri::Result<Menu<Wry>> {
+    Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, "open", "Open panel", true, None::<&str>)?,
@@ -58,17 +86,32 @@ pub fn build(app: &AppHandle, home: PathBuf, pill_shown: bool) -> tauri::Result<
                 None::<&str>,
             )?,
             &MenuItem::with_id(app, "clear-snooze", "Clear snooze", true, None::<&str>)?,
-            &pill_item,
+            pill_item,
+            &submenu(app, "Show on", &displays.show_on)?,
+            &submenu(app, "Never show on", &displays.never_show_on)?,
+            &submenu(app, "Position", &displays.position)?,
             &MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?,
         ],
+    )
+}
+
+pub fn build(app: &AppHandle, home: PathBuf, pill_shown: bool) -> tauri::Result<Tray> {
+    let pill_item = MenuItem::with_id(
+        app,
+        "toggle-pill",
+        pill_label(pill_shown),
+        true,
+        None::<&str>,
     )?;
+    let menu = menu(app, &pill_item, &display_menu(&home))?;
     let text = GdiText::default();
+    let menu_home = home.clone();
     let icon = TrayIconBuilder::with_id("beacon")
         .icon(image(TrayState::Quiet, &text))
         .tooltip(tooltip(None))
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(move |app, event| handle_menu(app, &home, event))
+        .on_menu_event(move |app, event| handle_menu(app, &menu_home, event))
         .on_tray_icon_event(|icon, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -82,6 +125,7 @@ pub fn build(app: &AppHandle, home: PathBuf, pill_shown: bool) -> tauri::Result<
         .build(app)?;
     Ok(Tray {
         icon,
+        home,
         pill_item,
         state: TrayState::Quiet,
         tooltip: tooltip(None),
@@ -109,7 +153,16 @@ fn handle_menu(app: &AppHandle, home: &Path, event: MenuEvent) {
         "clear-snooze" => feed::send(home.to_path_buf(), Request::Unsnooze { session_id: None }),
         "toggle-pill" => shell::post(app, Action::TogglePill),
         "quit" => shell::post(app, Action::Quit),
-        _ => {}
+        other => match other.split_once(':') {
+            Some((SHOW_ON, display)) => shell::post(app, Action::ShowOn(display.to_string())),
+            Some((AVOID, display)) => shell::post(app, Action::ToggleAvoided(display.to_string())),
+            Some((CORNER, key)) => {
+                if let Some(corner) = corner(key) {
+                    shell::post(app, Action::MoveToCorner(corner));
+                }
+            }
+            _ => {}
+        },
     }
 }
 
@@ -128,6 +181,17 @@ impl Tray {
                 eprintln!("cannot update the tray tooltip: {error}");
             }
             self.tooltip = tooltip;
+        }
+    }
+
+    pub fn refresh_displays(&self) {
+        let rebuilt = menu(
+            self.icon.app_handle(),
+            &self.pill_item,
+            &display_menu(&self.home),
+        );
+        if let Err(error) = rebuilt.and_then(|menu| self.icon.set_menu(Some(menu))) {
+            eprintln!("cannot rebuild the tray menu: {error}");
         }
     }
 

@@ -6,10 +6,16 @@ pub use text::GdiText;
 use crate::geometry::{Monitor, Rect};
 use std::ffi::c_void;
 use std::ptr::{null, null_mut};
-use windows_sys::Win32::Foundation::{LPARAM, POINT, RECT};
+use windows_sys::Win32::Devices::Display::{
+    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+    DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo,
+    GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
+};
+use windows_sys::Win32::Foundation::{LPARAM, LUID, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, EnumDisplayMonitors,
-    GetMonitorInfoW, HBITMAP, HDC, HMONITOR, MONITOR_DEFAULTTOPRIMARY, MONITORINFO,
+    GetMonitorInfoW, HBITMAP, HDC, HMONITOR, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MONITORINFOEXW,
     MonitorFromPoint,
 };
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI};
@@ -51,19 +57,110 @@ unsafe extern "system" fn collect_monitor(
     data: LPARAM,
 ) -> BOOL {
     let monitors = unsafe { &mut *(data as *mut Vec<Monitor>) };
-    if let Some(info) = monitor_info(monitor) {
+    let mut info = MONITORINFOEXW {
+        monitorInfo: MONITORINFO {
+            cbSize: size_of::<MONITORINFOEXW>() as u32,
+            ..unsafe { std::mem::zeroed() }
+        },
+        ..unsafe { std::mem::zeroed() }
+    };
+    if unsafe {
+        GetMonitorInfoW(
+            monitor,
+            &mut info as *mut MONITORINFOEXW as *mut MONITORINFO,
+        )
+    } != 0
+    {
+        let device = text_of(&info.szDevice);
         monitors.push(Monitor {
-            bounds: rect(info.rcMonitor),
-            work: rect(info.rcWork),
+            id: device.clone(),
+            name: device,
+            bounds: rect(info.monitorInfo.rcMonitor),
+            work: rect(info.monitorInfo.rcWork),
             scale: f64::from(monitor_dpi(monitor)) / BASE_DPI,
-            primary: info.dwFlags & MONITORINFOF_PRIMARY != 0,
+            primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
         });
     }
     1
 }
 
+fn text_of(buffer: &[u16]) -> String {
+    let length = buffer
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(buffer.len());
+    String::from_utf16_lossy(&buffer[..length])
+}
+
+fn device_info_header<T>(kind: i32, adapter: LUID, id: u32) -> DISPLAYCONFIG_DEVICE_INFO_HEADER {
+    DISPLAYCONFIG_DEVICE_INFO_HEADER {
+        r#type: kind,
+        size: size_of::<T>() as u32,
+        adapterId: adapter,
+        id,
+    }
+}
+
+fn display_targets() -> Vec<(String, String, String)> {
+    let (mut path_count, mut mode_count) = (0, 0);
+    if unsafe {
+        GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count)
+    } != 0
+    {
+        return Vec::new();
+    }
+    let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); path_count as usize];
+    let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); mode_count as usize];
+    if unsafe {
+        QueryDisplayConfig(
+            QDC_ONLY_ACTIVE_PATHS,
+            &mut path_count,
+            paths.as_mut_ptr(),
+            &mut mode_count,
+            modes.as_mut_ptr(),
+            null_mut(),
+        )
+    } != 0
+    {
+        return Vec::new();
+    }
+    paths.truncate(path_count as usize);
+    paths
+        .iter()
+        .filter_map(|path| {
+            let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+                header: device_info_header::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>(
+                    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                    path.sourceInfo.adapterId,
+                    path.sourceInfo.id,
+                ),
+                ..Default::default()
+            };
+            let mut target = DISPLAYCONFIG_TARGET_DEVICE_NAME {
+                header: device_info_header::<DISPLAYCONFIG_TARGET_DEVICE_NAME>(
+                    DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+                    path.targetInfo.adapterId,
+                    path.targetInfo.id,
+                ),
+                ..Default::default()
+            };
+            let found = unsafe {
+                DisplayConfigGetDeviceInfo(&mut source.header) == 0
+                    && DisplayConfigGetDeviceInfo(&mut target.header) == 0
+            };
+            found.then(|| {
+                (
+                    text_of(&source.viewGdiDeviceName),
+                    text_of(&target.monitorFriendlyDeviceName),
+                    text_of(&target.monitorDevicePath),
+                )
+            })
+        })
+        .collect()
+}
+
 pub fn monitors() -> Vec<Monitor> {
-    let mut monitors = Vec::new();
+    let mut monitors: Vec<Monitor> = Vec::new();
     unsafe {
         EnumDisplayMonitors(
             null_mut(),
@@ -72,7 +169,29 @@ pub fn monitors() -> Vec<Monitor> {
             &mut monitors as *mut Vec<Monitor> as LPARAM,
         )
     };
+    let targets = display_targets();
     monitors
+        .into_iter()
+        .enumerate()
+        .map(|(index, monitor)| {
+            let (id, name) = targets
+                .iter()
+                .find(|(device, _, _)| *device == monitor.id)
+                .map_or(
+                    (monitor.id.clone(), monitor.name.clone()),
+                    |(_, name, path)| (path.clone(), name.clone()),
+                );
+            Monitor {
+                id,
+                name: if name.is_empty() {
+                    format!("Display {}", index + 1)
+                } else {
+                    name
+                },
+                ..monitor
+            }
+        })
+        .collect()
 }
 
 pub fn cursor_position() -> (i32, i32) {

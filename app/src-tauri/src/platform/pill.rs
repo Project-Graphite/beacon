@@ -1,7 +1,8 @@
 use super::{GdiText, bitmap, cursor_position, monitor_info, monitors, reduced_motion};
+use crate::displays::{landing, target};
 use crate::geometry::{
-    Rect, clamp_into, default_pill_rect, layout_signature, monitor_for, primary, resize_anchored,
-    snap,
+    Corner, Monitor, Rect, corner_rect, layout_signature, monitor_for, resize_anchored,
+    restored_pill_rect, snap,
 };
 use crate::model::PillModel;
 use crate::positions;
@@ -68,6 +69,7 @@ struct Pill {
     scale: f32,
     rect: Rect,
     user_visible: bool,
+    targeted: bool,
     fullscreen: bool,
     shown: bool,
     reduced_motion: bool,
@@ -149,6 +151,7 @@ pub fn create(
         scale: 1.0,
         rect: Rect::default(),
         user_visible: visible,
+        targeted: false,
         fullscreen: false,
         shown: false,
         reduced_motion: reduced_motion(),
@@ -161,7 +164,7 @@ pub fn create(
         text: GdiText::default(),
         on_event: Rc::new(on_event),
     };
-    pill.relocate(None);
+    pill.relocate();
     pill.fullscreen = foreground_is_fullscreen(hwnd);
     pill.sync();
     PILL.with(|cell| cell.replace(Some(pill)));
@@ -189,6 +192,28 @@ pub fn user_visible() -> bool {
     with_pill(|pill| pill.user_visible).unwrap_or(false)
 }
 
+pub fn targeted() -> bool {
+    with_pill(|pill| pill.targeted).unwrap_or(false)
+}
+
+pub fn retarget() {
+    with_pill(|pill| {
+        pill.relocate();
+        pill.sync();
+    });
+}
+
+pub fn move_to_corner(corner: Corner) {
+    with_pill(|pill| {
+        let monitors = monitors();
+        if let Some(target) = target(&monitors, &positions::display_choice(&pill.home)) {
+            let placed = corner_rect(pill.rect, corner, target);
+            pill.move_to(placed.left, placed.top);
+            pill.save(&monitors, &target.id);
+        }
+    });
+}
+
 pub fn shown_rect() -> Option<Rect> {
     with_pill(|pill| pill.shown.then_some(pill.rect)).flatten()
 }
@@ -209,17 +234,20 @@ pub fn set_hover_polling(polling: bool) {
 }
 
 impl Pill {
-    fn relocate(&mut self, fallback: Option<Rect>) {
+    fn relocate(&mut self) {
         let monitors = monitors();
-        let rect = positions::load(&self.home, &layout_signature(&monitors))
-            .or(fallback)
-            .unwrap_or_else(|| {
-                let scale = primary(&monitors).map_or(1.0, |monitor| monitor.scale);
-                let canvas = render_pill(&self.model, scale as f32, 0.0, true, &self.text);
-                default_pill_rect(canvas.width as i32, canvas.height as i32, &monitors)
-            });
-        self.rect = clamp_into(rect, &monitors);
-        self.scale = monitor_for(&self.rect, &monitors).map_or(1.0, |monitor| monitor.scale) as f32;
+        let target = target(&monitors, &positions::display_choice(&self.home));
+        self.targeted = target.is_some();
+        if let Some(target) = target {
+            let canvas = render_pill(&self.model, target.scale as f32, 0.0, true, &self.text);
+            let saved = [
+                positions::load_for_display(&self.home, &target.id),
+                positions::load(&self.home, &layout_signature(&monitors)),
+            ];
+            let size = Rect::sized(0, 0, canvas.width as i32, canvas.height as i32);
+            self.rect = restored_pill_rect(saved, size, target, &monitors);
+            self.scale = target.scale as f32;
+        }
         self.present();
     }
 
@@ -274,7 +302,7 @@ impl Pill {
     }
 
     fn sync(&mut self) {
-        let visible = self.user_visible && !self.fullscreen;
+        let visible = self.user_visible && self.targeted && !self.fullscreen;
         if visible != self.shown {
             self.shown = visible;
             unsafe { ShowWindow(self.hwnd, if visible { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
@@ -314,13 +342,27 @@ impl Pill {
         }
     }
 
-    fn finish_drag(&mut self) {
+    fn finish_drag(&mut self, origin: Rect) {
         let monitors = monitors();
-        if let Some(monitor) = monitor_for(&self.rect, &monitors) {
-            let snapped = snap(self.rect, &monitor.work, monitor.scale);
-            self.move_to(snapped.left, snapped.top);
+        let Some(monitor) = landing(
+            &self.rect,
+            &monitors,
+            &positions::display_choice(&self.home),
+        ) else {
+            return self.move_to(origin.left, origin.top);
+        };
+        let snapped = snap(self.rect, &monitor.work, monitor.scale);
+        self.move_to(snapped.left, snapped.top);
+        if let Err(error) = positions::choose_display(&self.home, &monitor.id) {
+            eprintln!("cannot save the chosen display: {error}");
         }
-        if let Err(error) = positions::save(&self.home, &layout_signature(&monitors), self.rect) {
+        self.save(&monitors, &monitor.id);
+    }
+
+    fn save(&self, monitors: &[Monitor], display: &str) {
+        let saved = positions::save(&self.home, &layout_signature(monitors), self.rect)
+            .and_then(|()| positions::save_for_display(&self.home, display, self.rect));
+        if let Err(error) = saved {
             eprintln!("cannot save the pill position: {error}");
         }
     }
@@ -377,7 +419,7 @@ impl Pill {
                 }
                 Some(match press {
                     Some(press) if press.dragging => {
-                        self.finish_drag();
+                        self.finish_drag(press.origin);
                         Some(PillEvent::Moved)
                     }
                     Some(_) if message == WM_LBUTTONUP => Some(PillEvent::Clicked),
@@ -395,13 +437,14 @@ impl Pill {
                 Some(Some(PillEvent::Moved))
             }
             WM_DISPLAYCHANGE => {
-                self.relocate(Some(self.rect));
+                self.relocate();
+                self.sync();
                 Some(Some(PillEvent::Moved))
             }
             WM_SETTINGCHANGE => {
                 self.reduced_motion = reduced_motion();
                 if wparam == SPI_SETWORKAREA as WPARAM {
-                    self.relocate(Some(self.rect));
+                    self.relocate();
                 } else {
                     self.present();
                 }

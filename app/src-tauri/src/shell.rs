@@ -1,14 +1,17 @@
+use crate::displays::target;
 use crate::feed::Feed;
-use crate::geometry::{Rect, place_panel};
+use crate::geometry::{Corner, Rect, place_panel, primary};
 use crate::model::{PillModel, alerting_count};
 use crate::panel::{self, PANEL};
 use crate::platform::{self, pill, pill::PillEvent};
+use crate::positions;
 use crate::toasts::Toaster;
 use crate::tray::Tray;
 use beacon_core::Snapshot;
 use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::io;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -28,6 +31,9 @@ pub enum Action {
     PanelHeight(f64),
     FlushToasts,
     TogglePill,
+    ShowOn(String),
+    ToggleAvoided(String),
+    MoveToCorner(Corner),
     Quit,
 }
 
@@ -124,7 +130,10 @@ impl Shell {
                 Some(Mode::Sticky) => self.close(),
                 _ => self.open(Base::Sticky, true),
             },
-            Action::Pill(PillEvent::Moved) => self.place(),
+            Action::Pill(PillEvent::Moved) => {
+                self.place();
+                self.tray.refresh_displays();
+            }
             Action::Pill(PillEvent::HoverTick) => self.check_hover(),
             Action::OpenPanel => self.open(Base::Sticky, true),
             Action::ClosePanel if self.mode() != Some(Mode::Pinned) => self.close(),
@@ -141,6 +150,16 @@ impl Shell {
                 let shown = !pill::user_visible();
                 pill::set_user_visible(shown);
                 self.tray.show_pill_state(shown);
+                self.place();
+            }
+            Action::ShowOn(display) => {
+                self.change_displays(positions::choose_display(&self.feed.home, &display))
+            }
+            Action::ToggleAvoided(display) => {
+                self.change_displays(positions::toggle_avoided(&self.feed.home, &display))
+            }
+            Action::MoveToCorner(corner) => {
+                pill::move_to_corner(corner);
                 self.place();
             }
             Action::Quit => {
@@ -162,8 +181,20 @@ impl Shell {
         })
     }
 
+    fn change_displays(&mut self, saved: io::Result<()>) {
+        if let Err(error) = saved {
+            eprintln!("cannot save the display choice: {error}");
+        }
+        pill::retarget();
+        self.place();
+        self.tray.refresh_displays();
+    }
+
     fn placement(&self) -> Option<(Rect, f64)> {
-        place_panel(pill::shown_rect(), &platform::monitors(), self.panel_height)
+        let monitors = platform::monitors();
+        target(&monitors, &positions::display_choice(&self.feed.home))
+            .or(primary(&monitors))
+            .map(|monitor| place_panel(pill::shown_rect(), monitor, self.panel_height))
     }
 
     fn open(&mut self, base: Base, focused: bool) {
@@ -292,7 +323,11 @@ impl Shell {
         }
         let was_alerting = alerting_count(self.snapshot.as_ref()) > 0;
         self.snapshot = snapshot;
-        if !was_alerting && alerting_count(self.snapshot.as_ref()) > 0 && self.panel.is_none() {
+        if !was_alerting
+            && alerting_count(self.snapshot.as_ref()) > 0
+            && self.panel.is_none()
+            && pill::targeted()
+        {
             self.open(Base::Hover, false);
         }
         if self.panel.is_some()

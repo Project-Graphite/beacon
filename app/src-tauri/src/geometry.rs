@@ -42,13 +42,6 @@ impl Rect {
         (self.left..self.right).contains(&x) && (self.top..self.bottom).contains(&y)
     }
 
-    fn encloses(&self, other: &Rect) -> bool {
-        self.left <= other.left
-            && self.top <= other.top
-            && other.right <= self.right
-            && other.bottom <= self.bottom
-    }
-
     fn overlap(&self, other: &Rect) -> i64 {
         let width = (self.right.min(other.right) - self.left.max(other.left)).max(0);
         let height = (self.bottom.min(other.bottom) - self.top.max(other.top)).max(0);
@@ -66,8 +59,10 @@ impl Rect {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Monitor {
+    pub id: String,
+    pub name: String,
     pub bounds: Rect,
     pub work: Rect,
     pub scale: f64,
@@ -117,17 +112,39 @@ pub fn monitor_for<'a>(rect: &Rect, monitors: &'a [Monitor]) -> Option<&'a Monit
         })
 }
 
-pub fn default_pill_rect(width: i32, height: i32, monitors: &[Monitor]) -> Rect {
-    let Some(monitor) = primary(monitors) else {
-        return Rect::sized(0, 0, width, height);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Corner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+pub fn corner_rect(rect: Rect, corner: Corner, monitor: &Monitor) -> Rect {
+    let (work, margin) = (monitor.work, px(EDGE_MARGIN, monitor.scale));
+    let left = match corner {
+        Corner::TopLeft | Corner::BottomLeft => work.left + margin,
+        Corner::TopRight | Corner::BottomRight => work.right - margin - rect.width(),
     };
-    let margin = px(EDGE_MARGIN, monitor.scale);
-    Rect::sized(
-        monitor.work.right - margin - width,
-        monitor.work.top + margin,
-        width,
-        height,
-    )
+    let top = match corner {
+        Corner::TopLeft | Corner::TopRight => work.top + margin,
+        Corner::BottomLeft | Corner::BottomRight => work.bottom - margin - rect.height(),
+    };
+    rect.moved_to(left, top)
+}
+
+pub fn restored_pill_rect(
+    saved: [Option<Rect>; 2],
+    size: Rect,
+    target: &Monitor,
+    monitors: &[Monitor],
+) -> Rect {
+    saved
+        .into_iter()
+        .flatten()
+        .find(|rect| monitor_for(rect, monitors).is_some_and(|monitor| monitor.id == target.id))
+        .unwrap_or_else(|| corner_rect(size, Corner::TopRight, target))
+        .kept_inside(&target.work)
 }
 
 pub fn snap(rect: Rect, work: &Rect, scale: f64) -> Rect {
@@ -149,18 +166,6 @@ pub fn snap(rect: Rect, work: &Rect, scale: f64) -> Rect {
     rect.moved_to(left, top)
 }
 
-pub fn clamp_into(rect: Rect, monitors: &[Monitor]) -> Rect {
-    if monitors.iter().any(|monitor| monitor.work.encloses(&rect)) {
-        return rect;
-    }
-    monitors
-        .iter()
-        .max_by_key(|monitor| monitor.work.overlap(&rect))
-        .filter(|monitor| monitor.work.overlap(&rect) > 0)
-        .or(primary(monitors))
-        .map_or(rect, |monitor| rect.kept_inside(&monitor.work))
-}
-
 pub fn resize_anchored(rect: Rect, width: i32, height: i32, work: &Rect) -> Rect {
     let left = if rect.centre().0 > work.centre().0 {
         rect.right - width
@@ -170,15 +175,7 @@ pub fn resize_anchored(rect: Rect, width: i32, height: i32, work: &Rect) -> Rect
     Rect::sized(left, rect.top, width, height)
 }
 
-pub fn place_panel(
-    pill: Option<Rect>,
-    monitors: &[Monitor],
-    content_height: f64,
-) -> Option<(Rect, f64)> {
-    let monitor = pill
-        .as_ref()
-        .and_then(|pill| monitor_for(pill, monitors))
-        .or(primary(monitors))?;
+pub fn place_panel(pill: Option<Rect>, monitor: &Monitor, content_height: f64) -> (Rect, f64) {
     let (work, scale) = (monitor.work, monitor.scale);
     let tallest = PANEL_MAX_HEIGHT.min(f64::from(work.height()) / scale - PANEL_SCREEN_ALLOWANCE);
     let height = px(
@@ -207,18 +204,20 @@ pub fn place_panel(
             (work.right - margin - width, work.bottom - margin - height)
         }
     };
-    Some((
+    (
         Rect::sized(left, top, width, height).kept_inside(&work),
         scale,
-    ))
+    )
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn monitor(bounds: Rect, taskbar: i32, scale: f64, primary: bool) -> Monitor {
+    pub fn monitor(id: &str, bounds: Rect, taskbar: i32, scale: f64, primary: bool) -> Monitor {
         Monitor {
+            id: id.to_string(),
+            name: id.to_string(),
             bounds,
             work: Rect {
                 bottom: bounds.bottom - taskbar,
@@ -231,8 +230,21 @@ mod tests {
 
     fn desk() -> Vec<Monitor> {
         vec![
-            monitor(Rect::sized(1920, -200, 2560, 1440), 72, 1.5, false),
-            monitor(Rect::sized(0, 0, 1920, 1080), 48, 1.0, true),
+            monitor("wide", Rect::sized(1920, -200, 2560, 1440), 72, 1.5, false),
+            monitor("main", Rect::sized(0, 0, 1920, 1080), 48, 1.0, true),
+        ]
+    }
+
+    fn portrait_desk() -> Vec<Monitor> {
+        vec![
+            monitor("oled", Rect::sized(0, 0, 2560, 1440), 48, 1.0, true),
+            monitor(
+                "philips",
+                Rect::sized(-1080, -300, 1080, 1920),
+                48,
+                1.0,
+                false,
+            ),
         ]
     }
 
@@ -251,10 +263,70 @@ mod tests {
     }
 
     #[test]
-    fn the_default_is_the_top_right_of_the_primary_work_area() {
+    fn the_default_is_the_top_right_of_the_work_area() {
         assert_eq!(
-            default_pill_rect(100, 28, &desk()),
+            corner_rect(Rect::sized(0, 0, 100, 28), Corner::TopRight, &desk()[1]),
             Rect::sized(1920 - 12 - 100, 12, 100, 28)
+        );
+    }
+
+    #[test]
+    fn corners_sit_inside_a_portrait_work_area_left_of_the_primary() {
+        let philips = &portrait_desk()[1];
+        let corner = |corner| corner_rect(Rect::sized(500, 500, 100, 28), corner, philips);
+        assert_eq!(corner(Corner::TopLeft), Rect::sized(-1068, -288, 100, 28));
+        assert_eq!(corner(Corner::TopRight), Rect::sized(-112, -288, 100, 28));
+        assert_eq!(
+            corner(Corner::BottomLeft),
+            Rect::sized(-1068, 1532, 100, 28)
+        );
+        assert_eq!(
+            corner(Corner::BottomRight),
+            Rect::sized(-112, 1532, 100, 28)
+        );
+    }
+
+    #[test]
+    fn restoring_prefers_the_target_displays_saved_rect() {
+        let monitors = portrait_desk();
+        let (oled, philips) = (&monitors[0], &monitors[1]);
+        let size = Rect::sized(0, 0, 100, 28);
+        let on_philips = Rect::sized(-500, 400, 100, 28);
+        let on_oled = Rect::sized(2000, 12, 100, 28);
+        let layout_on_oled = Rect::sized(1500, 900, 100, 28);
+        assert_eq!(
+            restored_pill_rect(
+                [Some(on_philips), Some(layout_on_oled)],
+                size,
+                philips,
+                &monitors
+            ),
+            on_philips
+        );
+        assert_eq!(
+            restored_pill_rect([Some(on_oled), Some(layout_on_oled)], size, oled, &monitors),
+            on_oled
+        );
+        assert_eq!(
+            restored_pill_rect([None, Some(layout_on_oled)], size, oled, &monitors),
+            layout_on_oled
+        );
+        assert_eq!(
+            restored_pill_rect([None, Some(layout_on_oled)], size, philips, &monitors),
+            Rect::sized(-112, -288, 100, 28)
+        );
+        assert_eq!(
+            restored_pill_rect([Some(on_oled), None], size, philips, &monitors),
+            Rect::sized(-112, -288, 100, 28)
+        );
+        assert_eq!(
+            restored_pill_rect(
+                [Some(Rect::sized(-60, 400, 100, 28)), None],
+                size,
+                philips,
+                &monitors
+            ),
+            Rect::sized(-100, 400, 100, 28)
         );
     }
 
@@ -279,21 +351,6 @@ mod tests {
     }
 
     #[test]
-    fn clamping_keeps_visible_rects_and_pulls_lost_ones_back() {
-        let monitors = desk();
-        let visible = Rect::sized(2500, 100, 150, 42);
-        assert_eq!(clamp_into(visible, &monitors), visible);
-        assert_eq!(
-            clamp_into(Rect::sized(1900, 500, 100, 28), &monitors),
-            Rect::sized(1920, 500, 100, 28)
-        );
-        assert_eq!(
-            clamp_into(Rect::sized(9000, 9000, 100, 28), &monitors),
-            Rect::sized(1820, 1032 - 28, 100, 28)
-        );
-    }
-
-    #[test]
     fn resizing_keeps_the_edge_nearer_the_screen_edge() {
         let work = Rect::sized(0, 0, 1920, 1032);
         assert_eq!(
@@ -308,8 +365,8 @@ mod tests {
 
     #[test]
     fn the_panel_opens_beside_the_pill_in_every_quadrant() {
-        let monitors = vec![monitor(Rect::sized(0, 0, 1920, 1080), 48, 1.0, true)];
-        let place = |pill: Rect| place_panel(Some(pill), &monitors, 300.0).unwrap().0;
+        let main = monitor("main", Rect::sized(0, 0, 1920, 1080), 48, 1.0, true);
+        let place = |pill: Rect| place_panel(Some(pill), &main, 300.0).0;
         assert_eq!(
             place(Rect::sized(1808, 12, 100, 28)),
             Rect::sized(1528, 48, 380, 300)
@@ -330,30 +387,34 @@ mod tests {
 
     #[test]
     fn the_panel_scales_clamps_its_height_and_stays_inside_the_work_area() {
-        let monitors = vec![monitor(Rect::sized(0, 0, 1920, 1080), 48, 1.5, true)];
-        let (panel, scale) =
-            place_panel(Some(Rect::sized(1800, 18, 100, 42)), &monitors, 40.0).unwrap();
+        let main = monitor("main", Rect::sized(0, 0, 1920, 1080), 48, 1.5, true);
+        let (panel, scale) = place_panel(Some(Rect::sized(1800, 18, 100, 42)), &main, 40.0);
         assert_eq!(scale, 1.5);
         assert_eq!(panel, Rect::sized(1330, 72, 570, 180));
-        let (tall, _) = place_panel(Some(Rect::sized(0, 18, 100, 42)), &monitors, 2000.0).unwrap();
+        let (tall, _) = place_panel(Some(Rect::sized(0, 18, 100, 42)), &main, 2000.0);
         assert_eq!(tall.height(), 960);
         let (short, _) = place_panel(
             Some(Rect::sized(0, 18, 100, 42)),
-            &[monitor(Rect::sized(0, 0, 800, 400), 0, 1.0, true)],
+            &monitor("small", Rect::sized(0, 0, 800, 400), 0, 1.0, true),
             2000.0,
-        )
-        .unwrap();
+        );
         assert_eq!(short.height(), 376);
         assert_eq!(short.top, 24);
     }
 
     #[test]
-    fn without_a_pill_the_panel_sits_bottom_right_of_the_primary_work_area() {
-        let (panel, scale) = place_panel(None, &desk(), 200.0).unwrap();
+    fn without_a_pill_the_panel_sits_bottom_right_of_the_work_area() {
+        let (panel, scale) = place_panel(None, &desk()[1], 200.0);
         assert_eq!(scale, 1.0);
         assert_eq!(
             panel,
             Rect::sized(1920 - 12 - 380, 1032 - 12 - 200, 380, 200)
         );
+    }
+
+    #[test]
+    fn without_a_pill_the_panel_sits_bottom_right_of_a_portrait_work_area() {
+        let (panel, _) = place_panel(None, &portrait_desk()[1], 200.0);
+        assert_eq!(panel, Rect::sized(-12 - 380, 1572 - 12 - 200, 380, 200));
     }
 }
