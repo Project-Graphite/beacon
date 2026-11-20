@@ -261,7 +261,7 @@ export function App() {
         onToggleSettings={() => showSettings(!settingsOpen)}
         run={run}
       />
-      <div ref={scroller} className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+      <div ref={scroller} className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable_both-edges]">
         <div ref={content} className="relative">
           {failure && (
             <p title={failure} className="truncate border-b border-line-soft px-2.5 py-1.5 text-micro text-danger">

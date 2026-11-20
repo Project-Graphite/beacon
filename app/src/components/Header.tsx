@@ -19,7 +19,7 @@ interface HeaderProps {
 export function Header({ sessions, accountUsage, snoozedUntil, queue, settingsOpen, onToggleSettings, run }: HeaderProps) {
   const parts = summaryParts(sessions);
   return (
-    <header className="relative z-20 flex h-8 shrink-0 items-center gap-1.5 border-b border-line-soft pr-1 pl-2.5">
+    <header className="relative z-20 flex h-8 shrink-0 items-center gap-1.5 border-b border-line-soft pr-2.5 pl-4">
       <p aria-label={summary(sessions)} className="min-w-0 truncate text-secondary text-muted">
         {parts.length === 0
           ? 'All quiet'

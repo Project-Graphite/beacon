@@ -140,8 +140,8 @@
 }
 
 .scroll-thin::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
 }
 
 .scroll-thin::-webkit-scrollbar-track {
@@ -149,8 +149,8 @@
 }
 
 .scroll-thin::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 5px;
+  border: 1px solid transparent;
+  border-radius: 3px;
   background: var(--color-line) padding-box;
 }
 
