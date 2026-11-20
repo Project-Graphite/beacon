@@ -53,6 +53,7 @@ pub enum PillEvent {
     Clicked,
     Moved,
     HoverTick,
+    ForegroundChanged,
 }
 
 struct Press {
@@ -411,7 +412,7 @@ impl Pill {
             WM_FOREGROUND_CHANGED => {
                 self.fullscreen = foreground_is_fullscreen(self.hwnd);
                 self.sync();
-                Some(None)
+                Some(Some(PillEvent::ForegroundChanged))
             }
             _ => None,
         }

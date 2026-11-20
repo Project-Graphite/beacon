@@ -73,6 +73,12 @@ impl Toaster {
         was_empty && !self.batch.is_empty()
     }
 
+    pub fn flush_unless_focused(&mut self, focused: Option<&str>) -> Option<Toast> {
+        self.batch
+            .retain(|candidate| Some(candidate.session_id.as_str()) != focused);
+        self.flush()
+    }
+
     pub fn flush(&mut self) -> Option<Toast> {
         let batch = std::mem::take(&mut self.batch);
         match batch.as_slice() {
@@ -220,6 +226,38 @@ mod tests {
             session("d", SessionState::Starting),
         ])));
         assert_eq!(toaster.flush(), None);
+    }
+
+    #[test]
+    fn the_session_whose_window_has_focus_gets_no_toast() {
+        let mut toaster = primed(vec![
+            session("a", SessionState::Working),
+            session("b", SessionState::Working),
+        ]);
+        toaster.observe(&snapshot(vec![
+            session("a", SessionState::Done),
+            session("b", SessionState::NeedsPermission),
+        ]));
+        assert_eq!(
+            toaster.flush_unless_focused(Some("a")),
+            Some(Toast {
+                title: "project-b needs permission".to_string(),
+                body: String::new(),
+            })
+        );
+        toaster.observe(&snapshot(vec![
+            session("a", SessionState::NeedsAnswer),
+            session("b", SessionState::NeedsPermission),
+        ]));
+        assert_eq!(toaster.flush_unless_focused(Some("a")), None);
+        toaster.observe(&snapshot(vec![
+            session("a", SessionState::Done),
+            session("b", SessionState::Done),
+        ]));
+        assert_eq!(
+            toaster.flush_unless_focused(None).unwrap().title,
+            "2 sessions finished"
+        );
     }
 
     #[test]

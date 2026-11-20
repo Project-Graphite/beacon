@@ -11,6 +11,8 @@ Usage:
   beacon decide <id> deny [--message <text>] [--stop]
   beacon decide <id> answer \"<question>=<label>\" ...
   beacon ack <session-id-or-unique-prefix>
+  beacon jump <session-id-or-unique-prefix>
+  beacon where <session-id-or-unique-prefix>
   beacon snooze <session-id-or-unique-prefix|all> <minutes>
   beacon unsnooze <session-id-or-unique-prefix|all>
   beacon usage [--refresh]
@@ -34,6 +36,12 @@ pub enum Command {
         decision: Decision,
     },
     Ack {
+        session: String,
+    },
+    Jump {
+        session: String,
+    },
+    Where {
         session: String,
     },
     Snooze {
@@ -112,6 +120,12 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         }
         ("decide", _) => parse_decide(rest),
         ("ack", [session]) => Ok(Command::Ack {
+            session: session.clone(),
+        }),
+        ("jump", [session]) => Ok(Command::Jump {
+            session: session.clone(),
+        }),
+        ("where", [session]) => Ok(Command::Where {
             session: session.clone(),
         }),
         ("snooze", [session, minutes]) => Ok(Command::Snooze {
@@ -332,6 +346,32 @@ mod tests {
                 settings: Some(PathBuf::from("s.json"))
             })
         );
+    }
+
+    #[test]
+    fn jump_and_where_parse() {
+        assert_eq!(
+            parsed(&["jump", "4c2c"]),
+            Ok(Command::Jump {
+                session: "4c2c".to_string()
+            })
+        );
+        assert_eq!(
+            parsed(&["where", "4c2c"]),
+            Ok(Command::Where {
+                session: "4c2c".to_string()
+            })
+        );
+        for line in [
+            &["jump"][..],
+            &["jump", "a", "b"],
+            &["where"],
+            &["where", "a", "--json"],
+        ] {
+            assert!(parsed(line).is_err(), "{line:?}");
+        }
+        assert!(USAGE.contains("beacon jump <session-id-or-unique-prefix>"));
+        assert!(USAGE.contains("beacon where <session-id-or-unique-prefix>"));
     }
 
     #[test]

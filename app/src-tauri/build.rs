@@ -9,6 +9,7 @@ fn main() {
             "refresh_usage",
             "close_panel",
             "set_panel_height",
+            "jump",
         ]),
     ))
     .expect("the Tauri build script failed");

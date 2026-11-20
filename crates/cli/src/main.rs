@@ -2,6 +2,7 @@ mod args;
 mod diff;
 mod doctor;
 mod installer;
+mod jump;
 mod platform;
 mod settings;
 mod status;
@@ -77,6 +78,8 @@ fn run(command: Command) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Ack { session } => acknowledge(&beacon_home()?, &session),
+        Command::Jump { session } => jump::jump(&beacon_home()?, &session),
+        Command::Where { session } => jump::locate(&beacon_home()?, &session),
         Command::Snooze { session, minutes } => snooze(&beacon_home()?, session, Some(minutes)),
         Command::Unsnooze { session } => snooze(&beacon_home()?, session, None),
         Command::Usage { refresh } => {

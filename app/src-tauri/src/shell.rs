@@ -1,5 +1,6 @@
 use crate::feed::Feed;
 use crate::geometry::{Rect, place_panel};
+use crate::jump;
 use crate::model::{PillModel, alerting_count};
 use crate::panel::{self, PANEL};
 use crate::platform::{self, pill, pill::PillEvent};
@@ -126,6 +127,9 @@ impl Shell {
             },
             Action::Pill(PillEvent::Moved) => self.place(),
             Action::Pill(PillEvent::HoverTick) => self.check_hover(),
+            Action::Pill(PillEvent::ForegroundChanged) => {
+                jump::acknowledge_focused(&self.feed.home, self.snapshot.as_ref())
+            }
             Action::OpenPanel => self.open(Base::Sticky, true),
             Action::ClosePanel if self.mode() != Some(Mode::Pinned) => self.close(),
             Action::ClosePanel => {}
@@ -303,7 +307,10 @@ impl Shell {
     }
 
     fn flush_toasts(&mut self) {
-        let Some(toast) = self.toaster.flush() else {
+        let Some(toast) = self
+            .toaster
+            .flush_unless_focused(jump::focused_session(self.snapshot.as_ref()).as_deref())
+        else {
             return;
         };
         if let Err(error) = self

@@ -67,6 +67,20 @@ export interface Session {
   usage: SessionUsage | null;
 }
 
+export type TargetKind =
+  | { type: 'editor'; scheme: string }
+  | { type: 'desktop' }
+  | { type: 'windows_terminal' }
+  | { type: 'console' }
+  | { type: 'other' };
+
+export interface JumpOutcome {
+  result: 'focused' | 'flashed' | 'no_window';
+  kind: TargetKind | null;
+  ambiguous: boolean;
+  link_opened: boolean;
+}
+
 export interface PendingDecision {
   id: number;
   session_id: string;
@@ -133,6 +147,7 @@ export const unsnooze = (sessionId: string | null) => invoke<void>('unsnooze', {
 export const refreshUsage = () => invoke<void>('refresh_usage');
 export const closePanel = () => invoke<void>('close_panel');
 export const setPanelHeight = (height: number) => invoke<void>('set_panel_height', { height });
+export const jump = (sessionId: string) => invoke<JumpOutcome>('jump', { sessionId });
 
 export const onSnapshot = (handler: (snapshot: Snapshot | null) => void): Promise<UnlistenFn> =>
   listen<Snapshot | null>('beacon://snapshot', (event) => handler(event.payload));

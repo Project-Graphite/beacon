@@ -2,6 +2,7 @@
 
 mod feed;
 mod geometry;
+mod jump;
 mod model;
 mod panel;
 mod platform;
@@ -62,6 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             panel::refresh_usage,
             panel::close_panel,
             panel::set_panel_height,
+            jump::jump,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

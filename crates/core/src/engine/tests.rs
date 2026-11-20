@@ -1234,3 +1234,25 @@ fn activity_lines_and_timeline_labels_are_redacted() {
         Some("Running API_KEY=*** npm run deploy")
     );
 }
+
+#[test]
+fn the_host_identity_comes_from_the_first_event_that_carries_one_and_persists() {
+    let mut fixture = fixture();
+    fixture.send_with_env(SESSION_START, &[("CLAUDE_PID", "1")]);
+    assert_eq!(fixture.session().host, None);
+    fixture.send_with_env(
+        USER_PROMPT_SUBMIT,
+        &[("WT_SESSION", "first"), ("TERM_PROGRAM", "x")],
+    );
+    fixture.send_with_env(STOP, &[("WT_SESSION", "second")]);
+    let host = fixture.session().host.unwrap();
+    assert_eq!(host.wt_session.as_deref(), Some("first"));
+    assert_eq!(host.term_program.as_deref(), Some("x"));
+    let restored = Engine::load_sessions(&fixture.engine.persisted_state().unwrap()).unwrap();
+    assert_eq!(restored[0].host, Some(host));
+    let legacy = serde_json::to_value(fixture.session()).unwrap();
+    let mut legacy = legacy.as_object().unwrap().clone();
+    legacy.remove("host");
+    let legacy: Session = serde_json::from_value(Value::Object(legacy)).unwrap();
+    assert_eq!(legacy.host, None);
+}
