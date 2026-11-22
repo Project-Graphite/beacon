@@ -1034,6 +1034,23 @@ fn at_most_twenty_ended_sessions_are_kept_and_five_are_in_the_snapshot() {
 }
 
 #[test]
+fn the_ended_count_leaves_out_dismissed_sessions() {
+    let now = now_ms();
+    let fixture = fixture_with(
+        Config::default(),
+        vec![
+            persisted("ended-kept", SessionState::Ended, now - 2_000),
+            Session {
+                dismissed: true,
+                ..persisted("ended-dismissed", SessionState::Ended, now - 1_000)
+            },
+        ],
+    );
+    assert_eq!(fixture.engine.snapshot().ended_count, 1);
+    assert_eq!(fixture.engine.ended().len(), 2);
+}
+
+#[test]
 fn what_needs_the_user_names_pending_decisions_and_alerting_sessions() {
     let mut fixture = fixture();
     fixture.send(USER_PROMPT_SUBMIT);

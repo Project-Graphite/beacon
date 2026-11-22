@@ -240,7 +240,7 @@ impl Engine {
                 })
                 .map(in_snapshot)
                 .collect(),
-            ended_count: ended.len(),
+            ended_count: ended.iter().filter(|session| !session.dismissed).count(),
             pending: self
                 .pending
                 .values()
