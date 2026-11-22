@@ -178,7 +178,7 @@ export function SessionView({
             <CommandBlock command={session.command_current} live />
           </section>
         )}
-        {session.tasks.length > 0 && <PlanList tasks={session.tasks} />}
+        {detail && detail.tasks.length > 0 && <PlanList tasks={detail.tasks} />}
         {failure && <p className="text-micro text-danger">Cannot load details: {failure}</p>}
         {detail && detail.steps.length > 0 && <ActivityList steps={detail.steps} />}
         <PromptBox session={session} onJumpReport={onJumpReport} />

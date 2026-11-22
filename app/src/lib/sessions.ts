@@ -40,6 +40,45 @@ export type RowLine =
 
 export const cardId = (sessionId: string) => `session-${sessionId}`;
 
+const SESSION_DEFAULTS = {
+  attention: false,
+  cwd: null,
+  project: null,
+  branch: null,
+  transcript_path: null,
+  entrypoint: null,
+  claude_pid: null,
+  attended: null,
+  permission_mode: null,
+  model: null,
+  title: null,
+  listed_name: null,
+  activity: null,
+  turn_started_ms: null,
+  turn_ended_ms: null,
+  last_message_preview: null,
+  last_error: null,
+  limited: false,
+  snoozed_until_ms: null,
+  alerting: false,
+  editor: null,
+  usage: null,
+  mcp_request: null,
+  host: null,
+  prompts: [],
+  task_current: null,
+  step_current: null,
+  command_current: null,
+  dismissed: false,
+  ai_title: null,
+  last_prompt: null,
+  can_wake: false,
+} satisfies Partial<Session>;
+
+export type WireSession = Omit<Session, keyof typeof SESSION_DEFAULTS> & Partial<Session>;
+
+export const withDefaults = (session: WireSession): Session => ({ ...SESSION_DEFAULTS, ...session });
+
 const GROUP_LABELS =['Needs you', 'Snoozed', 'Working', 'Idle'];
 
 const STATE_PHRASES: Record<SessionState, { text: string; tone: Tone }> = {

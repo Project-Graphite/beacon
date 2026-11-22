@@ -18,6 +18,7 @@ use std::time::Duration;
 pub enum Request {
     Snapshot,
     Subscribe,
+    Ended,
     Decide {
         id: u64,
         decision: Decision,
@@ -91,6 +92,8 @@ pub struct Reply {
     pub detail: Option<SessionDetail>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_path: Option<PromptPath>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<Vec<Session>>,
 }
 
 impl Reply {
@@ -101,6 +104,7 @@ impl Reply {
             snapshot: None,
             detail: None,
             prompt_path: None,
+            ended: None,
         }
     }
 
@@ -123,6 +127,8 @@ impl Reply {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub sessions: Vec<Session>,
+    #[serde(default)]
+    pub ended_count: usize,
     pub pending: Vec<PendingDecision>,
     pub resolved: Vec<ResolvedDecision>,
     pub snoozed_until_ms: Option<u64>,
@@ -371,5 +377,18 @@ mod tests {
             assert_eq!(serde_json::to_string(&request).unwrap(), json);
             assert_eq!(serde_json::from_str::<Request>(json).unwrap(), request);
         }
+    }
+
+    #[test]
+    fn the_ended_request_and_a_snapshot_without_an_ended_count_have_their_shapes() {
+        assert_eq!(
+            serde_json::to_string(&Request::Ended).unwrap(),
+            r#"{"op":"ended"}"#
+        );
+        let snapshot: Snapshot = serde_json::from_str(
+            r#"{"sessions":[],"pending":[],"resolved":[],"snoozed_until_ms":null,"account_usage":null,"config":{"stall_minutes":10,"answer_unattended":false}}"#,
+        )
+        .unwrap();
+        assert_eq!(snapshot.ended_count, 0);
     }
 }

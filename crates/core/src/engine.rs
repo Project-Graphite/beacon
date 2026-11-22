@@ -23,7 +23,7 @@ use beacon_protocol::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::io;
 use std::path::Path;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -31,7 +31,9 @@ use tokio::sync::{mpsc, oneshot, watch};
 const RECENT_TOOL_USES: usize = 16;
 const RESOLVED_KEPT: usize = 32;
 const DOCTOR_REPLY: &[u8] = br#"{"beacon":"ok"}"#;
-const ENDED_KEPT_MS: u64 = 24 * 60 * 60 * 1000;
+const ENDED_KEPT_MS: u64 = 2 * 60 * 60 * 1000;
+const ENDED_KEPT: usize = 20;
+const ENDED_IN_SNAPSHOT: usize = 5;
 const TIMELINE_KEPT: usize = 60;
 const LAST_MESSAGE_BYTES: usize = 64 * 1024;
 const USAGE_EVENTS: [&str; 4] = ["Stop", "SubagentStop", "PostToolBatch", "SessionEnd"];
@@ -199,6 +201,19 @@ impl Engine {
         self.changes.subscribe()
     }
 
+    pub fn needs_user(&self) -> BTreeSet<String> {
+        self.pending
+            .keys()
+            .map(|id| format!("decision {id}"))
+            .chain(
+                self.sessions
+                    .values()
+                    .filter(|session| session.alerting)
+                    .map(|session| format!("session {}", session.session_id)),
+            )
+            .collect()
+    }
+
     pub fn has_live_sessions(&self) -> bool {
         self.sessions
             .values()
@@ -206,15 +221,23 @@ impl Engine {
     }
 
     pub fn snapshot(&self) -> Snapshot {
+        let ended = self.ended_newest_first();
+        let shown_ended: HashSet<&str> = ended
+            .iter()
+            .take(ENDED_IN_SNAPSHOT)
+            .map(|session| session.session_id.as_str())
+            .collect();
         Snapshot {
             sessions: self
                 .sessions
                 .values()
-                .map(|session| Session {
-                    steps: VecDeque::new(),
-                    ..session.without_prompt_texts()
+                .filter(|session| {
+                    session.state != SessionState::Ended
+                        || shown_ended.contains(session.session_id.as_str())
                 })
+                .map(in_snapshot)
                 .collect(),
+            ended_count: ended.len(),
             pending: self
                 .pending
                 .values()
@@ -225,6 +248,20 @@ impl Engine {
             account_usage: self.account_usage.clone(),
             config: self.config.live(),
         }
+    }
+
+    fn ended_newest_first(&self) -> Vec<&Session> {
+        let mut ended: Vec<&Session> = self
+            .sessions
+            .values()
+            .filter(|session| session.state == SessionState::Ended)
+            .collect();
+        ended.sort_by_key(|session| std::cmp::Reverse(session.last_event_ms));
+        ended
+    }
+
+    pub fn ended(&self) -> Vec<Session> {
+        self.ended_newest_first().into_iter().map(shown).collect()
     }
 
     pub fn set_config(
@@ -251,6 +288,12 @@ impl Engine {
     pub fn control(&mut self, request: Request) -> Reply {
         let result = match request {
             Request::Snapshot | Request::Subscribe => return Reply::with_snapshot(self.snapshot()),
+            Request::Ended => {
+                return Reply {
+                    ended: Some(self.ended()),
+                    ..Reply::ok()
+                };
+            }
             Request::Detail { session_id } => {
                 return self
                     .detail(&session_id)
@@ -1267,13 +1310,13 @@ impl Engine {
 
     fn prune_ended(&mut self, now: u64) -> bool {
         let expired: Vec<String> = self
-            .sessions
-            .values()
-            .filter(|session| {
-                session.state == SessionState::Ended
-                    && now.saturating_sub(session.last_event_ms) > ENDED_KEPT_MS
+            .ended_newest_first()
+            .into_iter()
+            .enumerate()
+            .filter(|(index, session)| {
+                *index >= ENDED_KEPT || now.saturating_sub(session.last_event_ms) > ENDED_KEPT_MS
             })
-            .map(|session| session.session_id.clone())
+            .map(|(_, session)| session.session_id.clone())
             .collect();
         for session_id in &expired {
             self.sessions.remove(session_id);
@@ -1332,9 +1375,31 @@ impl Engine {
     }
 
     fn changed_at(&mut self, now: u64) {
+        self.prune_ended(now);
         self.settle_snoozes(now);
         self.settle_sessions();
         self.changes.send_modify(|version| *version += 1);
+    }
+}
+
+fn shown(session: &Session) -> Session {
+    Session {
+        steps: VecDeque::new(),
+        tasks: Vec::new(),
+        ..session.without_prompt_texts()
+    }
+}
+
+fn in_snapshot(session: &Session) -> Session {
+    match session.state {
+        SessionState::Ended => Session {
+            usage: None,
+            last_message_preview: None,
+            ai_title: None,
+            last_prompt: None,
+            ..shown(session)
+        },
+        _ => shown(session),
     }
 }
 

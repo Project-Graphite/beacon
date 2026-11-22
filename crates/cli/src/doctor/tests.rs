@@ -177,6 +177,7 @@ fn surfaces_are_counted_with_limited_sessions() {
         ..Session::new(id, 0)
     };
     let snapshot = Snapshot {
+        ended_count: 0,
         sessions: vec![
             session("a", Some("cli"), false),
             session("b", Some("cli"), false),

@@ -76,6 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .invoke_handler(tauri::generate_handler![
             panel::get_snapshot,
             panel::get_detail,
+            panel::get_ended,
             panel::acknowledge,
             panel::dismiss,
             panel::decide,

@@ -2,7 +2,7 @@ use crate::feed::{self, Feed};
 use crate::geometry::Rect;
 use crate::platform::pill;
 use crate::shell::{self, Action};
-use beacon_core::{Decision, Reply, Request, SessionDetail, Snapshot};
+use beacon_core::{Decision, Reply, Request, Session, SessionDetail, Snapshot};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -54,6 +54,14 @@ pub async fn get_detail(
         .await?
         .detail
         .ok_or_else(|| "the Beacon core sent no detail".to_string())
+}
+
+#[tauri::command]
+pub async fn get_ended(feed: State<'_, Arc<Feed>>) -> Result<Vec<Session>, String> {
+    ask(feed.home.clone(), Request::Ended)
+        .await?
+        .ended
+        .ok_or_else(|| "the Beacon core sent no ended sessions".to_string())
 }
 
 #[tauri::command]

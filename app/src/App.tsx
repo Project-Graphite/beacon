@@ -6,6 +6,7 @@ import {
   closePanel,
   dismiss,
   getDetail,
+  getEnded,
   getOverlay,
   getSnapshot,
   getUiSettings,
@@ -79,6 +80,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [endedOpen, setEndedOpen] = useState(false);
+  const [endedList, setEndedList] = useState<Session[] | null>(null);
   const [crossedOpen, setCrossedOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [chosenRequestId, setChosenRequestId] = useState<number | null>(null);
@@ -184,11 +186,15 @@ export function App() {
   }, []);
 
   const sessions = snapshot?.sessions ?? [];
-  const { groups, ended } = groupSessions(sessions);
+  const { groups, ended: recentlyEnded } = groupSessions(sessions);
+  const ended = (endedList ?? []).filter((session) => !session.dismissed);
+  const endedKey = `${snapshot?.ended_count ?? 0}:${recentlyEnded.map((session) => session.session_id)}`;
   const crossed = crossedOff(sessions);
   const listOrder = [...groups.flatMap((group) => group.sessions), ...ended];
   const visible = [...groups.flatMap((group) => group.sessions), ...(endedOpen ? ended : [])];
-  const openSession = sessions.find((session) => session.session_id === openId);
+  const findSession = (sessionId: string | null) =>
+    ended.find((session) => session.session_id === sessionId) ?? sessions.find((session) => session.session_id === sessionId);
+  const openSession = findSession(openId);
   const queue = requestQueue(snapshot?.pending ?? []);
   const current = currentRequest(queue, chosenRequestId);
   const ticking = queue.length > 0 || sessions.some((session) => session.state !== 'ended' && turnRunning(session));
@@ -218,6 +224,10 @@ export function App() {
       : null,
     entrance,
   );
+
+  useEffect(() => {
+    if (endedOpen) getEnded().then(setEndedList, fail);
+  }, [endedOpen, endedKey, fail]);
 
   useEffect(() => {
     if (!ticking) return;
@@ -264,8 +274,20 @@ export function App() {
       dismiss(sessionId).then(() => {
         if (opening.current === sessionId) opening.current = null;
         setOpenId((open) => (open === sessionId ? null : open));
+        if (endedOpen) return getEnded().then(setEndedList);
       }),
     );
+
+  const toggleEnded = () => {
+    if (endedOpen) setEndedOpen(false);
+    else
+      run(
+        getEnded().then((list) => {
+          setEndedList(list);
+          setEndedOpen(true);
+        }),
+      );
+  };
 
   const reportJump = (sessionId: string, { notice, succeeded }: JumpReport) => {
     if (notice) showNotices([{ id: nextJumpNoticeId.current--, sessionId, text: notice }]);
@@ -386,7 +408,7 @@ export function App() {
         />
       );
     if (key.startsWith(DETAIL_PREFIX)) {
-      const session = sessions.find((each) => each.session_id === key.slice(DETAIL_PREFIX.length));
+      const session = findSession(key.slice(DETAIL_PREFIX.length));
       return (
         session && (
           <SessionView
@@ -437,10 +459,11 @@ export function App() {
         <SessionList
           groups={groups}
           ended={ended}
+          endedCount={snapshot?.ended_count ?? 0}
           crossed={crossed}
           endedOpen={endedOpen}
           crossedOpen={crossedOpen}
-          onToggleEnded={() => setEndedOpen(!endedOpen)}
+          onToggleEnded={toggleEnded}
           onToggleCrossed={() => setCrossedOpen(!crossedOpen)}
           renderRow={(session) => renderRow(session, false)}
           renderCrossedRow={(session) => renderRow(session, true)}

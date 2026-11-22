@@ -3,6 +3,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "get_snapshot",
             "get_detail",
+            "get_ended",
             "acknowledge",
             "dismiss",
             "decide",

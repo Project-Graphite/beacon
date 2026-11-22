@@ -440,13 +440,28 @@ async fn stream_snapshots<W: AsyncWrite + Unpin>(
     let mut changes = shared.engine.borrow().watch_changes();
     loop {
         changes.borrow_and_update();
-        let snapshot = shared.engine.borrow().snapshot();
+        let (snapshot, sent_needs) = {
+            let engine = shared.engine.borrow();
+            (engine.snapshot(), engine.needs_user())
+        };
         write_reply(writer, &Reply::with_snapshot(snapshot)).await?;
         let next_allowed = Instant::now() + SUBSCRIBE_INTERVAL;
         if changes.changed().await.is_err() {
             return Ok(());
         }
-        sleep_until(next_allowed).await;
+        loop {
+            if !shared.engine.borrow().needs_user().is_subset(&sent_needs) {
+                break;
+            }
+            tokio::select! {
+                () = sleep_until(next_allowed) => break,
+                changed = changes.changed() => {
+                    if changed.is_err() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
     }
 }
 

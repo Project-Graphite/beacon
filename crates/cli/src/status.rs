@@ -311,6 +311,7 @@ mod tests {
         headless.turn_started_ms = Some(NOW - 90_047_000);
         headless.turn_ended_ms = Some(NOW - 90_000_000);
         let snapshot = Snapshot {
+            ended_count: 0,
             sessions: vec![working, asking, listed, headless],
             pending: vec![
                 pending(
@@ -371,6 +372,7 @@ ID  PROJECT  TOOL                    INPUT                                      
         let mut edge = pending(9, "nobody", "Bash", json!({"command": "pwd"}));
         edge.expires_ms = NOW + 900_000;
         let snapshot = Snapshot {
+            ended_count: 0,
             sessions: Vec::new(),
             pending: vec![late, edge],
             resolved: Vec::new(),
@@ -393,6 +395,7 @@ ID  PROJECT  TOOL  INPUT  AGE
     #[test]
     fn an_empty_snapshot_says_so() {
         let snapshot = Snapshot {
+            ended_count: 0,
             sessions: Vec::new(),
             pending: Vec::new(),
             resolved: Vec::new(),
@@ -432,6 +435,7 @@ ID  PROJECT  TOOL  INPUT  AGE
         let mut crossed = session("66666666", SessionState::Idle, NOW - 1_000);
         crossed.dismissed = true;
         let snapshot = Snapshot {
+            ended_count: 0,
             sessions: vec![crossed, session("77777777", SessionState::Working, NOW)],
             pending: Vec::new(),
             resolved: Vec::new(),

@@ -35,63 +35,80 @@ const IMAGE_SURFACES: [(&str, &str, Option<&str>); 7] = [
 pub struct Session {
     pub session_id: String,
     pub state: SessionState,
+    #[serde(default, skip_serializing_if = "is_false")]
     pub attention: bool,
     pub overlays: Overlays,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entrypoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attended: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listed_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_started_ms: Option<u64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_ended_ms: Option<u64>,
     pub last_event_ms: u64,
     pub event_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_message_preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
     pub tasks_created: u32,
     pub tasks_completed: u32,
+    #[serde(default, skip_serializing_if = "is_false")]
     pub limited: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snoozed_until_ms: Option<u64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub alerting: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub editor: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<SessionUsage>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_request: Option<McpRequest>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<Host>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompts: Vec<Prompt>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tasks: Vec<Task>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_current: Option<String>,
     #[serde(skip)]
     pub steps: VecDeque<Step>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step_current: Option<CurrentStep>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command_current: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub dismissed: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_title: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_prompt: Option<String>,
     #[serde(default)]
     pub display_title: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub can_wake: bool,
 }
 
@@ -181,6 +198,10 @@ impl Session {
     pub fn set_preview(&mut self, message: &str) {
         self.last_message_preview = Some(message.chars().take(PREVIEW_CHARS).collect());
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 pub fn title_line(text: &str) -> String {

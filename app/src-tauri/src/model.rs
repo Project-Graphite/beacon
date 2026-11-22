@@ -428,6 +428,7 @@ pub mod tests {
 
     pub fn snapshot(sessions: Vec<Session>) -> Snapshot {
         Snapshot {
+            ended_count: 0,
             sessions,
             pending: Vec::new(),
             resolved: Vec::new(),

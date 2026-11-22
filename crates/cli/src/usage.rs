@@ -113,6 +113,7 @@ mod tests {
 
     fn snapshot(sessions: Vec<Session>, account_usage: Option<AccountUsage>) -> Snapshot {
         Snapshot {
+            ended_count: 0,
             sessions,
             pending: Vec::new(),
             resolved: Vec::new(),

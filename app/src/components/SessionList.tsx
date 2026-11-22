@@ -6,6 +6,7 @@ import { FoldedGroup } from './FoldedGroup';
 interface SessionListProps {
   groups: SessionGroup[];
   ended: Session[];
+  endedCount: number;
   crossed: Session[];
   endedOpen: boolean;
   crossedOpen: boolean;
@@ -18,6 +19,7 @@ interface SessionListProps {
 export function SessionList({
   groups,
   ended,
+  endedCount,
   crossed,
   endedOpen,
   crossedOpen,
@@ -36,8 +38,8 @@ export function SessionList({
         ),
         ...group.sessions.map(renderRow),
       ])}
-      {ended.length > 0 && (
-        <FoldedGroup key="ended" motionId="ended" label={`Ended (${ended.length})`} open={endedOpen} onToggle={onToggleEnded}>
+      {endedCount > 0 && (
+        <FoldedGroup key="ended" motionId="ended" label={`Ended (${endedCount})`} open={endedOpen} onToggle={onToggleEnded}>
           {ended.map(renderRow)}
         </FoldedGroup>
       )}

@@ -952,15 +952,15 @@ fn session_ids(engine: &Engine) -> Vec<String> {
 }
 
 #[test]
-fn ended_sessions_older_than_a_day_are_pruned_at_load() {
-    let day = 24 * 60 * 60 * 1000;
+fn ended_sessions_older_than_two_hours_are_pruned_at_load() {
+    let kept = 2 * 60 * 60 * 1000;
     let now = now_ms();
     let fixture = fixture_with(
         Config::default(),
         vec![
-            persisted("ended-old", SessionState::Ended, now - day - 60_000),
-            persisted("ended-recent", SessionState::Ended, now - day + 60_000),
-            persisted("idle-old", SessionState::Idle, now - 3 * day),
+            persisted("ended-old", SessionState::Ended, now - kept - 60_000),
+            persisted("ended-recent", SessionState::Ended, now - kept + 60_000),
+            persisted("idle-old", SessionState::Idle, now - 3 * kept),
         ],
     );
     assert_eq!(
@@ -971,21 +971,139 @@ fn ended_sessions_older_than_a_day_are_pruned_at_load() {
 
 #[test]
 fn ended_sessions_are_pruned_by_the_periodic_check() {
-    let day = 24 * 60 * 60 * 1000;
+    let kept = 2 * 60 * 60 * 1000;
     let mut fixture = fixture();
     fixture.send(USER_PROMPT_SUBMIT);
     fixture.send(SESSION_END);
     let ended_at = fixture.session().last_event_ms;
     let mut changes = fixture.engine.watch_changes();
     changes.borrow_and_update();
-    fixture.engine.check_stalls(ended_at + day);
+    fixture.engine.check_stalls(ended_at + kept);
     assert_eq!(session_ids(&fixture.engine), [SESSION.to_string()]);
     assert!(!changes.has_changed().unwrap());
-    fixture.engine.check_stalls(ended_at + day + 1);
+    fixture.engine.check_stalls(ended_at + kept + 1);
     assert!(session_ids(&fixture.engine).is_empty());
     assert!(changes.has_changed().unwrap());
     let persisted = fixture.engine.persisted_state().unwrap();
     assert!(Engine::load_sessions(&persisted).unwrap().is_empty());
+}
+
+#[test]
+fn at_most_twenty_ended_sessions_are_kept_and_five_are_in_the_snapshot() {
+    let now = now_ms();
+    let ended = (0..25u64).map(|index| {
+        persisted(
+            &format!("ended-{index:02}"),
+            SessionState::Ended,
+            now - 60_000 + index,
+        )
+    });
+    let mut fixture = fixture_with(
+        Config::default(),
+        ended
+            .chain([persisted("idle", SessionState::Idle, now - 120_000)])
+            .collect(),
+    );
+    let newest: Vec<String> = (5..25)
+        .rev()
+        .map(|index| format!("ended-{index:02}"))
+        .collect();
+    let ended = fixture.engine.ended();
+    assert_eq!(
+        ended
+            .iter()
+            .map(|session| session.session_id.clone())
+            .collect::<Vec<_>>(),
+        newest
+    );
+    let snapshot = fixture.engine.snapshot();
+    assert_eq!(snapshot.ended_count, 20);
+    let mut shown: Vec<String> = snapshot
+        .sessions
+        .iter()
+        .map(|session| session.session_id.clone())
+        .collect();
+    shown.sort();
+    let mut expected: Vec<String> = newest[..5].to_vec();
+    expected.push("idle".to_string());
+    expected.sort();
+    assert_eq!(shown, expected);
+    let reply = fixture.engine.control(Request::Ended);
+    assert!(reply.ok);
+    assert_eq!(reply.ended.unwrap(), ended);
+}
+
+#[test]
+fn what_needs_the_user_names_pending_decisions_and_alerting_sessions() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    fixture.send(PRE_TOOL_USE);
+    assert!(fixture.engine.needs_user().is_empty());
+    let (id, _receiver) = fixture.ask(PERMISSION_REQUEST);
+    assert_eq!(
+        fixture.engine.needs_user(),
+        BTreeSet::from([format!("decision {id}"), format!("session {SESSION}")])
+    );
+    fixture.engine.decide(id, Decision::Allow).unwrap();
+    fixture.send(POST_TOOL_USE);
+    assert!(fixture.engine.needs_user().is_empty());
+    fixture.send(STOP);
+    assert_eq!(
+        fixture.engine.needs_user(),
+        BTreeSet::from([format!("session {SESSION}")])
+    );
+}
+
+#[test]
+fn snapshots_leave_task_lists_to_the_detail() {
+    let mut fixture = fixture();
+    fixture.send(&task_event("TaskCreated", "1", "Write the parser"));
+    assert_eq!(fixture.session().tasks.len(), 1);
+    let shown = &fixture.engine.snapshot().sessions[0];
+    assert!(shown.tasks.is_empty());
+    assert_eq!(shown.tasks_created, 1);
+    assert_eq!(shown.task_current.as_deref(), Some("Write the parser"));
+    assert_eq!(fixture.engine.detail(SESSION).unwrap().tasks.len(), 1);
+}
+
+#[test]
+fn an_ended_session_is_slim_in_the_snapshot_and_whole_in_the_ended_list() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    fixture.send(&custom(
+        "Stop",
+        json!({"last_assistant_message": "All done"}),
+    ));
+    fixture.send(SESSION_END);
+    let slim = &fixture.engine.snapshot().sessions[0];
+    assert_eq!(slim.state, SessionState::Ended);
+    assert_eq!(slim.last_message_preview, None);
+    let whole = &fixture.engine.ended()[0];
+    assert_eq!(whole.last_message_preview.as_deref(), Some("All done"));
+}
+
+#[test]
+fn a_newly_ended_session_pushes_out_the_oldest_beyond_twenty() {
+    let now = now_ms();
+    let mut fixture = fixture_with(
+        Config::default(),
+        (0..20u64)
+            .map(|index| {
+                persisted(
+                    &format!("ended-{index:02}"),
+                    SessionState::Ended,
+                    now - 60_000 + index,
+                )
+            })
+            .collect(),
+    );
+    fixture.send(USER_PROMPT_SUBMIT);
+    fixture.send(SESSION_END);
+    let ended = fixture.engine.ended();
+    assert_eq!(ended.len(), 20);
+    assert_eq!(ended[0].session_id, SESSION);
+    assert!(!fixture.engine.has_session("ended-00"));
+    assert!(fixture.engine.has_session("ended-01"));
 }
 
 #[test]

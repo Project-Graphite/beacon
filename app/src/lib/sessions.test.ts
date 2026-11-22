@@ -19,6 +19,7 @@ import {
   taskProgress,
   turnRunning,
   turnTime,
+  withDefaults,
 } from './sessions.ts';
 
 const session = (fields: Partial<Session>): Session => ({
@@ -305,4 +306,23 @@ test('meta items list only what is present', () => {
 test('a session with queued prompts says how many in its meta line', () => {
   const prompt = (id: number, status: 'queued' | 'delivered') => ({ id, preview: '', created_ms: 0, status, reason: null });
   assert.deepEqual(metaItems(session({ prompts: [prompt(1, 'delivered'), prompt(2, 'queued')] })), [{ text: '1 queued' }]);
+});
+test('a session sent without its empty fields gets them back as null, false or empty', () => {
+  const full = session({ session_id: 'w', state: 'working', last_event_ms: 5, event_count: 2, display_title: 'w', ai_title: null, last_prompt: null, can_wake: false, host: null });
+  const { tasks, ...expected } = full;
+  assert.deepEqual(tasks, []);
+  assert.deepEqual(
+    withDefaults({
+      session_id: 'w',
+      state: 'working',
+      overlays: { compacting: false, subagents: 0, background_tasks: 0 },
+      last_event_ms: 5,
+      event_count: 2,
+      tasks_created: 0,
+      tasks_completed: 0,
+      display_title: 'w',
+    }),
+    expected,
+  );
+  assert.equal(withDefaults({ ...expected, alerting: true, cwd: 'C:\\work' }).cwd, 'C:\\work');
 });

@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { openedFrom, type OpenedPayload } from './lib/panel.ts';
 import type { AddRules } from './lib/rules.ts';
+import { withDefaults, type WireSession } from './lib/sessions.ts';
 import { commandMissing, uiSettings } from './lib/settings.ts';
 
 export type SessionState =
@@ -77,7 +78,6 @@ export interface Session {
   mcp_request: McpRequest | null;
   host?: SessionHost | null;
   prompts: Prompt[];
-  tasks: Task[];
   task_current: string | null;
   step_current: CurrentStep | null;
   command_current: string | null;
@@ -178,6 +178,7 @@ export interface LiveConfig {
 
 export interface Snapshot {
   sessions: Session[];
+  ended_count: number;
   pending: PendingDecision[];
   resolved: ResolvedDecision[];
   snoozed_until_ms: number | null;
@@ -280,13 +281,17 @@ export interface AppInfo {
   home: string;
 }
 
-export const getSnapshot = () => invoke<Snapshot>('get_snapshot');
+type WireSnapshot = Omit<Snapshot, 'sessions'> & { sessions: WireSession[] };
+const snapshotFrom = (snapshot: WireSnapshot): Snapshot => ({ ...snapshot, sessions: snapshot.sessions.map(withDefaults) });
+
+export const getSnapshot = () => invoke<WireSnapshot>('get_snapshot').then(snapshotFrom);
 const details = new Map<string, SessionDetail>();
 export const getDetail = (sessionId: string) =>
   invoke<SessionDetail>('get_detail', { sessionId }).then((detail) => {
     details.set(sessionId, detail);
     return detail;
   });
+export const getEnded = () => invoke<WireSession[]>('get_ended').then((ended) => ended.map(withDefaults));
 export const cachedDetail = (sessionId: string) => details.get(sessionId) ?? null;
 export const acknowledge = (sessionId: string) => invoke<void>('acknowledge', { sessionId });
 export const dismiss = (sessionId: string) => invoke<void>('dismiss', { sessionId });
@@ -330,7 +335,7 @@ export const setOverlayPosition = (position: OverlayPosition) => invoke<void>('s
 export const quitApp = () => invoke<void>('quit_app');
 
 export const onSnapshot = (handler: (snapshot: Snapshot | null) => void): Promise<UnlistenFn> =>
-  listen<Snapshot | null>('beacon://snapshot', (event) => handler(event.payload));
+  listen<WireSnapshot | null>('beacon://snapshot', (event) => handler(event.payload && snapshotFrom(event.payload)));
 
 export const onOpened = (handler: (opened: Opened) => void): Promise<UnlistenFn> =>
   listen<OpenedPayload>('beacon://opened', (event) => handler(openedFrom(event.payload)));
