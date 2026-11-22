@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { decide, type Decision, type PendingDecision } from '../beacon';
+import { errorText } from '../lib/format.ts';
 import { destructiveReason } from '../lib/destructive.ts';
 import { requestId } from '../lib/queue.ts';
 import { redact } from '../lib/redact.ts';
@@ -34,7 +35,7 @@ export function RequestCard({ request, now, marked, currentId, keys, onJump }: R
     setFailure(null);
     decide(request.id, decision).catch((error) => {
       setOutcome(null);
-      setFailure(String(error));
+      setFailure(errorText(error));
     });
   };
   const title =

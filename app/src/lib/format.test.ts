@@ -7,7 +7,14 @@ import {
   formatTokens,
   resetTime,
   shortModel,
+  errorText,
 } from './format.ts';
+
+test('errors read in sentence case without a trailing period', () => {
+  assert.equal(errorText('cannot save the settings: access denied.'), 'Cannot save the settings: access denied');
+  assert.equal(errorText(new Error('boom')), 'Boom');
+  assert.equal(errorText('Command jump not found'), 'Command jump not found');
+});
 
 test('durations switch units at a minute, an hour and a day', () => {
   assert.equal(formatDuration(0), '0s');

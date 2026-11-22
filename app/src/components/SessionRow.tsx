@@ -18,7 +18,7 @@ interface SessionRowProps {
   now: number;
   selected: boolean;
   crossedOff: boolean;
-  onOpen: () => void;
+  onOpen: () => Promise<void>;
   onJump: () => void;
   onCrossOff: () => void;
 }
@@ -56,7 +56,7 @@ export function SessionRow({
         className={`relative transition-colors duration-120 ease-settle ${crossedOff ? 'opacity-45' : 'hover:bg-surface'} ${selected ? 'bg-surface' : ''} ${alert ? 'outline-1 -outline-offset-1 outline-wip/50' : ''}`}
       >
         <span data-flash aria-hidden="true" className="pointer-events-none absolute inset-0 bg-ink/8 opacity-0" />
-        <div className="relative flex h-10 items-center gap-2.5 px-2.5">
+        <div className="relative flex h-9 items-center gap-2.5 px-2.5">
           <Avatar session={session} size="row" />
           <div className="min-w-0 flex-1">
             <p className="flex items-baseline gap-2">

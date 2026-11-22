@@ -1,6 +1,6 @@
 import type { Step } from '../beacon';
 
-const RECENT_STEPS = 12;
+const RECENT_STEPS = 6;
 
 export function recentSteps(steps: Step[]): { earlier: Step[]; recent: Step[] } {
   const split = Math.max(0, steps.length - RECENT_STEPS);

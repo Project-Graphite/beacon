@@ -37,6 +37,11 @@ export function resetTime(iso: string, now: number): string {
     : `${WEEKDAYS[date.getDay()]} ${clockTime(ms)}`;
 }
 
+export function errorText(error: unknown): string {
+  const text = String(error).replace(/^Error: /, '').trim().replace(/\.$/, '');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 export function shortModel(model: string): string {
   return model.replace(/^claude-/, '');
 }

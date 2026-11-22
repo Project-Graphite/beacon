@@ -13,12 +13,12 @@ const steps = (count: number): Step[] =>
     duration_ms: null,
   }));
 
-test('the most recent twelve steps show, oldest first, with the rest kept as earlier', () => {
+test('the most recent six steps show, oldest first, with the rest kept as earlier', () => {
   const ids = (list: Step[]) => list.map((step) => step.id);
   assert.deepEqual(recentSteps([]), { earlier: [], recent: [] });
   assert.deepEqual(ids(recentSteps(steps(5)).recent), [1, 2, 3, 4, 5]);
-  assert.deepEqual(recentSteps(steps(12)).earlier, []);
+  assert.deepEqual(recentSteps(steps(6)).earlier, []);
   const split = recentSteps(steps(20));
-  assert.deepEqual(ids(split.earlier), [1, 2, 3, 4, 5, 6, 7, 8]);
-  assert.deepEqual(ids(split.recent), [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+  assert.deepEqual(ids(split.earlier), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+  assert.deepEqual(ids(split.recent), [15, 16, 17, 18, 19, 20]);
 });

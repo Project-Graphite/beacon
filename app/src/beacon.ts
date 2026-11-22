@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { openedFrom, type OpenedPayload } from './lib/panel.ts';
 import type { AddRules } from './lib/rules.ts';
+import { commandMissing, uiSettings } from './lib/settings.ts';
 
 export type SessionState =
   | 'starting'
@@ -223,11 +224,28 @@ export interface HooksStatus {
   warnings: string[];
 }
 
+export type OverlayVisibility = 'always' | 'active' | 'attention' | 'never';
+
+export type OverlaySize = 'small' | 'medium' | 'large';
+
+export type AttentionStyle = 'colour' | 'pulse' | 'pulse_peek';
+
+export type StartMode = 'login' | 'claude' | 'manual';
+
 export interface UiSettings {
   hotkey: string;
   toasts_enabled: boolean;
   toast_on_finished: boolean;
   sounds_enabled: boolean;
+  visibility: OverlayVisibility;
+  reveal_on_hover: boolean;
+  size: OverlaySize;
+  idle_opacity: number;
+  attention_style: AttentionStyle;
+  attention_repeat_seconds: number;
+  peek_seconds: number;
+  start_mode: StartMode;
+  quit_when_idle_minutes: number;
 }
 
 export interface AppInfo {
@@ -236,7 +254,13 @@ export interface AppInfo {
 }
 
 export const getSnapshot = () => invoke<Snapshot>('get_snapshot');
-export const getDetail = (sessionId: string) => invoke<SessionDetail>('get_detail', { sessionId });
+const details = new Map<string, SessionDetail>();
+export const getDetail = (sessionId: string) =>
+  invoke<SessionDetail>('get_detail', { sessionId }).then((detail) => {
+    details.set(sessionId, detail);
+    return detail;
+  });
+export const cachedDetail = (sessionId: string) => details.get(sessionId) ?? null;
 export const acknowledge = (sessionId: string) => invoke<void>('acknowledge', { sessionId });
 export const dismiss = (sessionId: string) => invoke<void>('dismiss', { sessionId });
 export const decide = (id: number, decision: Decision) => invoke<void>('decide', { id, decision });
@@ -253,15 +277,22 @@ export const sendPromptToWindow = (sessionId: string, text: string) =>
   invoke<WindowPrompt>('send_prompt_to_window', { sessionId, text });
 export const setConfig = ({ stall_minutes, answer_unattended }: Partial<LiveConfig>) =>
   invoke<void>('set_config', { stallMinutes: stall_minutes, answerUnattended: answer_unattended });
-export const hooksStatus = () => invoke<HooksStatus>('hooks_status');
+let lastHooksStatus: HooksStatus | null = null;
+export const hooksStatus = () => invoke<HooksStatus>('hooks_status').then((status) => (lastHooksStatus = status));
+export const cachedHooksStatus = () => lastHooksStatus;
 export const hooksPlan = (action: HooksAction) => invoke<string>('hooks_plan', { action });
 export const hooksApply = (action: HooksAction) => invoke<HooksStatus>('hooks_apply', { action });
-export const getUiSettings = () => invoke<UiSettings>('get_ui_settings');
-export const setUiSettings = (change: Partial<UiSettings>) => invoke<UiSettings>('set_ui_settings', { change });
-export const getLoginStart = () => invoke<boolean>('get_login_start');
-export const setLoginStart = (enabled: boolean) => invoke<void>('set_login_start', { enabled });
+export const getUiSettings = () => invoke<Partial<UiSettings>>('get_ui_settings').then(uiSettings);
+export const setUiSettings = (change: Partial<UiSettings>) =>
+  invoke<Partial<UiSettings>>('set_ui_settings', { change }).then(uiSettings);
+export const previewAttention = () =>
+  invoke<void>('preview_attention').catch((error) => {
+    if (!commandMissing(error)) throw error;
+  });
 export const openLogsFolder = () => invoke<void>('open_logs_folder');
-export const appInfo = () => invoke<AppInfo>('app_info');
+let lastAppInfo: AppInfo | null = null;
+export const appInfo = () => invoke<AppInfo>('app_info').then((info) => (lastAppInfo = info));
+export const cachedAppInfo = () => lastAppInfo;
 
 export const onSnapshot = (handler: (snapshot: Snapshot | null) => void): Promise<UnlistenFn> =>
   listen<Snapshot | null>('beacon://snapshot', (event) => handler(event.payload));

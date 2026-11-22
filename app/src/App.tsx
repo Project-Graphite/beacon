@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { flushSync } from 'react-dom';
 import {
   acknowledge,
+  appInfo,
   closePanel,
   dismiss,
+  getDetail,
   getSnapshot,
   getUiSettings,
+  hooksStatus,
   jump,
   onClosing,
   onOpened,
@@ -25,6 +29,8 @@ import { SettingsView } from './components/SettingsView';
 import { ViewStack } from './components/ViewStack';
 import { useListMotion } from './hooks/useListMotion.ts';
 import { PanelFit, usePanelHeight } from './hooks/usePanelHeight.ts';
+import { toggleOpen } from './lib/disclosure.ts';
+import { errorText } from './lib/format.ts';
 import { jumpReport, type JumpReport } from './lib/jump.ts';
 import { entryOffset } from './lib/panel.ts';
 import { promptBoxId, promptPath } from './lib/prompts.ts';
@@ -52,9 +58,14 @@ import { flashRow } from './motion.ts';
 
 const NOTICE_MS = 4000;
 const SCROLL_IDLE_MS = 800;
+const SNAPSHOT_RETRY_MS = 1000;
+const PRELOAD_WAIT_MS = 150;
 const DETAIL_PREFIX = 'detail:';
 
-const isTextField = (target: EventTarget | null) =>
+const whenLoaded = (loading: Promise<unknown>) =>
+  Promise.race([loading.catch(() => null), new Promise((ready) => window.setTimeout(ready, PRELOAD_WAIT_MS))]);
+
+const isTextField = (target: EventTarget | null): target is HTMLElement =>
   target instanceof HTMLTextAreaElement ||
   target instanceof HTMLSelectElement ||
   (target instanceof HTMLInputElement && target.type !== 'radio' && target.type !== 'checkbox');
@@ -75,6 +86,7 @@ export function App() {
   const [ui, setUi] = useState<UiSettings | null>(null);
   const [closing, setClosing] = useState(false);
   const [entrance, setEntrance] = useState(0);
+  const [moreOpen, setMoreOpen] = useState<string[]>([]);
   const panel = useRef<HTMLElement>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -84,15 +96,18 @@ export function App() {
   const pendingIds = useRef<number[]>([]);
   const requestKeys = useRef(new Map<number, (key: string) => void>());
   const nextJumpNoticeId = useRef(-1);
+  const opening = useRef<string | null>(null);
 
-  const run = useCallback((action: Promise<unknown>) => {
-    action.then(
-      () => setFailure(null),
-      (error) => setFailure(String(error)),
-    );
-  }, []);
+  const fail = useCallback((error: unknown) => setFailure(errorText(error)), []);
 
-  const fit = usePanelHeight(panel, scroller, content, listening, run);
+  const run = useCallback(
+    (action: Promise<unknown>) => {
+      action.then(() => setFailure(null), fail);
+    },
+    [fail],
+  );
+
+  const fit = usePanelHeight(panel, scroller, content, listening, fail);
 
   const showNotices = useCallback((fresh: ResolutionNotice[]) => {
     setNotices((current) => [...current, ...fresh]);
@@ -119,16 +134,25 @@ export function App() {
       shown.current = false;
       setClosing(true);
     };
+    let live = true;
+    const load = (): Promise<void> =>
+      getSnapshot().then(receive, (error) => {
+        fail(error);
+        return new Promise((retry) => window.setTimeout(retry, SNAPSHOT_RETRY_MS)).then(() => (live ? load() : undefined));
+      });
     const subscriptions = Promise.all([onSnapshot(receive), onOpened(open), onClosing(close)]);
     run(
       subscriptions.then(() => {
         setListening(true);
-        return getSnapshot().then(receive);
+        return load();
       }),
     );
-    run(getUiSettings().then(setUi));
-    return () => void subscriptions.then((unlisteners) => unlisteners.forEach((unlisten) => unlisten()));
-  }, [run, showNotices]);
+    getUiSettings().then(setUi, fail);
+    return () => {
+      live = false;
+      void subscriptions.then((unlisteners) => unlisteners.forEach((unlisten) => unlisten()));
+    };
+  }, [run, fail, showNotices]);
 
   useEffect(() => {
     const [area, list, inner] = [scrollArea.current, scroller.current, content.current];
@@ -214,11 +238,31 @@ export function App() {
 
   const openDetail = (sessionId: string) => {
     setSelectedId(sessionId);
-    setOpenId(sessionId);
+    opening.current = sessionId;
+    return whenLoaded(getDetail(sessionId)).then(() => {
+      if (opening.current !== sessionId) return;
+      opening.current = null;
+      flushSync(() => setOpenId(sessionId));
+    });
+  };
+
+  const toggleSettings = () => {
+    if (settingsOpen) setSettingsOpen(false);
+    else void whenLoaded(Promise.all([hooksStatus(), appInfo()])).then(() => flushSync(() => setSettingsOpen(true)));
+  };
+
+  const closeDetail = () => {
+    opening.current = null;
+    setOpenId(null);
   };
 
   const crossOff = (sessionId: string) =>
-    run(dismiss(sessionId).then(() => setOpenId((open) => (open === sessionId ? null : open))));
+    run(
+      dismiss(sessionId).then(() => {
+        if (opening.current === sessionId) opening.current = null;
+        setOpenId((open) => (open === sessionId ? null : open));
+      }),
+    );
 
   const reportJump = (sessionId: string, { notice, succeeded }: JumpReport) => {
     if (notice) showNotices([{ id: nextJumpNoticeId.current--, sessionId, text: notice }]);
@@ -247,16 +291,17 @@ export function App() {
         if (event.key === 'Escape') setSettingsOpen(false);
         return;
       }
+      if (event.key === 'Escape' && isTextField(event.target)) {
+        event.target.blur();
+        return;
+      }
       if (event.ctrlKey || event.altKey || event.metaKey || isTextField(event.target)) return;
       const key = event.key.toLowerCase();
       if (current && (key === 'a' || key === 'd' || key === 'm')) {
         event.preventDefault();
         const act = requestKeys.current.get(current.id);
         if (act) act(key);
-        else {
-          openDetail(current.session_id);
-          window.setTimeout(() => requestKeys.current.get(current.id)?.(key));
-        }
+        else void openDetail(current.session_id).then(() => window.setTimeout(() => requestKeys.current.get(current.id)?.(key)));
         return;
       }
       switch (event.key) {
@@ -280,19 +325,19 @@ export function App() {
           break;
         }
         case 'Enter':
-          if (!openSession && selected && !(event.target instanceof HTMLButtonElement)) openDetail(selected.session_id);
+          if (!openSession && selected && !(event.target instanceof HTMLButtonElement)) void openDetail(selected.session_id);
           break;
         case 'ArrowLeft':
         case 'Backspace':
           if (openSession) {
             event.preventDefault();
-            setOpenId(null);
+            closeDetail();
           }
           break;
         case '[':
         case ']': {
           const next = openSession && stepTab(sessionTabs(listOrder, openSession.session_id), openSession.session_id, event.key === ']' ? 1 : -1);
-          if (next) openDetail(next);
+          if (next) void openDetail(next);
           break;
         }
         case 'a':
@@ -312,12 +357,11 @@ export function App() {
         case '/':
           if (selected && promptPath(selected)) {
             event.preventDefault();
-            openDetail(selected.session_id);
-            focusPrompt(selected.session_id);
+            void openDetail(selected.session_id).then(() => focusPrompt(selected.session_id));
           }
           break;
         case 'Escape':
-          if (openSession) setOpenId(null);
+          if (openSession || opening.current) closeDetail();
           else run(closePanel());
           break;
       }
@@ -343,7 +387,9 @@ export function App() {
             keys={keys}
             now={now}
             globalSnoozedUntil={snapshot?.snoozed_until_ms ?? null}
-            onBack={() => setOpenId(null)}
+            moreOpen={moreOpen.includes(session.session_id)}
+            onToggleMore={() => setMoreOpen((open) => toggleOpen(open, session.session_id))}
+            onBack={closeDetail}
             onSwitch={openDetail}
             onJump={() => jumpTo(session.session_id)}
             onCrossOff={() => crossOff(session.session_id)}
@@ -372,9 +418,9 @@ export function App() {
     );
     return (
       <>
-        {snapshot === null && <EmptyState title="Not connected to the Beacon core." detail="Sessions appear once it is running." />}
+        {snapshot === null && <EmptyState title="Not connected to the Beacon core" detail="Sessions appear once it is running" />}
         {snapshot?.sessions.length === 0 && (
-          <EmptyState title="No Claude sessions running." detail="Sessions appear here when Claude Code starts." />
+          <EmptyState title="No Claude sessions running" detail="Sessions appear here when Claude Code starts" />
         )}
         <SessionList
           groups={groups}
@@ -408,7 +454,7 @@ export function App() {
           soundsEnabled={ui?.sounds_enabled ?? null}
           settingsOpen={settingsOpen}
           onToggleSounds={() => ui && run(changeUi({ sounds_enabled: !ui.sounds_enabled }))}
-          onToggleSettings={() => setSettingsOpen(!settingsOpen)}
+          onToggleSettings={toggleSettings}
           run={run}
         />
         <div ref={scrollArea} className="scroll-area relative flex min-h-0 flex-1 flex-col">

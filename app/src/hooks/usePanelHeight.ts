@@ -16,9 +16,10 @@ export function usePanelHeight(
   scroller: RefObject<HTMLElement | null>,
   content: RefObject<HTMLElement | null>,
   listening: boolean,
-  run: (action: Promise<unknown>) => void,
+  fail: (error: unknown) => void,
 ) {
   const reported = useRef(0);
+  const holding = useRef(0);
 
   const needed = useCallback(() => {
     const [section, list, inner] = [panel.current, scroller.current, content.current];
@@ -29,9 +30,9 @@ export function usePanelHeight(
     (height: number) => {
       if (height === reported.current) return;
       reported.current = height;
-      run(setPanelHeight(height));
+      setPanelHeight(height).catch(fail);
     },
-    [run],
+    [fail],
   );
 
   useEffect(() => {
@@ -40,7 +41,7 @@ export function usePanelHeight(
     let frame = 0;
     const settle = () => {
       frame = 0;
-      const height = needed();
+      const height = Math.max(needed(), holding.current);
       const running = shrinking(inner);
       if (height < reported.current && running.length > 0) {
         void Promise.allSettled(running.map((animation) => animation.finished)).then(schedule);
@@ -64,6 +65,7 @@ export function usePanelHeight(
       const settle = (asked: number): Promise<void> => {
         const target = needed() + extra;
         if (target <= window.innerHeight || target === asked) return Promise.resolve();
+        holding.current = Math.max(holding.current, target);
         report(target);
         const reachable = Math.min(target, window.screen.availHeight - SCREEN_ALLOWANCE_PX) - 1;
         return new Promise<void>((resolve) => {
@@ -80,7 +82,9 @@ export function usePanelHeight(
           check();
         }).then(() => settle(target));
       };
-      return settle(0);
+      return settle(0).finally(() => {
+        holding.current = 0;
+      });
     },
     [needed, report],
   );

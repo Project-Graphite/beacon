@@ -1,6 +1,6 @@
 import { Fragment } from 'react';
 import type { AccountUsage, Session } from '../beacon';
-import { summary, summaryParts } from '../lib/sessions.ts';
+import { summary, summaryParts, type QueuePlace } from '../lib/sessions.ts';
 import { Icon } from './Icon';
 import { RollingNumber } from './RollingNumber';
 import { SnoozeMenu } from './SnoozeMenu';
@@ -10,7 +10,7 @@ interface HeaderProps {
   sessions: Session[];
   accountUsage: AccountUsage | null;
   snoozedUntil: number | null;
-  queue: { position: number; total: number } | null;
+  queue: QueuePlace | null;
   soundsEnabled: boolean | null;
   settingsOpen: boolean;
   onToggleSounds: () => void;
@@ -29,44 +29,28 @@ export function Header({
   onToggleSettings,
   run,
 }: HeaderProps) {
-  const parts = summaryParts(sessions);
+  const parts = summaryParts(sessions, queue);
   return (
     <header className="relative z-20 flex h-8 shrink-0 items-center gap-1.5 border-b border-line-soft px-2.5">
-      <p aria-label={summary(sessions)} className="min-w-0 truncate text-secondary text-muted">
+      <p
+        aria-label={summary(sessions, queue)}
+        title={queue && queue.total > 1 ? 'Tab and Shift+Tab move between requests' : undefined}
+        className="min-w-0 truncate text-secondary text-muted"
+      >
         {parts.length === 0
           ? 'All quiet'
           : parts.map((part, index) => (
               <Fragment key={part.kind}>
                 {index > 0 && <span className="text-faint"> · </span>}
-                <span className="text-ink">
+                <span className={part.kind === 'request' ? undefined : 'text-ink'}>
                   <RollingNumber value={part.count} /> {part.text}
                 </span>
               </Fragment>
             ))}
       </p>
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
-        {queue && (
-          <span
-            title="Tab and Shift+Tab move between requests"
-            className="mr-1 flex items-center gap-1.5 font-mono text-micro text-muted tabular-nums"
-          >
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-wip" />
-            <RollingNumber value={queue.position} /> of <RollingNumber value={queue.total} />
-          </span>
-        )}
         {accountUsage && <UsageButton usage={accountUsage} />}
-        <button
-          type="button"
-          aria-label="Sounds"
-          aria-pressed={soundsEnabled ?? false}
-          disabled={soundsEnabled === null}
-          title="Play a sound when a session needs you or finishes"
-          onClick={onToggleSounds}
-          className={`press grid size-6 place-items-center rounded-field hover:bg-surface hover:text-ink ${soundsEnabled ? 'text-ink' : 'text-muted'}`}
-        >
-          <Icon name={soundsEnabled ? 'sound-on' : 'sound-off'} />
-        </button>
-        <SnoozeMenu snoozedUntil={snoozedUntil} run={run} />
+        <SnoozeMenu snoozedUntil={snoozedUntil} soundsEnabled={soundsEnabled} onToggleSounds={onToggleSounds} run={run} />
         <button
           type="button"
           aria-label="Settings"

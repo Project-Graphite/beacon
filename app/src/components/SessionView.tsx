@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { getDetail, type PendingDecision, type Session, type SessionDetail } from '../beacon';
+import { cachedDetail, getDetail, type PendingDecision, type Session, type SessionDetail } from '../beacon';
+import { errorText } from '../lib/format.ts';
 import type { JumpReport } from '../lib/jump.ts';
 import type { ResolutionNotice } from '../lib/queue.ts';
 import {
@@ -18,6 +19,7 @@ import { CommandBlock } from './CommandBlock';
 import { IconButton } from './IconButton';
 import { PlanList } from './PlanList';
 import { ProgressBar } from './ProgressBar';
+import { PromptBox } from './PromptBox';
 import { RequestCard } from './RequestCard';
 import { SessionActions } from './SessionActions';
 import { SessionDetails } from './SessionDetails';
@@ -33,6 +35,8 @@ interface SessionViewProps {
   keys: Map<number, (key: string) => void> | null;
   now: number;
   globalSnoozedUntil: number | null;
+  moreOpen: boolean;
+  onToggleMore: () => void;
   onBack: () => void;
   onSwitch: (sessionId: string) => void;
   onJump: () => void;
@@ -51,6 +55,8 @@ export function SessionView({
   keys,
   now,
   globalSnoozedUntil,
+  moreOpen,
+  onToggleMore,
   onBack,
   onSwitch,
   onJump,
@@ -58,7 +64,7 @@ export function SessionView({
   onJumpReport,
   run,
 }: SessionViewProps) {
-  const [detail, setDetail] = useState<SessionDetail | null>(null);
+  const [detail, setDetail] = useState<SessionDetail | null>(() => cachedDetail(session.session_id));
   const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
@@ -69,7 +75,7 @@ export function SessionView({
         setDetail(loaded);
         setFailure(null);
       },
-      (error) => current && setFailure(String(error)),
+      (error) => current && setFailure(errorText(error)),
     );
     return () => {
       current = false;
@@ -175,7 +181,8 @@ export function SessionView({
         {session.tasks.length > 0 && <PlanList tasks={session.tasks} />}
         {failure && <p className="text-micro text-danger">Cannot load details: {failure}</p>}
         {detail && detail.steps.length > 0 && <ActivityList steps={detail.steps} />}
-        <SessionDetails session={session} detail={detail} onJumpReport={onJumpReport} />
+        <PromptBox session={session} onJumpReport={onJumpReport} />
+        <SessionDetails session={session} detail={detail} open={moreOpen} onToggle={onToggleMore} />
       </div>
     </div>
   );
