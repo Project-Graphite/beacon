@@ -1410,7 +1410,6 @@ fn shown(session: &Session) -> Session {
 fn in_snapshot(session: &Session) -> Session {
     match session.state {
         SessionState::Ended => Session {
-            usage: None,
             last_message_preview: None,
             ai_title: None,
             last_prompt: None,

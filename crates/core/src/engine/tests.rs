@@ -1108,10 +1108,26 @@ fn an_ended_session_is_slim_in_the_snapshot_and_whole_in_the_ended_list() {
         "Stop",
         json!({"last_assistant_message": "All done"}),
     ));
+    fixture.send(&task_event("TaskCreated", "1", "Write the parser"));
+    let usage = SessionUsage {
+        input_tokens: 1,
+        output_tokens: 2,
+        cache_creation_tokens: 3,
+        cache_read_tokens: 4,
+        context_tokens: 8,
+        subagent_tokens: 0,
+        reported_cost_usd: None,
+        model: Some("m".to_string()),
+        updated_ms: 5,
+        status: UsageStatus::Ok,
+    };
+    fixture.engine.set_usage(SESSION, usage.clone());
     fixture.send(SESSION_END);
     let slim = &fixture.engine.snapshot().sessions[0];
     assert_eq!(slim.state, SessionState::Ended);
     assert_eq!(slim.last_message_preview, None);
+    assert_eq!(slim.usage, Some(usage));
+    assert!(slim.tasks.is_empty());
     let whole = &fixture.engine.ended()[0];
     assert_eq!(whole.last_message_preview.as_deref(), Some("All done"));
 }
