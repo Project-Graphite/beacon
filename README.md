@@ -275,12 +275,12 @@ style) and `Quit`.
 
 | | Terminal | VS Code extension | Desktop app Code tab | Headless (`claude -p`) |
 |---|---|---|---|---|
-| Session state | Built, not verified on this surface | Built, not verified on this surface | Built, not verified on this surface | Verified |
+| Session state | Built, not verified on this surface | Built, not verified on this surface | Verified | Verified |
 | Answer permission requests | Built, not verified on this surface | Built, not verified on this surface | Built, not verified on this surface | Verified [1] |
 | Answer questions and plans | Built, not verified on this surface | Built, not verified on this surface | Built, not verified on this surface | Verified [1] |
 | Jump to window | Built, not verified on this surface | Built, not verified on this surface [2] | Built, not verified on this surface [2] | Not supported [3] |
-| Send a prompt | Built, not verified on this surface | Built, not verified on this surface | Built, not verified on this surface | Verified [4] |
-| Usage | Built, not verified on this surface | Built, not verified on this surface | Built, not verified on this surface | Verified |
+| Send a prompt | Built, not verified on this surface | Built, not verified on this surface | Verified [5] | Verified [4] |
+| Usage | Built, not verified on this surface | Built, not verified on this surface | Verified | Verified |
 
 1. Only with `Answer headless runs` on. Off (the default), a run with nobody attached is passed
    straight through so it never waits.
@@ -288,11 +288,13 @@ style) and `Quit`.
    change and the VS Code link are not verified on any surface.
 3. A headless run has no window.
 4. The prompt at turn end. A headless run is never woken and has no window for the other paths.
+5. Waking an idle session. The prompt at turn end is not verified on this surface.
 
-Every end-to-end check so far ran against headless `claude -p` sessions: state, allow, deny,
-always allow, a question, a plan, a prompt at turn end and usage. The hooks have not been installed
-for the interactive terminal, the VS Code extension or the desktop Code tab, so those surfaces are
-built but unverified. Waking an idle session from Beacon is verified on the desktop Code tab only.
+Headless `claude -p` sessions were checked end to end: state, allow, deny, always allow, a
+question, a plan, a prompt at turn end and usage. On the desktop Code tab, live state, usage and
+waking an idle session with a prompt were checked against a real session; answering requests,
+questions and plans there was not. Nothing has been checked in the interactive terminal or the VS
+Code extension, so those surfaces are built but unverified.
 
 ## Limits and known gaps
 
