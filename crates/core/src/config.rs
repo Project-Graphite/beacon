@@ -39,7 +39,7 @@ impl Default for Config {
     fn default() -> Config {
         Config {
             stall_minutes: 10,
-            reconcile_seconds: 60,
+            reconcile_seconds: 300,
             answer_unattended: false,
             log_level: LogLevel::Info,
             clear_finished_minutes: 10,

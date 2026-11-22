@@ -31,6 +31,8 @@ const PERSIST_DEBOUNCE: Duration = Duration::from_millis(500);
 const SUBSCRIBE_INTERVAL: Duration = Duration::from_millis(100);
 const STALL_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 const USAGE_READ_INTERVAL: Duration = Duration::from_secs(2);
+const CACHE_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+const RECONCILE_SPACING: Duration = Duration::from_secs(15);
 const PLAN_RETRY_DELAYS: [Duration; 5] = [
     Duration::ZERO,
     Duration::from_millis(250),
@@ -500,6 +502,8 @@ async fn reconcile(
     claude_json: Option<PathBuf>,
 ) -> io::Result<()> {
     let interval = Duration::from_secs(reconcile_seconds.max(1));
+    let cache_interval = interval.min(CACHE_CHECK_INTERVAL);
+    let mut changes = shared.engine.borrow().watch_changes();
     let mut cache = CacheWatch {
         path: claude_json,
         modified: None,
@@ -507,6 +511,7 @@ async fn reconcile(
     };
     cache.refresh(&shared).await?;
     loop {
+        shared.engine.borrow_mut().take_reconcile_wanted();
         match lister.list().await {
             Ok(listed) => shared.engine.borrow_mut().reconcile(listed),
             Err(error) => shared
@@ -515,11 +520,25 @@ async fn reconcile(
                 .log
                 .warn(format_args!("session listing gave no information: {error}")),
         }
+        let listed_at = Instant::now();
+        let mut cache_due = listed_at + cache_interval;
         loop {
-            sleep(interval).await;
-            cache.refresh(&shared).await?;
-            if shared.engine.borrow().has_live_sessions() {
-                break;
+            let periodic = shared.engine.borrow().has_live_sessions();
+            tokio::select! {
+                () = sleep_until(cache_due) => {
+                    cache.refresh(&shared).await?;
+                    cache_due += cache_interval;
+                }
+                () = sleep_until(listed_at + interval), if periodic => break,
+                changed = changes.changed() => {
+                    if changed.is_err() {
+                        return Ok(());
+                    }
+                    if shared.engine.borrow_mut().take_reconcile_wanted() {
+                        sleep_until(listed_at + RECONCILE_SPACING).await;
+                        break;
+                    }
+                }
             }
         }
     }

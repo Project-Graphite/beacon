@@ -1055,6 +1055,23 @@ fn what_needs_the_user_names_pending_decisions_and_alerting_sessions() {
 }
 
 #[test]
+fn a_reconcile_pass_is_wanted_for_an_unknown_session_a_gone_process_or_on_request() {
+    let mut fixture = fixture();
+    assert!(!fixture.engine.take_reconcile_wanted());
+    fixture.send_with_env(USER_PROMPT_SUBMIT, &[("CLAUDE_PID", "4242")]);
+    assert!(fixture.engine.take_reconcile_wanted());
+    fixture.send(PRE_TOOL_USE);
+    assert!(!fixture.engine.take_reconcile_wanted());
+    fixture.engine.process_exited(SESSION, 4243);
+    assert!(!fixture.engine.take_reconcile_wanted());
+    fixture.engine.process_exited(SESSION, 4242);
+    assert!(fixture.engine.take_reconcile_wanted());
+    assert!(fixture.engine.control(Request::Reconcile).ok);
+    assert!(fixture.engine.take_reconcile_wanted());
+    assert!(!fixture.engine.take_reconcile_wanted());
+}
+
+#[test]
 fn snapshots_leave_task_lists_to_the_detail() {
     let mut fixture = fixture();
     fixture.send(&task_event("TaskCreated", "1", "Write the parser"));

@@ -19,6 +19,7 @@ pub enum Request {
     Snapshot,
     Subscribe,
     Ended,
+    Reconcile,
     Decide {
         id: u64,
         decision: Decision,

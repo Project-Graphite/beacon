@@ -123,6 +123,7 @@ pub struct Engine {
     transcripts_wanted: Vec<String>,
     waiters: HashMap<String, StopWaiter>,
     next_waiter_id: u64,
+    reconcile_wanted: bool,
 }
 
 impl Engine {
@@ -159,6 +160,7 @@ impl Engine {
             transcripts_wanted: Vec::new(),
             waiters: HashMap::new(),
             next_waiter_id: 1,
+            reconcile_wanted: false,
         };
         engine.prune_ended(now_ms());
         engine.settle_snoozes(now_ms());
@@ -288,6 +290,11 @@ impl Engine {
     pub fn control(&mut self, request: Request) -> Reply {
         let result = match request {
             Request::Snapshot | Request::Subscribe => return Reply::with_snapshot(self.snapshot()),
+            Request::Reconcile => {
+                self.reconcile_wanted = true;
+                self.changed();
+                return Reply::ok();
+            }
             Request::Ended => {
                 return Reply {
                     ended: Some(self.ended()),
@@ -442,6 +449,10 @@ impl Engine {
 
     pub fn take_plans_wanted(&mut self) -> Vec<u64> {
         std::mem::take(&mut self.plans_wanted)
+    }
+
+    pub fn take_reconcile_wanted(&mut self) -> bool {
+        std::mem::take(&mut self.reconcile_wanted)
     }
 
     pub fn take_transcripts_wanted(&mut self) -> Vec<String> {
@@ -629,6 +640,7 @@ impl Engine {
     fn apply_event(&mut self, meta: &Meta, common: Common, event: Event) -> Option<HookOutcome> {
         let now = now_ms();
         let session_id = common.session_id;
+        self.reconcile_wanted |= !self.sessions.contains_key(&session_id);
         let session = self
             .sessions
             .entry(session_id.clone())
@@ -1166,6 +1178,7 @@ impl Engine {
                 "process {pid} of session {session_id} is gone"
             ));
             session.apply(Input::ProcessGone, now_ms());
+            self.reconcile_wanted = true;
             self.changed();
         }
     }

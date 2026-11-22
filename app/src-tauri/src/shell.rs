@@ -1,5 +1,5 @@
 use crate::displays::target;
-use crate::feed::Feed;
+use crate::feed::{self, Feed};
 use crate::geometry::{
     Corner, Edge, PressTarget, Rect, place_panel, place_panel_on_edge, press_target, primary,
 };
@@ -17,7 +17,7 @@ use crate::positions::{self, AttentionStyle, StartMode, Style, UiSettings, Visib
 use crate::sounds::sound_for;
 use crate::toasts::Toaster;
 use crate::tray::Tray;
-use beacon_core::Snapshot;
+use beacon_core::{Request, Snapshot};
 use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -499,6 +499,7 @@ impl Shell {
         if panel.hidden_since.take().is_some() {
             self.place();
             self.show();
+            feed::send(self.feed.home.clone(), Request::Reconcile);
         }
         self.unseen.clear();
         self.show_tab();
