@@ -701,6 +701,9 @@ impl Shell {
         }
         self.snapshot = snapshot;
         let gained = self.unseen.observe(self.snapshot.as_ref(), Instant::now());
+        if self.mode().is_some() {
+            self.unseen.clear();
+        }
         self.peek_gains(&gained);
         self.show_tab();
         if self.mode().is_some()
