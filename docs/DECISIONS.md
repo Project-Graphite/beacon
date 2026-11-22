@@ -82,8 +82,9 @@ its task list, on every change, and the panel's WebView was built from scratch o
   newer waiter or the session ending releases it; headless runs never get one. This brings back the
   idle wake the v1 scope cut dropped and replaces the VS Code prefill and copy-and-jump paths
   wherever the session can be woken. Spike S6b showed Claude treats the text as an automated
-  notification, not user input, so the prompt box says so. **Not yet confirmed on a real
-  interactive session.**
+  notification, not user input, so the prompt box says so. Confirmed on a desktop Code tab
+  session on 2026-11-22: a prompt sent to the idle session arrived as Stop hook feedback and
+  started a turn. **Not yet confirmed in the terminal or VS Code.**
 - **Finished sessions clear themselves.** `clear_finished_minutes` in `config.json` (10 by default;
   "Clear finished after" offers Never, 5, 10, 30 minutes and 1 hour) acknowledges a `done` session
   that long after its turn ended, checked with the stall check every 30 s. `error` and `stalled`

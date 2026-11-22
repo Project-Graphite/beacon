@@ -190,8 +190,8 @@ The prompt box in a session's detail view sends text by one of four paths, tried
 A session can be woken while it is idle, done or in error, attended (not `claude -p`), and Claude
 Code is holding its `StopWaiter` hook, which it starts at each turn end and keeps for up to 24
 hours or until a prompt is typed in the session. Claude sees a woken prompt as a follow-up from
-Beacon, not as a message you typed. This path has not been confirmed on a real interactive session
-yet.
+Beacon, not as a message you typed. This path is confirmed on a desktop Code tab session; the
+terminal and VS Code are not confirmed yet.
 
 A queued prompt shows `queued`, `delivered`, `acknowledged` or `failed`, and survives a restart; a
 woken prompt shows `delivered` at once. A prompt delivered at turn end also appears in the session
@@ -292,7 +292,7 @@ style) and `Quit`.
 Every end-to-end check so far ran against headless `claude -p` sessions: state, allow, deny,
 always allow, a question, a plan, a prompt at turn end and usage. The hooks have not been installed
 for the interactive terminal, the VS Code extension or the desktop Code tab, so those surfaces are
-built but unverified. Waking an idle session from Beacon is unverified on every surface.
+built but unverified. Waking an idle session from Beacon is verified on the desktop Code tab only.
 
 ## Limits and known gaps
 
