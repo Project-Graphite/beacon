@@ -1,12 +1,19 @@
 use crate::displays::DisplayChoice;
 use crate::geometry::{Rect, TabPlacement};
-use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 
 const UI_FILE: &str = "ui.json";
 const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Space";
+const IDLE_OPACITY: (f64, f64, f64) = (0.2, 0.6, 1.0);
+const PEEK_SECONDS: (f64, f64, f64) = (2.0, 4.0, 10.0);
+const REPEAT_SECONDS: [u64; 5] = [0, 30, 60, 120, 300];
+const DEFAULT_REPEAT_SECONDS: u64 = 60;
+const QUIT_MINUTES: [u64; 4] = [0, 5, 15, 60];
+const DEFAULT_QUIT_MINUTES: u64 = 15;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -14,6 +21,87 @@ pub enum Style {
     #[default]
     Tab,
     Pill,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Visibility {
+    Always,
+    #[default]
+    Active,
+    Attention,
+    Never,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OverlaySize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttentionStyle {
+    Colour,
+    Pulse,
+    #[default]
+    PulsePeek,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StartMode {
+    Login,
+    #[default]
+    Claude,
+    Manual,
+}
+
+impl OverlaySize {
+    pub fn tab_length(self) -> f64 {
+        match self {
+            OverlaySize::Small => 56.0,
+            OverlaySize::Medium => 72.0,
+            OverlaySize::Large => 96.0,
+        }
+    }
+
+    pub fn tab_factor(self) -> f64 {
+        match self {
+            OverlaySize::Small => 0.75,
+            OverlaySize::Medium => 1.0,
+            OverlaySize::Large => 1.5,
+        }
+    }
+
+    pub fn pill_factor(self) -> f64 {
+        match self {
+            OverlaySize::Small => 0.85,
+            OverlaySize::Medium => 1.0,
+            OverlaySize::Large => 1.2,
+        }
+    }
+}
+
+fn lenient<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Ok(serde_json::from_value(serde_json::Value::deserialize(deserializer)?).ok())
+}
+
+fn clamped(value: Option<f64>, (low, default, high): (f64, f64, f64)) -> f64 {
+    value
+        .filter(|value| value.is_finite())
+        .map_or(default, |value| value.clamp(low, high))
+}
+
+fn one_of(value: Option<u64>, allowed: &[u64], default: u64) -> u64 {
+    value
+        .filter(|value| allowed.contains(value))
+        .unwrap_or(default)
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -34,6 +122,60 @@ struct UiFile {
     toast_on_finished: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sounds_enabled: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    visibility: Option<Visibility>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    reveal_on_hover: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    size: Option<OverlaySize>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    idle_opacity: Option<f64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    attention_style: Option<AttentionStyle>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    attention_repeat_seconds: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    peek_seconds: Option<f64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    start_mode: Option<StartMode>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    quit_when_idle_minutes: Option<u64>,
     #[serde(flatten)]
     choice: DisplayChoice,
 }
@@ -44,6 +186,15 @@ pub struct UiSettings {
     pub toasts_enabled: bool,
     pub toast_on_finished: bool,
     pub sounds_enabled: bool,
+    pub visibility: Visibility,
+    pub reveal_on_hover: bool,
+    pub size: OverlaySize,
+    pub idle_opacity: f64,
+    pub attention_style: AttentionStyle,
+    pub attention_repeat_seconds: u64,
+    pub peek_seconds: f64,
+    pub start_mode: StartMode,
+    pub quit_when_idle_minutes: u64,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -52,6 +203,15 @@ pub struct UiSettingsChange {
     pub toasts_enabled: Option<bool>,
     pub toast_on_finished: Option<bool>,
     pub sounds_enabled: Option<bool>,
+    pub visibility: Option<Visibility>,
+    pub reveal_on_hover: Option<bool>,
+    pub size: Option<OverlaySize>,
+    pub idle_opacity: Option<f64>,
+    pub attention_style: Option<AttentionStyle>,
+    pub attention_repeat_seconds: Option<u64>,
+    pub peek_seconds: Option<f64>,
+    pub start_mode: Option<StartMode>,
+    pub quit_when_idle_minutes: Option<u64>,
 }
 
 fn read(home: &Path) -> UiFile {
@@ -73,12 +233,38 @@ pub fn hotkey(home: &Path) -> String {
 }
 
 pub fn ui_settings(home: &Path) -> UiSettings {
-    let file = read(home);
+    settings_of(read(home))
+}
+
+impl Default for UiSettings {
+    fn default() -> UiSettings {
+        settings_of(UiFile::default())
+    }
+}
+
+fn settings_of(file: UiFile) -> UiSettings {
     UiSettings {
         hotkey: file.hotkey.unwrap_or_else(|| DEFAULT_HOTKEY.to_string()),
         toasts_enabled: file.toasts_enabled.unwrap_or(true),
         toast_on_finished: file.toast_on_finished.unwrap_or(true),
         sounds_enabled: file.sounds_enabled.unwrap_or(false),
+        visibility: file.visibility.unwrap_or_default(),
+        reveal_on_hover: file.reveal_on_hover.unwrap_or(true),
+        size: file.size.unwrap_or_default(),
+        idle_opacity: clamped(file.idle_opacity, IDLE_OPACITY),
+        attention_style: file.attention_style.unwrap_or_default(),
+        attention_repeat_seconds: one_of(
+            file.attention_repeat_seconds,
+            &REPEAT_SECONDS,
+            DEFAULT_REPEAT_SECONDS,
+        ),
+        peek_seconds: clamped(file.peek_seconds, PEEK_SECONDS),
+        start_mode: file.start_mode.unwrap_or_default(),
+        quit_when_idle_minutes: one_of(
+            file.quit_when_idle_minutes,
+            &QUIT_MINUTES,
+            DEFAULT_QUIT_MINUTES,
+        ),
     }
 }
 
@@ -88,6 +274,19 @@ pub fn save_ui_settings(home: &Path, change: UiSettingsChange) -> io::Result<()>
         file.toasts_enabled = change.toasts_enabled.or(file.toasts_enabled);
         file.toast_on_finished = change.toast_on_finished.or(file.toast_on_finished);
         file.sounds_enabled = change.sounds_enabled.or(file.sounds_enabled);
+        file.visibility = change.visibility.or(file.visibility);
+        file.reveal_on_hover = change.reveal_on_hover.or(file.reveal_on_hover);
+        file.size = change.size.or(file.size);
+        file.idle_opacity = change.idle_opacity.or(file.idle_opacity);
+        file.attention_style = change.attention_style.or(file.attention_style);
+        file.attention_repeat_seconds = change
+            .attention_repeat_seconds
+            .or(file.attention_repeat_seconds);
+        file.peek_seconds = change.peek_seconds.or(file.peek_seconds);
+        file.start_mode = change.start_mode.or(file.start_mode);
+        file.quit_when_idle_minutes = change
+            .quit_when_idle_minutes
+            .or(file.quit_when_idle_minutes);
     })
 }
 
@@ -237,6 +436,7 @@ mod tests {
                 toasts_enabled: true,
                 toast_on_finished: true,
                 sounds_enabled: false,
+                ..UiSettings::default()
             }
         );
         save_ui_settings(
@@ -263,6 +463,7 @@ mod tests {
                 toasts_enabled: false,
                 toast_on_finished: false,
                 sounds_enabled: false,
+                ..UiSettings::default()
             }
         );
         let mut expected: serde_json::Value = serde_json::from_str(existing).unwrap();
@@ -303,6 +504,7 @@ mod tests {
                 toasts_enabled: false,
                 toast_on_finished: true,
                 sounds_enabled: true,
+                ..UiSettings::default()
             }
         );
         let mut expected: serde_json::Value = serde_json::from_str(existing).unwrap();
@@ -314,6 +516,98 @@ mod tests {
             .unwrap(),
             expected
         );
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn overlay_settings_round_trip_beside_every_existing_key_and_bad_values_fall_back() {
+        let home = std::env::temp_dir().join(format!("beacon-overlay-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let existing = r#"{"pill_positions":{"a":{"left":1,"top":2,"right":4,"bottom":6}},"display_positions":{"philips":{"left":5,"top":6,"right":12,"bottom":14}},"style":"pill","tab_positions":{"philips":{"edge":"top","offset":0.25}},"hotkey":"Ctrl+Shift+B","toasts_enabled":false,"toast_on_finished":true,"sounds_enabled":true,"display":"philips","avoid_displays":["oled"]}"#;
+        std::fs::write(home.join(UI_FILE), existing).unwrap();
+        let defaults = ui_settings(&home);
+        assert_eq!(
+            (
+                defaults.visibility,
+                defaults.reveal_on_hover,
+                defaults.size,
+                defaults.idle_opacity,
+                defaults.attention_style,
+                defaults.attention_repeat_seconds,
+                defaults.peek_seconds,
+                defaults.start_mode,
+                defaults.quit_when_idle_minutes,
+            ),
+            (
+                Visibility::Active,
+                true,
+                OverlaySize::Medium,
+                0.6,
+                AttentionStyle::PulsePeek,
+                60,
+                4.0,
+                StartMode::Claude,
+                15,
+            )
+        );
+        let change: UiSettingsChange = serde_json::from_str(
+            r#"{"visibility":"attention","reveal_on_hover":false,"size":"large","idle_opacity":0.35,"attention_style":"pulse","attention_repeat_seconds":120,"peek_seconds":7.5,"start_mode":"manual","quit_when_idle_minutes":60}"#,
+        )
+        .unwrap();
+        save_ui_settings(&home, change).unwrap();
+        save_style(&home, Style::Pill).unwrap();
+        assert_eq!(
+            ui_settings(&home),
+            UiSettings {
+                hotkey: "Ctrl+Shift+B".to_string(),
+                toasts_enabled: false,
+                toast_on_finished: true,
+                sounds_enabled: true,
+                visibility: Visibility::Attention,
+                reveal_on_hover: false,
+                size: OverlaySize::Large,
+                idle_opacity: 0.35,
+                attention_style: AttentionStyle::Pulse,
+                attention_repeat_seconds: 120,
+                peek_seconds: 7.5,
+                start_mode: StartMode::Manual,
+                quit_when_idle_minutes: 60,
+            }
+        );
+        let mut expected: serde_json::Value = serde_json::from_str(existing).unwrap();
+        for (key, value) in serde_json::json!({"visibility":"attention","reveal_on_hover":false,"size":"large","idle_opacity":0.35,"attention_style":"pulse","attention_repeat_seconds":120,"peek_seconds":7.5,"start_mode":"manual","quit_when_idle_minutes":60}).as_object().unwrap() {
+            expected[key] = value.clone();
+        }
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(home.join(UI_FILE)).unwrap()).unwrap();
+        assert_eq!(written, expected);
+        assert_eq!(
+            serde_json::to_value(ui_settings(&home)).unwrap()["attention_style"],
+            "pulse"
+        );
+        expected["visibility"] = "sometimes".into();
+        expected["size"] = 3.into();
+        expected["idle_opacity"] = 5.0.into();
+        expected["attention_style"] = "pulse_peek".into();
+        expected["attention_repeat_seconds"] = 45.into();
+        expected["peek_seconds"] = 0.5.into();
+        expected["start_mode"] = serde_json::Value::Null;
+        expected["quit_when_idle_minutes"] = (-5).into();
+        std::fs::write(home.join(UI_FILE), expected.to_string()).unwrap();
+        let fallen_back = ui_settings(&home);
+        assert_eq!(fallen_back.visibility, Visibility::Active);
+        assert_eq!(fallen_back.size, OverlaySize::Medium);
+        assert_eq!(fallen_back.idle_opacity, 1.0);
+        assert_eq!(fallen_back.attention_style, AttentionStyle::PulsePeek);
+        assert_eq!(fallen_back.attention_repeat_seconds, 60);
+        assert_eq!(fallen_back.peek_seconds, 2.0);
+        assert_eq!(fallen_back.start_mode, StartMode::Claude);
+        assert_eq!(fallen_back.quit_when_idle_minutes, 15);
+        assert_eq!(fallen_back.hotkey, "Ctrl+Shift+B");
+        assert!(fallen_back.sounds_enabled);
+        assert_eq!(load(&home, "a"), Some(Rect::sized(1, 2, 3, 4)));
+        assert_eq!(style(&home), Style::Pill);
         std::fs::remove_dir_all(&home).unwrap();
     }
 

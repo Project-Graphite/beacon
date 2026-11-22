@@ -1,10 +1,12 @@
 use crate::feed::Feed;
 use crate::platform::registry;
-use crate::positions::{self, UiSettings, UiSettingsChange};
+use crate::positions::{self, StartMode, UiSettings, UiSettingsChange};
 use crate::shell::{self, Action};
 use beacon_cli::doctor::{self, HooksStatus};
 use beacon_cli::installer::{self, Paths};
+use beacon_core::AUTOSTART_FILE;
 use serde::{Deserialize, Serialize};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, State};
@@ -89,6 +91,43 @@ pub async fn hooks_apply(action: HooksAction) -> Result<HooksStatus, String> {
     .await
 }
 
+pub fn apply_start_mode(home: &Path, mode: StartMode, sync_registry: bool) -> io::Result<()> {
+    let executable = std::env::current_exe()?;
+    let marker = home.join(AUTOSTART_FILE);
+    if mode == StartMode::Claude {
+        std::fs::create_dir_all(home)?;
+        std::fs::write(&marker, executable.to_string_lossy().as_bytes())?;
+    } else if let Err(error) = std::fs::remove_file(&marker)
+        && error.kind() != io::ErrorKind::NotFound
+    {
+        return Err(error);
+    }
+    match (sync_registry, mode) {
+        (false, _) => Ok(()),
+        (true, StartMode::Login) => {
+            registry::write_string(RUN_KEY, RUN_VALUE, &login_command(&executable))
+        }
+        (true, _) => registry::delete_value(RUN_KEY, RUN_VALUE),
+    }
+}
+
+fn change_settings(
+    app: &AppHandle,
+    home: &Path,
+    change: UiSettingsChange,
+) -> Result<UiSettings, String> {
+    let start_mode_changed = change.start_mode.is_some();
+    positions::save_ui_settings(home, change)
+        .map_err(|error| format!("cannot save the settings: {error}"))?;
+    let settings = positions::ui_settings(home);
+    if start_mode_changed {
+        apply_start_mode(home, settings.start_mode, true)
+            .map_err(|error| format!("cannot apply the start mode: {error}"))?;
+    }
+    shell::post(app, Action::SettingsChanged);
+    Ok(settings)
+}
+
 #[tauri::command]
 pub async fn get_ui_settings(feed: State<'_, Arc<Feed>>) -> Result<UiSettings, String> {
     Ok(positions::ui_settings(&feed.home))
@@ -103,25 +142,38 @@ pub async fn set_ui_settings(
     if let Some(hotkey) = &change.hotkey {
         change_hotkey(&app, &positions::hotkey(&feed.home), hotkey)?;
     }
-    positions::save_ui_settings(&feed.home, change)
-        .map_err(|error| format!("cannot save the settings: {error}"))?;
-    Ok(positions::ui_settings(&feed.home))
+    change_settings(&app, &feed.home, change)
 }
 
 #[tauri::command]
-pub async fn get_login_start() -> Result<bool, String> {
-    registry::has_value(RUN_KEY, RUN_VALUE).map_err(|error| error.to_string())
+pub async fn get_login_start(feed: State<'_, Arc<Feed>>) -> Result<bool, String> {
+    Ok(positions::ui_settings(&feed.home).start_mode == StartMode::Login)
 }
 
 #[tauri::command]
-pub async fn set_login_start(enabled: bool) -> Result<(), String> {
-    if enabled {
-        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-        registry::write_string(RUN_KEY, RUN_VALUE, &login_command(&executable))
-    } else {
-        registry::delete_value(RUN_KEY, RUN_VALUE)
-    }
-    .map_err(|error| error.to_string())
+pub async fn set_login_start(
+    app: AppHandle,
+    feed: State<'_, Arc<Feed>>,
+    enabled: bool,
+) -> Result<(), String> {
+    change_settings(
+        &app,
+        &feed.home,
+        UiSettingsChange {
+            start_mode: Some(if enabled {
+                StartMode::Login
+            } else {
+                StartMode::Claude
+            }),
+            ..UiSettingsChange::default()
+        },
+    )
+    .map(drop)
+}
+
+#[tauri::command]
+pub async fn preview_attention(app: AppHandle) {
+    shell::post(&app, Action::PreviewAttention);
 }
 
 #[tauri::command]
@@ -152,6 +204,35 @@ mod tests {
             login_command(Path::new(r"C:\Program Files\Beacon\beacon-app.exe")),
             r#""C:\Program Files\Beacon\beacon-app.exe""#
         );
+    }
+
+    #[test]
+    fn the_start_mode_keeps_exactly_one_of_the_marker_and_the_run_value() {
+        assert!(
+            !registry::tests::has_value(RUN_KEY, RUN_VALUE).unwrap(),
+            "a Beacon Run value already exists; this test would replace it"
+        );
+        let home = std::env::temp_dir().join(format!("beacon-start-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let marker = home.join(AUTOSTART_FILE);
+        apply_start_mode(&home, StartMode::Claude, false).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            std::env::current_exe().unwrap().to_string_lossy()
+        );
+        apply_start_mode(&home, StartMode::Login, true).unwrap();
+        let registered = registry::tests::has_value(RUN_KEY, RUN_VALUE);
+        let marker_after_login = marker.exists();
+        apply_start_mode(&home, StartMode::Claude, true).unwrap();
+        assert!(registered.unwrap());
+        assert!(!marker_after_login);
+        assert!(!registry::tests::has_value(RUN_KEY, RUN_VALUE).unwrap());
+        assert!(marker.exists());
+        apply_start_mode(&home, StartMode::Manual, true).unwrap();
+        assert!(!marker.exists());
+        assert!(!registry::tests::has_value(RUN_KEY, RUN_VALUE).unwrap());
+        apply_start_mode(&home, StartMode::Manual, false).unwrap();
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]

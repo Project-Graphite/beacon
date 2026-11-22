@@ -37,7 +37,7 @@ pub struct Toaster {
     batch: Vec<Candidate>,
 }
 
-fn verb(state: SessionState) -> Option<&'static str> {
+pub fn verb(state: SessionState) -> Option<&'static str> {
     match state {
         SessionState::NeedsPermission => Some("needs permission"),
         SessionState::NeedsAnswer => Some("has a question"),

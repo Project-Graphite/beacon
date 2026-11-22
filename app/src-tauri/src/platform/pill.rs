@@ -1,16 +1,22 @@
 use super::frames::{self, WM_FRAME};
-use super::{
-    GdiText, bitmap, cursor_position, monitor_info, monitors, reduced_motion, refresh_rate,
-};
+use super::layer::Layer;
+use super::{GdiText, cursor_position, monitor_info, monitors, reduced_motion, refresh_rate};
 use crate::displays::{dock, landing, target};
 use crate::geometry::{
     Corner, Edge, Monitor, Rect, TabPlacement, corner_rect, default_placement, layout_signature,
-    monitor_for, pill_edge, resize_anchored, restored_pill_rect, slide, snap, tab_rect,
+    monitor_for, peek_rect, pill_edge, pill_reveal_strip, resize_anchored, restored_pill_rect,
+    slide, snap, tab_rect,
 };
-use crate::model::{PillModel, TabTone};
-use crate::motion::{Attention, Curve, Strip, Tween, next_burst, unseen_moving, unseen_strip};
-use crate::positions::{self, Style};
-use crate::raster::{Canvas, PillMotion, Rgb, mix, paint_pill, paint_tab, render_pill, tone_paint};
+use crate::model::{Peek, PillModel, TabTone};
+use crate::motion::{
+    Attention, Curve, Strip, Tween, next_burst, peek_extent, peek_moving, peek_next_change,
+    unseen_moving, unseen_strip,
+};
+use crate::positions::{self, AttentionStyle, Style, UiSettings};
+use crate::raster::{
+    Canvas, PillMotion, Rgb, mix, paint_hit_area, paint_peek, paint_pill, paint_tab, render_pill,
+    tone_paint,
+};
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::io;
@@ -19,10 +25,9 @@ use std::ptr::{null, null_mut};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicPtr, Ordering};
 use std::time::Instant;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION, CreateCompatibleDC, DeleteObject, HBITMAP, HDC,
-    MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTONULL, MonitorFromWindow, SelectObject,
+    MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTONULL, MonitorFromWindow,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
@@ -31,28 +36,28 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, SetCapture, TME_HOVER, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, CreateWindowExW, DefWindowProcW, EVENT_SYSTEM_FOREGROUND, GetClassNameW,
-    GetForegroundWindow, GetWindowRect, HC_ACTION, HHOOK, IDC_ARROW, IsZoomed, KillTimer,
-    LoadCursorW, MA_NOACTIVATE, MSLLHOOKSTRUCT, PostMessageW, RegisterClassExW, SPI_SETWORKAREA,
-    SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetTimer, SetWindowPos,
-    SetWindowsHookExW, ShowWindow, ULW_ALPHA, UnhookWindowsHookEx, UpdateLayeredWindow,
-    WH_MOUSE_LL, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_CAPTURECHANGED,
-    WM_DISPLAYCHANGE, WM_DPICHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_SETTINGCHANGE, WM_TIMER, WM_XBUTTONDOWN,
-    WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CallNextHookEx, DefWindowProcW, EVENT_SYSTEM_FOREGROUND, GetClassNameW, GetForegroundWindow,
+    GetWindowRect, HC_ACTION, HHOOK, IDC_ARROW, IsZoomed, KillTimer, LoadCursorW, MA_NOACTIVATE,
+    MSLLHOOKSTRUCT, PostMessageW, RegisterClassExW, SPI_SETWORKAREA, SWP_NOACTIVATE, SWP_NOSIZE,
+    SWP_NOZORDER, SetTimer, SetWindowPos, SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL,
+    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_CAPTURECHANGED, WM_DISPLAYCHANGE,
+    WM_DPICHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
+    WM_RBUTTONDOWN, WM_SETTINGCHANGE, WM_TIMER, WM_XBUTTONDOWN, WNDCLASSEXW,
 };
 
 const CLASS: &str = "BeaconPill";
 const HOVER_TIMER: usize = 2;
-const BURST_TIMER: usize = 3;
+const WAKE_TIMER: usize = 3;
 const TICK_MS: u32 = 100;
 const HOVER_MS: u32 = 150;
+const REVEAL_HOVER_MS: u32 = 200;
 const CLICK_SLOP: f64 = 4.0;
 const WM_FOREGROUND_CHANGED: u32 = WM_APP + 1;
 const WM_POINTER_PRESSED: u32 = WM_APP + 2;
 const DESKTOP_CLASSES: [&str; 2] = ["Progman", "WorkerW"];
 const FADE: f64 = 0.16;
 const TONE_FADE: f64 = 0.2;
+const OPACITY_FADE: f64 = 0.2;
 const HOVER_GROW: f64 = 0.12;
 const GLIDE: f64 = 0.18;
 const MARK_POP: f64 = 0.18;
@@ -62,6 +67,8 @@ const RESTING_STRIP: f64 = 4.0;
 const HOVERED_STRIP: f64 = 6.0;
 const STILL_DEPTH: f64 = 8.0;
 const PULSING_DEPTH: f64 = 18.0;
+const REVEAL_DEPTH: f64 = 2.0;
+const PEEK_SLIDE: f64 = 12.0;
 
 static WINDOW: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 
@@ -73,12 +80,15 @@ pub enum PillEvent {
     HoverTick,
     ForegroundChanged,
     Pressed((i32, i32)),
+    RevealHovered,
+    PeekPressed,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TabModel {
     pub tone: TabTone,
-    pub unseen_since: Option<(Instant, Instant)>,
+    pub attention_since: Option<Instant>,
+    pub alerting: bool,
 }
 
 struct Press {
@@ -93,18 +103,16 @@ struct Glide {
     progress: Tween,
 }
 
-struct Surface {
-    dc: HDC,
-    bitmap: HBITMAP,
-    bits: *mut u8,
-    width: i32,
-    height: i32,
+struct ShownPeek {
+    canvas: Canvas,
+    started: f64,
 }
 
 struct Pill {
     hwnd: HWND,
     home: PathBuf,
     style: Style,
+    settings: UiSettings,
     model: PillModel,
     tab: TabModel,
     scale: f64,
@@ -114,6 +122,8 @@ struct Pill {
     display: String,
     placement: TabPlacement,
     user_visible: bool,
+    revealed: bool,
+    reveal_wanted: bool,
     targeted: bool,
     fullscreen: bool,
     shown: bool,
@@ -121,6 +131,7 @@ struct Pill {
     hovering: bool,
     hover_polling: bool,
     tracking: bool,
+    reveal_tracking: bool,
     pressed_since_entry: bool,
     press: Option<Press>,
     started: Instant,
@@ -129,6 +140,7 @@ struct Pill {
     refresh_rate: u32,
     framing: bool,
     fade: Tween,
+    opacity: Tween,
     paint_from: (Rgb, f32),
     tone_fade: Tween,
     strip: Tween,
@@ -137,9 +149,12 @@ struct Pill {
     growths: Vec<f32>,
     width: Tween,
     canvas: Canvas,
-    frame: Vec<u8>,
-    surface: Surface,
-    alpha: u8,
+    layer: Layer,
+    reveal: Layer,
+    reveal_rect: Option<Rect>,
+    hit_canvas: Canvas,
+    peek: Option<ShownPeek>,
+    peek_layer: Layer,
     press_hook: HHOOK,
 }
 
@@ -161,12 +176,11 @@ pub fn create(
     on_event: impl Fn(PillEvent) + 'static,
 ) -> io::Result<()> {
     let class = wide(CLASS);
-    let hwnd = unsafe {
-        let instance = GetModuleHandleW(null());
+    unsafe {
         let window_class = WNDCLASSEXW {
             cbSize: size_of::<WNDCLASSEXW>() as u32,
             lpfnWndProc: Some(window_proc),
-            hInstance: instance,
+            hInstance: GetModuleHandleW(null()),
             hCursor: LoadCursorW(null_mut(), IDC_ARROW),
             lpszClassName: class.as_ptr(),
             ..std::mem::zeroed()
@@ -174,24 +188,9 @@ pub fn create(
         if RegisterClassExW(&window_class) == 0 {
             return Err(io::Error::last_os_error());
         }
-        CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
-            class.as_ptr(),
-            class.as_ptr(),
-            WS_POPUP,
-            0,
-            0,
-            0,
-            0,
-            null_mut(),
-            null_mut(),
-            instance,
-            null(),
-        )
-    };
-    if hwnd.is_null() {
-        return Err(io::Error::last_os_error());
     }
+    let layer = Layer::create(&class)?;
+    let hwnd = layer.hwnd;
     WINDOW.store(hwnd, Ordering::Relaxed);
     unsafe {
         SetWinEventHook(
@@ -204,9 +203,12 @@ pub fn create(
             WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
         )
     };
+    let settings = positions::ui_settings(&home);
     let mut pill = Pill {
         hwnd,
         style: positions::style(&home),
+        opacity: Tween::rest(settings.idle_opacity),
+        settings,
         home,
         model: PillModel::default(),
         tab: TabModel::default(),
@@ -220,6 +222,8 @@ pub fn create(
             offset: 0.5,
         },
         user_visible: visible,
+        revealed: false,
+        reveal_wanted: false,
         targeted: false,
         fullscreen: false,
         shown: false,
@@ -227,6 +231,7 @@ pub fn create(
         hovering: false,
         hover_polling: false,
         tracking: false,
+        reveal_tracking: false,
         pressed_since_entry: false,
         press: None,
         started: Instant::now(),
@@ -243,15 +248,12 @@ pub fn create(
         growths: Vec::new(),
         width: Tween::rest(0.0),
         canvas: Canvas::default(),
-        frame: Vec::new(),
-        surface: Surface {
-            dc: unsafe { CreateCompatibleDC(null_mut()) },
-            bitmap: null_mut(),
-            bits: null_mut(),
-            width: 0,
-            height: 0,
-        },
-        alpha: 0,
+        layer,
+        reveal: Layer::create(&class)?,
+        reveal_rect: None,
+        hit_canvas: Canvas::default(),
+        peek: None,
+        peek_layer: Layer::create(&class)?,
         press_hook: null_mut(),
     };
     pill.relocate();
@@ -299,7 +301,7 @@ pub fn show_tab(tab: TabModel) {
             pill.paint_from = pill.tone_paint(now);
             pill.tone_fade = Tween::between(0.0, 1.0, now, pill.duration(TONE_FADE), Curve::Settle);
         }
-        if let (Some(attention), None) = (pill.attention(now), tab.unseen_since) {
+        if let (Some(attention), None) = (pill.attention(now), tab.attention_since) {
             let from = unseen_strip(attention, pill.reduced_motion).thickness;
             pill.strip = Tween::between(
                 from,
@@ -310,8 +312,61 @@ pub fn show_tab(tab: TabModel) {
             );
         }
         pill.tab = tab;
+        pill.fade_opacity();
         pill.present();
         pill.schedule();
+    });
+}
+
+pub fn configure(settings: UiSettings) {
+    with_pill(|pill| {
+        if pill.settings == settings {
+            return;
+        }
+        pill.settings = settings;
+        pill.width = Tween::rest(f64::from(pill.natural_size().width()));
+        pill.fade_opacity();
+        pill.sync();
+    });
+}
+
+pub fn reveal(revealed: bool, reveal_wanted: bool) {
+    with_pill(|pill| {
+        if (pill.revealed, pill.reveal_wanted) != (revealed, reveal_wanted) {
+            (pill.revealed, pill.reveal_wanted) = (revealed, reveal_wanted);
+            pill.sync();
+        }
+    });
+}
+
+pub fn peek(peek: Peek) {
+    with_pill(|pill| {
+        if !pill.may_show() {
+            return;
+        }
+        let mut canvas = Canvas::default();
+        paint_peek(
+            &mut canvas,
+            &peek.text,
+            tone_paint(peek.tone).0,
+            pill.scale as f32,
+            &pill.text,
+        );
+        pill.peek = Some(ShownPeek {
+            canvas,
+            started: pill.now(),
+        });
+        pill.present();
+        pill.schedule();
+    });
+}
+
+pub fn dismiss_peek() {
+    with_pill(|pill| {
+        if pill.peek.take().is_some() {
+            pill.present();
+            pill.schedule();
+        }
     });
 }
 
@@ -364,6 +419,10 @@ pub fn move_to_edge(edge: Edge) {
 
 pub fn shown_rect() -> Option<Rect> {
     with_pill(|pill| pill.shown.then_some(pill.rect)).flatten()
+}
+
+pub fn reveal_rect() -> Option<Rect> {
+    with_pill(|pill| pill.reveal_rect).flatten()
 }
 
 pub fn shown_tab() -> Option<(Rect, Edge)> {
@@ -425,34 +484,14 @@ pub fn watch_presses(watching: bool) {
     });
 }
 
-impl Surface {
-    fn resize(&mut self, width: i32, height: i32) -> bool {
-        let (created, bits) = bitmap(self.dc, width, height);
-        if created.is_null() || bits.is_null() {
-            eprintln!(
-                "cannot create the pill bitmap: {}",
-                io::Error::last_os_error()
-            );
-            return false;
-        }
-        unsafe {
-            SelectObject(self.dc, created);
-            if !self.bitmap.is_null() {
-                DeleteObject(self.bitmap);
-            }
-        }
-        (self.bitmap, self.bits, self.width, self.height) = (created, bits, width, height);
-        true
-    }
-
-    fn pixels(&mut self) -> &mut [u8] {
-        if self.bits.is_null() {
-            return &mut [];
-        }
-        unsafe {
-            std::slice::from_raw_parts_mut(self.bits, (self.width * self.height * 4) as usize)
-        }
-    }
+fn track_hover(hwnd: HWND, hover_ms: u32) -> bool {
+    let mut tracking = TRACKMOUSEEVENT {
+        cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+        dwFlags: TME_HOVER | TME_LEAVE,
+        hwndTrack: hwnd,
+        dwHoverTime: hover_ms,
+    };
+    unsafe { TrackMouseEvent(&mut tracking) != 0 }
 }
 
 impl Pill {
@@ -494,16 +533,47 @@ impl Pill {
         )
     }
 
+    fn fade_opacity(&mut self) {
+        let target = if self.tab.alerting {
+            1.0
+        } else {
+            self.settings.idle_opacity
+        };
+        let (now, duration) = (self.now(), self.duration(OPACITY_FADE));
+        self.opacity.head_to(target, now, duration, Curve::Settle);
+    }
+
     fn attention(&self, now: f64) -> Option<Attention> {
-        self.tab.unseen_since.map(|(first, newest)| Attention {
-            since_first: now - self.at(first),
-            since_newest: now - self.at(newest),
-        })
+        self.tab
+            .attention_since
+            .filter(|_| self.settings.attention_style != AttentionStyle::Colour)
+            .map(|since| Attention {
+                since_gain: now - self.at(since),
+                repeat: self.settings.attention_repeat_seconds as f64,
+            })
+    }
+
+    fn pill_scale(&self) -> f64 {
+        self.scale * self.settings.size.pill_factor()
+    }
+
+    fn tab_rect(&self, depth: f64) -> Rect {
+        tab_rect(
+            &self.bounds,
+            self.placement,
+            self.settings.size.tab_length(),
+            depth * self.settings.size.tab_factor(),
+            self.scale,
+        )
     }
 
     fn natural_size(&self) -> Rect {
-        let canvas = render_pill(&self.model, self.scale as f32, 0.0, true, &self.text);
+        let canvas = render_pill(&self.model, self.pill_scale() as f32, 0.0, true, &self.text);
         Rect::sized(0, 0, canvas.width as i32, canvas.height as i32)
+    }
+
+    fn may_show(&self) -> bool {
+        self.user_visible && self.targeted && !self.fullscreen
     }
 
     fn adopt(&mut self, monitor: &Monitor) {
@@ -547,10 +617,11 @@ impl Pill {
                 .iter()
                 .map(|start| Curve::Pop.at((now - start) / MARK_POP) as f32),
         );
+        let scale = self.pill_scale() as f32;
         paint_pill(
             &mut self.canvas,
             &self.model,
-            self.scale as f32,
+            scale,
             (now % PHASE_WRAP) as f32,
             self.reduced_motion,
             &self.text,
@@ -581,7 +652,7 @@ impl Pill {
         } else {
             STILL_DEPTH
         };
-        let docked = tab_rect(&self.bounds, self.placement, depth, self.scale);
+        let docked = self.tab_rect(depth);
         let rect = match &self.glide {
             Some(glide) => {
                 let progress = glide.progress.value(now);
@@ -605,7 +676,7 @@ impl Pill {
             paint,
             strip.thickness as f32,
             strip.glow as f32,
-            self.scale as f32,
+            (self.scale * self.settings.size.tab_factor()) as f32,
         );
         rect
     }
@@ -616,62 +687,94 @@ impl Pill {
             Style::Pill => self.paint_pill(now),
             Style::Tab => self.paint_tab(now),
         };
-        self.canvas.write_premultiplied_bgra(&mut self.frame);
-        let alpha = (self.fade.value(now).clamp(0.0, 1.0) * 255.0).round() as u8;
-        let resized = (rect.width(), rect.height()) != (self.surface.width, self.surface.height);
-        if !resized
-            && rect == self.rect
-            && alpha == self.alpha
-            && *self.surface.pixels() == self.frame[..]
-        {
-            return;
-        }
-        if resized && !self.surface.resize(rect.width(), rect.height()) {
-            return;
-        }
-        self.surface.pixels().copy_from_slice(&self.frame);
-        unsafe {
-            UpdateLayeredWindow(
-                self.hwnd,
-                null_mut(),
-                &POINT {
-                    x: rect.left,
-                    y: rect.top,
-                },
-                &SIZE {
-                    cx: rect.width(),
-                    cy: rect.height(),
-                },
-                self.surface.dc,
-                &POINT { x: 0, y: 0 },
-                0,
-                &BLENDFUNCTION {
-                    BlendOp: AC_SRC_OVER as u8,
-                    BlendFlags: 0,
-                    SourceConstantAlpha: alpha,
-                    AlphaFormat: AC_SRC_ALPHA as u8,
-                },
-                ULW_ALPHA,
-            );
-        }
+        let alpha = (self.fade.value(now).clamp(0.0, 1.0)
+            * self.opacity.value(now).clamp(0.0, 1.0)
+            * 255.0)
+            .round() as u8;
+        self.layer.update(rect, &self.canvas, alpha);
         self.rect = rect;
-        self.alpha = alpha;
+        self.present_reveal();
+        self.present_peek(now);
+    }
+
+    fn present_reveal(&mut self) {
+        let strip = (self.reveal_wanted && self.may_show())
+            .then(|| match self.style {
+                Style::Tab => Some(self.tab_rect(REVEAL_DEPTH / self.settings.size.tab_factor())),
+                Style::Pill => pill_reveal_strip(self.rect, &self.work, REVEAL_DEPTH, self.scale),
+            })
+            .flatten();
+        if let Some(rect) = strip {
+            paint_hit_area(
+                &mut self.hit_canvas,
+                (rect.width() as usize, rect.height() as usize),
+            );
+            self.reveal.update(rect, &self.hit_canvas, u8::MAX);
+            self.reveal_rect = Some(rect);
+        }
+        self.reveal.show(strip.is_some());
+    }
+
+    fn present_peek(&mut self, now: f64) {
+        let hold = self.settings.peek_seconds;
+        let shown = self.peek.as_ref().and_then(|peek| {
+            peek_extent(now - peek.started, hold, self.reduced_motion).map(|extent| (peek, extent))
+        });
+        let Some((peek, extent)) = shown else {
+            self.peek = None;
+            self.peek_layer.show(false);
+            return;
+        };
+        let (anchor, edge) = match self.style {
+            Style::Tab => (self.tab_rect(STILL_DEPTH), self.placement.edge),
+            Style::Pill => (
+                resize_anchored(
+                    self.rect,
+                    peek.canvas.width as i32,
+                    self.rect.height(),
+                    &self.work,
+                ),
+                pill_edge(self.rect, &self.work),
+            ),
+        };
+        let rect = peek_rect(
+            anchor,
+            edge,
+            (peek.canvas.width as i32, peek.canvas.height as i32),
+            PEEK_SLIDE * (1.0 - extent),
+            &self.work,
+            self.scale,
+        );
+        self.peek_layer
+            .update(rect, &peek.canvas, (extent * 255.0).round() as u8);
+        self.peek_layer.show(true);
+    }
+
+    fn peek_moving(&self, now: f64) -> bool {
+        self.peek.as_ref().is_some_and(|peek| {
+            peek_moving(
+                now - peek.started,
+                self.settings.peek_seconds,
+                self.reduced_motion,
+            )
+        })
     }
 
     fn moving(&self, now: f64) -> bool {
-        match self.style {
-            Style::Pill => {
-                self.model.animates(self.reduced_motion)
-                    || self.width.moving(now)
-                    || self.mark_pops.iter().any(|start| now - start < MARK_POP)
+        self.opacity.moving(now)
+            || match self.style {
+                Style::Pill => {
+                    self.model.animates(self.reduced_motion)
+                        || self.width.moving(now)
+                        || self.mark_pops.iter().any(|start| now - start < MARK_POP)
+                }
+                Style::Tab => {
+                    self.tone_fade.moving(now)
+                        || self.strip.moving(now)
+                        || self.glide.is_some()
+                        || (!self.reduced_motion && self.attention(now).is_some_and(unseen_moving))
+                }
             }
-            Style::Tab => {
-                self.tone_fade.moving(now)
-                    || self.strip.moving(now)
-                    || self.glide.is_some()
-                    || (!self.reduced_motion && self.attention(now).is_some_and(unseen_moving))
-            }
-        }
     }
 
     fn schedule(&mut self) {
@@ -687,9 +790,10 @@ impl Pill {
         let fading_out = self.fade.target() == 0.0;
         if self.shown && fading_out && !self.fade.moving(now) {
             self.shown = false;
-            unsafe { ShowWindow(self.hwnd, SW_HIDE) };
+            self.layer.show(false);
         }
-        let framing = self.shown && (self.fade.moving(now) || (!fading_out && self.moving(now)));
+        let framing = (self.shown && (self.fade.moving(now) || (!fading_out && self.moving(now))))
+            || self.peek_moving(now);
         if framing != self.framing {
             self.framing = framing;
             if framing {
@@ -700,25 +804,40 @@ impl Pill {
         }
         let burst_in = self
             .attention(now)
-            .filter(|_| self.shown && !framing && !self.reduced_motion && self.style == Style::Tab)
-            .map(|attention| next_burst(attention.since_newest) - attention.since_newest);
+            .filter(|_| self.shown && !self.reduced_motion && self.style == Style::Tab)
+            .and_then(|attention| next_burst(attention).map(|at| at - attention.since_gain));
+        let peek_in = self.peek.as_ref().and_then(|peek| {
+            peek_next_change(
+                now - peek.started,
+                self.settings.peek_seconds,
+                self.reduced_motion,
+            )
+        });
+        let wake_in = [burst_in, peek_in]
+            .into_iter()
+            .flatten()
+            .filter(|_| !framing)
+            .reduce(f64::min);
         unsafe {
-            if let Some(wait) = burst_in {
+            if let Some(wait) = wake_in {
                 SetTimer(
                     self.hwnd,
-                    BURST_TIMER,
+                    WAKE_TIMER,
                     (wait * 1000.0).ceil().max(1.0) as u32,
                     None,
                 );
             } else {
-                KillTimer(self.hwnd, BURST_TIMER);
+                KillTimer(self.hwnd, WAKE_TIMER);
             }
         }
     }
 
     fn sync(&mut self) {
         let now = self.now();
-        let visible = self.user_visible && self.targeted && !self.fullscreen;
+        let visible = self.may_show() && self.revealed;
+        if !self.may_show() {
+            self.peek = None;
+        }
         let duration = self.duration(FADE);
         self.fade.head_to(
             if visible { 1.0 } else { 0.0 },
@@ -729,7 +848,7 @@ impl Pill {
         self.present();
         if visible && !self.shown {
             self.shown = true;
-            unsafe { ShowWindow(self.hwnd, SW_SHOWNOACTIVATE) };
+            self.layer.show(true);
         }
         self.schedule();
     }
@@ -850,22 +969,43 @@ impl Pill {
         }
     }
 
+    fn handle_reveal(&mut self, message: u32) -> Option<Option<PillEvent>> {
+        match message {
+            WM_MOUSEMOVE => {
+                if !self.reveal_tracking {
+                    self.reveal_tracking = track_hover(self.reveal.hwnd, REVEAL_HOVER_MS);
+                }
+                Some(None)
+            }
+            WM_MOUSEHOVER => {
+                self.reveal_tracking = false;
+                Some(Some(PillEvent::RevealHovered))
+            }
+            WM_MOUSELEAVE => {
+                self.reveal_tracking = false;
+                Some(None)
+            }
+            _ => None,
+        }
+    }
+
     fn handle(
         &mut self,
+        hwnd: HWND,
         message: u32,
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> Option<Option<PillEvent>> {
+        if hwnd == self.reveal.hwnd {
+            return self.handle_reveal(message);
+        }
+        if hwnd == self.peek_layer.hwnd {
+            return (message == WM_LBUTTONDOWN).then_some(Some(PillEvent::PeekPressed));
+        }
         match message {
             WM_MOUSEMOVE => {
                 if !self.tracking {
-                    let mut tracking = TRACKMOUSEEVENT {
-                        cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
-                        dwFlags: TME_HOVER | TME_LEAVE,
-                        hwndTrack: self.hwnd,
-                        dwHoverTime: HOVER_MS,
-                    };
-                    self.tracking = unsafe { TrackMouseEvent(&mut tracking) } != 0;
+                    self.tracking = track_hover(self.hwnd, HOVER_MS);
                 }
                 self.hover(true);
                 let slop = (CLICK_SLOP * self.scale) as i32;
@@ -929,8 +1069,9 @@ impl Pill {
                 }
                 Some(None)
             }
-            WM_TIMER if wparam == BURST_TIMER => {
-                unsafe { KillTimer(self.hwnd, BURST_TIMER) };
+            WM_TIMER if wparam == WAKE_TIMER => {
+                unsafe { KillTimer(self.hwnd, WAKE_TIMER) };
+                self.present();
                 self.schedule();
                 Some(None)
             }
@@ -978,7 +1119,7 @@ unsafe extern "system" fn window_proc(
         return MA_NOACTIVATE as LRESULT;
     }
     let handled = with_pill(|pill| {
-        pill.handle(message, wparam, lparam)
+        pill.handle(hwnd, message, wparam, lparam)
             .map(|event| (event, pill.on_event.clone()))
     })
     .flatten();

@@ -1,8 +1,37 @@
+use crate::positions::Visibility;
+use crate::toasts::verb;
 use beacon_core::{Session, SessionState, Snapshot};
 use std::collections::BTreeSet;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub const MAX_MARKS: usize = 10;
+pub const LINGER: Duration = Duration::from_secs(5);
+const PEEK_BATCH: Duration = Duration::from_secs(2);
+const PEEK_NAME_CHARS: usize = 28;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Presence {
+    #[default]
+    Hidden,
+    Shown,
+    Lingering(Instant),
+}
+
+#[derive(Debug, Default)]
+pub struct Unused {
+    since: Option<Instant>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Peek {
+    pub text: String,
+    pub tone: TabTone,
+}
+
+#[derive(Debug, Default)]
+pub struct PeekBatch {
+    gains: Vec<(Instant, String)>,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TabTone {
@@ -168,8 +197,144 @@ pub fn tab_tone(snapshot: Option<&Snapshot>) -> TabTone {
     }
 }
 
+pub fn overlay_wanted(snapshot: Option<&Snapshot>, visibility: Visibility) -> bool {
+    let sessions = snapshot.map_or(&[][..], |snapshot| &snapshot.sessions[..]);
+    match visibility {
+        Visibility::Always => true,
+        Visibility::Active => sessions.iter().any(|session| {
+            session.alerting
+                || matches!(
+                    mark_kind(session.state),
+                    Some(
+                        MarkKind::Starting
+                            | MarkKind::Working
+                            | MarkKind::NeedsInput
+                            | MarkKind::Stalled
+                    )
+                )
+        }),
+        Visibility::Attention => sessions.iter().any(|session| session.alerting),
+        Visibility::Never => false,
+    }
+}
+
+impl Presence {
+    pub fn update(&mut self, needed: bool, now: Instant) -> Option<Duration> {
+        *self = match (*self, needed) {
+            (_, true) => Presence::Shown,
+            (Presence::Shown, false) => Presence::Lingering(now),
+            (Presence::Lingering(since), false) if now.duration_since(since) >= LINGER => {
+                Presence::Hidden
+            }
+            (unchanged, false) => unchanged,
+        };
+        match *self {
+            Presence::Lingering(since) => Some(LINGER.saturating_sub(now.duration_since(since))),
+            _ => None,
+        }
+    }
+
+    pub fn shown(self) -> bool {
+        self != Presence::Hidden
+    }
+}
+
+pub fn in_use(snapshot: Option<&Snapshot>, panel_open: bool) -> bool {
+    panel_open
+        || snapshot.is_some_and(|snapshot| {
+            !snapshot.pending.is_empty()
+                || snapshot
+                    .sessions
+                    .iter()
+                    .any(|session| session.state != SessionState::Ended)
+        })
+}
+
+impl Unused {
+    pub fn observe(&mut self, in_use: bool, now: Instant) {
+        if in_use {
+            self.since = None;
+        } else if self.since.is_none() {
+            self.since = Some(now);
+        }
+    }
+
+    pub fn quit_in(&self, minutes: u64, now: Instant) -> Option<Duration> {
+        let since = self.since.filter(|_| minutes > 0)?;
+        Some((since + Duration::from_secs(minutes * 60)).saturating_duration_since(now))
+    }
+}
+
+fn peek_name(session: &Session) -> String {
+    let name = [&session.title, &session.listed_name, &session.project]
+        .into_iter()
+        .flatten()
+        .map(|name| name.trim())
+        .find(|name| !name.is_empty())
+        .map_or_else(
+            || session.session_id.chars().take(8).collect(),
+            str::to_string,
+        );
+    if name.chars().count() > PEEK_NAME_CHARS {
+        format!(
+            "{}…",
+            name.chars()
+                .take(PEEK_NAME_CHARS)
+                .collect::<String>()
+                .trim_end()
+        )
+    } else {
+        name
+    }
+}
+
+fn alert_tone(state: SessionState) -> TabTone {
+    match state {
+        SessionState::Done => TabTone::Finished,
+        SessionState::Error => TabTone::Failed,
+        _ => TabTone::NeedsYou,
+    }
+}
+
+pub fn peek_for(sessions: &[&Session]) -> Option<Peek> {
+    let alerting: Vec<(&Session, &str)> = sessions
+        .iter()
+        .filter_map(|session| verb(session.state).map(|verb| (*session, verb)))
+        .collect();
+    match alerting.as_slice() {
+        [] => None,
+        [(session, verb)] => Some(Peek {
+            text: format!("{} {verb}", peek_name(session)),
+            tone: alert_tone(session.state),
+        }),
+        several
+            if several
+                .iter()
+                .all(|(session, _)| session.state == SessionState::Done) =>
+        {
+            Some(Peek {
+                text: format!("{} sessions finished", several.len()),
+                tone: TabTone::Finished,
+            })
+        }
+        several => Some(Peek {
+            text: format!("{} sessions need you", several.len()),
+            tone: TabTone::NeedsYou,
+        }),
+    }
+}
+
+impl PeekBatch {
+    pub fn add(&mut self, gained: &[String], now: Instant) -> Vec<String> {
+        self.gains
+            .retain(|(at, id)| now.duration_since(*at) <= PEEK_BATCH && !gained.contains(id));
+        self.gains.extend(gained.iter().map(|id| (now, id.clone())));
+        self.gains.iter().map(|(_, id)| id.clone()).collect()
+    }
+}
+
 impl Unseen {
-    pub fn observe(&mut self, snapshot: Option<&Snapshot>, now: Instant) {
+    pub fn observe(&mut self, snapshot: Option<&Snapshot>, now: Instant) -> Vec<String> {
         let alerting: BTreeSet<String> = snapshot.map_or_else(BTreeSet::new, |snapshot| {
             snapshot
                 .sessions
@@ -180,8 +345,8 @@ impl Unseen {
         });
         self.ids.retain(|id| alerting.contains(id));
         let before = self.ids.len();
-        self.ids
-            .extend(alerting.difference(&self.alerting).cloned());
+        let gained: Vec<String> = alerting.difference(&self.alerting).cloned().collect();
+        self.ids.extend(gained.iter().cloned());
         if self.ids.is_empty() {
             self.since = None;
         } else if self.ids.len() > before {
@@ -193,6 +358,7 @@ impl Unseen {
             ));
         }
         self.alerting = alerting;
+        gained
     }
 
     pub fn clear(&mut self) {
@@ -452,6 +618,221 @@ pub mod tests {
         assert_eq!(ids(&unseen), ["b"]);
         unseen.observe(None, start);
         assert!(ids(&unseen).is_empty());
+    }
+
+    #[test]
+    fn the_overlay_is_wanted_by_visibility_and_session_states() {
+        use Visibility::*;
+        let wanted = |visibility, sessions: Vec<Session>| {
+            overlay_wanted(Some(&snapshot(sessions)), visibility)
+        };
+        for visibility in [Always, Active, Attention, Never] {
+            assert_eq!(overlay_wanted(None, visibility), visibility == Always);
+            assert_eq!(wanted(visibility, vec![]), visibility == Always);
+        }
+        for state in [
+            SessionState::Starting,
+            SessionState::Working,
+            SessionState::NeedsPermission,
+            SessionState::NeedsAnswer,
+            SessionState::NeedsPlanApproval,
+            SessionState::NeedsMcpInput,
+            SessionState::Stalled,
+        ] {
+            assert!(wanted(Active, vec![session("a", state)]), "{state:?}");
+        }
+        for state in [SessionState::Idle, SessionState::Ended] {
+            assert!(!wanted(Active, vec![session("a", state)]), "{state:?}");
+        }
+        assert!(wanted(Active, vec![session("a", SessionState::Done)]));
+        assert!(!wanted(
+            Active,
+            vec![snoozed(session("a", SessionState::Done))]
+        ));
+        assert!(!wanted(
+            Attention,
+            vec![session("a", SessionState::Working)]
+        ));
+        assert!(wanted(Attention, vec![session("a", SessionState::Error)]));
+        assert!(!wanted(
+            Attention,
+            vec![snoozed(session("a", SessionState::NeedsPermission))]
+        ));
+        assert!(!wanted(
+            Never,
+            vec![session("a", SessionState::NeedsPermission)]
+        ));
+        assert!(wanted(Always, vec![session("a", SessionState::Idle)]));
+    }
+
+    #[test]
+    fn the_overlay_lingers_five_seconds_after_it_stops_being_needed() {
+        let start = Instant::now();
+        let at = |seconds: f64| start + Duration::from_secs_f64(seconds);
+        let mut presence = Presence::default();
+        assert!(!presence.shown());
+        assert_eq!(presence.update(false, at(0.0)), None);
+        assert!(!presence.shown());
+        assert_eq!(presence.update(true, at(1.0)), None);
+        assert!(presence.shown());
+        assert_eq!(presence.update(false, at(2.0)), Some(LINGER));
+        assert_eq!(
+            presence.update(false, at(4.0)),
+            Some(Duration::from_secs(3))
+        );
+        assert!(presence.shown());
+        assert_eq!(presence.update(true, at(5.0)), None);
+        assert_eq!(presence.update(false, at(6.0)), Some(LINGER));
+        assert_eq!(presence.update(false, at(11.0)), None);
+        assert!(!presence.shown());
+    }
+
+    #[test]
+    fn the_app_quits_after_the_chosen_minutes_without_sessions_panel_or_requests() {
+        let start = Instant::now();
+        let ended = snapshot(vec![session("a", SessionState::Ended)]);
+        let mut waiting = snapshot(vec![]);
+        waiting.pending.push(
+            serde_json::from_value(serde_json::json!({
+                "id": 1, "session_id": "a", "kind": "tool", "tool_name": "Bash",
+                "tool_input": {}, "permission_suggestions": null, "created_ms": 0
+            }))
+            .unwrap(),
+        );
+        assert!(!in_use(None, false));
+        assert!(!in_use(Some(&ended), false));
+        assert!(in_use(Some(&ended), true));
+        assert!(in_use(Some(&waiting), false));
+        assert!(in_use(
+            Some(&snapshot(vec![session("a", SessionState::Idle)])),
+            false
+        ));
+        let mut unused = Unused::default();
+        unused.observe(true, start);
+        assert_eq!(unused.quit_in(15, start), None);
+        unused.observe(false, start + Duration::from_secs(60));
+        unused.observe(false, start + Duration::from_secs(120));
+        assert_eq!(
+            unused.quit_in(15, start + Duration::from_secs(120)),
+            Some(Duration::from_secs(14 * 60))
+        );
+        assert_eq!(
+            unused.quit_in(5, start + Duration::from_secs(3600)),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(unused.quit_in(0, start + Duration::from_secs(3600)), None);
+        unused.observe(true, start + Duration::from_secs(200));
+        assert_eq!(unused.quit_in(15, start + Duration::from_secs(3600)), None);
+    }
+
+    fn titled(id: &str, state: SessionState, title: Option<&str>) -> Session {
+        Session {
+            title: title.map(str::to_string),
+            ..session(id, state)
+        }
+    }
+
+    #[test]
+    fn a_peek_names_one_session_and_its_reason() {
+        let peek = |session: Session| peek_for(&[&session]).map(|peek| (peek.text, peek.tone));
+        assert_eq!(
+            peek(titled(
+                "a",
+                SessionState::NeedsPermission,
+                Some("Fix login")
+            )),
+            Some(("Fix login needs permission".to_string(), TabTone::NeedsYou))
+        );
+        assert_eq!(
+            peek(session("a", SessionState::NeedsAnswer)).unwrap().0,
+            "project-a has a question"
+        );
+        let listed = Session {
+            listed_name: Some("listed".to_string()),
+            ..session("a", SessionState::NeedsPlanApproval)
+        };
+        assert_eq!(peek(listed).unwrap().0, "listed wants plan approval");
+        assert_eq!(
+            peek(session("a", SessionState::NeedsMcpInput)).unwrap().0,
+            "project-a needs input"
+        );
+        assert_eq!(
+            peek(session("a", SessionState::Error)),
+            Some(("project-a hit an API error".to_string(), TabTone::Failed))
+        );
+        assert_eq!(
+            peek(session("a", SessionState::Stalled)).unwrap().0,
+            "project-a may be stalled"
+        );
+        assert_eq!(
+            peek(session("a", SessionState::Done)),
+            Some(("project-a finished".to_string(), TabTone::Finished))
+        );
+        assert_eq!(peek(session("a", SessionState::Working)), None);
+        let nameless = Session {
+            project: None,
+            ..session("0123456789", SessionState::Done)
+        };
+        assert_eq!(peek(nameless).unwrap().0, "01234567 finished");
+    }
+
+    #[test]
+    fn a_long_title_is_cut_to_twenty_eight_characters_with_an_ellipsis() {
+        let long = titled(
+            "a",
+            SessionState::NeedsPermission,
+            Some("Refactor the authentication middleware"),
+        );
+        assert_eq!(
+            peek_for(&[&long]).unwrap().text,
+            "Refactor the authentication… needs permission"
+        );
+        let exact = titled("a", SessionState::Done, Some(&"x".repeat(28)));
+        assert_eq!(
+            peek_for(&[&exact]).unwrap().text,
+            format!("{} finished", "x".repeat(28))
+        );
+    }
+
+    #[test]
+    fn several_sessions_need_you_or_finished_together() {
+        let (a, b, c) = (
+            session("a", SessionState::Done),
+            session("b", SessionState::Done),
+            session("c", SessionState::NeedsPermission),
+        );
+        let finished = peek_for(&[&a, &b]).unwrap();
+        assert_eq!(finished.text, "2 sessions finished");
+        assert_eq!(finished.tone, TabTone::Finished);
+        let mixed = peek_for(&[&a, &b, &c]).unwrap();
+        assert_eq!(mixed.text, "3 sessions need you");
+        assert_eq!(mixed.tone, TabTone::NeedsYou);
+        assert_eq!(peek_for(&[]), None);
+    }
+
+    #[test]
+    fn gains_within_two_seconds_are_peeked_together() {
+        let start = Instant::now();
+        let ids = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| name.to_string())
+                .collect::<Vec<_>>()
+        };
+        let mut batch = PeekBatch::default();
+        assert_eq!(batch.add(&ids(&["a"]), start), ids(&["a"]));
+        assert_eq!(
+            batch.add(&ids(&["b", "c"]), start + Duration::from_millis(1500)),
+            ids(&["a", "b", "c"])
+        );
+        assert_eq!(
+            batch.add(&ids(&["a"]), start + Duration::from_millis(3000)),
+            ids(&["b", "c", "a"])
+        );
+        assert_eq!(
+            batch.add(&ids(&["d"]), start + Duration::from_millis(6000)),
+            ids(&["d"])
+        );
     }
 
     #[test]

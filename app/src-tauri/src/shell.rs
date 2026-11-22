@@ -4,13 +4,16 @@ use crate::geometry::{
     Corner, Edge, PressTarget, Rect, place_panel, place_panel_on_edge, press_target, primary,
 };
 use crate::jump;
-use crate::model::{PillModel, Unseen, tab_tone};
+use crate::model::{
+    Peek, PeekBatch, PillModel, Presence, TabTone, Unseen, Unused, alerting_count, in_use,
+    overlay_wanted, peek_for, tab_tone,
+};
 use crate::panel::{self, PANEL};
 use crate::platform::{
     self, pill,
     pill::{PillEvent, TabModel},
 };
-use crate::positions::{self, Style};
+use crate::positions::{self, AttentionStyle, StartMode, Style, UiSettings, Visibility};
 use crate::sounds::sound_for;
 use crate::toasts::Toaster;
 use crate::tray::Tray;
@@ -28,7 +31,9 @@ use tauri_plugin_notification::NotificationExt;
 const HOVER_CLOSE: Duration = Duration::from_millis(400);
 const CLOSE_DELAY: Duration = Duration::from_millis(160);
 const TOAST_BATCH: Duration = Duration::from_secs(2);
+const PREVIEW_TAIL: Duration = Duration::from_secs(1);
 const INITIAL_PANEL_HEIGHT: f64 = 120.0;
+const PREVIEW_TEXT: &str = "A session needs you (preview)";
 
 pub enum Action {
     Snapshot(Option<Snapshot>),
@@ -45,6 +50,9 @@ pub enum Action {
     ToggleAvoided(String),
     MoveToCorner(Corner),
     MoveToEdge(Edge),
+    SettingsChanged,
+    PreviewAttention,
+    Recheck,
     Quit,
 }
 
@@ -82,6 +90,12 @@ pub struct Shell {
     panel_height: f64,
     unseen: Unseen,
     closings: u64,
+    settings: UiSettings,
+    presence: Presence,
+    unused: Unused,
+    quit_armed: Option<Instant>,
+    peek_batch: PeekBatch,
+    preview: Option<Instant>,
 }
 
 thread_local! {
@@ -118,7 +132,6 @@ impl Shell {
     pub fn new(app: AppHandle, feed: Arc<Feed>, tray: Tray) -> Shell {
         Shell {
             app,
-            feed,
             tray,
             snapshot: None,
             toaster: Toaster::default(),
@@ -126,16 +139,26 @@ impl Shell {
             panel_height: INITIAL_PANEL_HEIGHT,
             unseen: Unseen::default(),
             closings: 0,
+            settings: positions::ui_settings(&feed.home),
+            presence: Presence::default(),
+            unused: Unused::default(),
+            quit_armed: None,
+            peek_batch: PeekBatch::default(),
+            preview: None,
+            feed,
         }
     }
 
     fn handle(&mut self, action: Action) {
         match action {
             Action::Snapshot(snapshot) => self.take_snapshot(snapshot),
-            Action::Pill(PillEvent::Hovered) if self.mode().is_none() => {
+            Action::Pill(PillEvent::Hovered | PillEvent::RevealHovered)
+                if self.mode().is_none() =>
+            {
                 self.open(Mode::Hover, false)
             }
-            Action::Pill(PillEvent::Hovered) => {}
+            Action::Pill(PillEvent::Hovered | PillEvent::RevealHovered) => {}
+            Action::Pill(PillEvent::PeekPressed) => self.open(Mode::Sticky, true),
             Action::Pill(PillEvent::Clicked) | Action::TogglePanel => match self.mode() {
                 Some(Mode::Sticky) => self.close(),
                 _ => self.open(Mode::Sticky, true),
@@ -200,16 +223,121 @@ impl Shell {
                 pill::move_to_edge(edge);
                 self.place();
             }
-            Action::Quit => {
-                self.destroy();
-                self.feed.shutdown();
-                self.app.exit(0);
+            Action::SettingsChanged => {
+                self.settings = positions::ui_settings(&self.feed.home);
+                pill::configure(self.settings.clone());
+                self.show_tab();
             }
+            Action::PreviewAttention => self.preview(),
+            Action::Recheck => {}
+            Action::Quit => return self.quit(),
         }
         self.announce();
         let mode = self.mode();
         pill::set_hover_polling(mode == Some(Mode::Hover));
         pill::watch_presses(mode.is_some());
+        self.settle();
+    }
+
+    fn quit(&mut self) {
+        self.destroy();
+        self.feed.shutdown();
+        self.app.exit(0);
+    }
+
+    fn recheck_after(&self, delay: Duration) {
+        let app = self.app.clone();
+        thread::spawn(move || {
+            thread::sleep(delay);
+            post(&app, Action::Recheck);
+        });
+    }
+
+    fn preview_length(&self) -> Duration {
+        Duration::from_secs_f64(self.settings.peek_seconds) + PREVIEW_TAIL
+    }
+
+    fn preview(&mut self) {
+        if self.settings.visibility == Visibility::Never {
+            return;
+        }
+        self.preview = Some(Instant::now());
+        self.show_tab();
+        if self.settings.attention_style == AttentionStyle::PulsePeek {
+            pill::peek(Peek {
+                text: PREVIEW_TEXT.to_string(),
+                tone: TabTone::NeedsYou,
+            });
+        }
+        self.recheck_after(self.preview_length());
+    }
+
+    fn settle(&mut self) {
+        let now = Instant::now();
+        if self
+            .preview
+            .is_some_and(|started| now.duration_since(started) >= self.preview_length())
+        {
+            self.preview = None;
+            self.show_tab();
+        }
+        let never = self.settings.visibility == Visibility::Never;
+        let needed = !never
+            && (self.mode().is_some()
+                || self.preview.is_some()
+                || overlay_wanted(self.snapshot.as_ref(), self.settings.visibility));
+        let was_shown = self.presence == Presence::Shown;
+        if let Some(linger) = self.presence.update(needed, now)
+            && was_shown
+        {
+            self.recheck_after(linger);
+        }
+        let shown = self.presence.shown();
+        pill::reveal(shown, !never && !shown && self.settings.reveal_on_hover);
+        self.unused
+            .observe(in_use(self.snapshot.as_ref(), self.panel.is_some()), now);
+        let minutes = if self.settings.start_mode == StartMode::Claude {
+            self.settings.quit_when_idle_minutes
+        } else {
+            0
+        };
+        match self.unused.quit_in(minutes, now) {
+            Some(wait) if wait.is_zero() => self.quit(),
+            Some(wait) if self.quit_armed != Some(now + wait) => {
+                self.quit_armed = Some(now + wait);
+                self.recheck_after(wait);
+            }
+            Some(_) => {}
+            None => self.quit_armed = None,
+        }
+    }
+
+    fn peek_gains(&mut self, gained: &[String]) {
+        if gained.is_empty()
+            || self.mode().is_some()
+            || self.settings.visibility == Visibility::Never
+            || self.settings.attention_style != AttentionStyle::PulsePeek
+        {
+            return;
+        }
+        let focused = jump::focused_session(self.snapshot.as_ref());
+        let unfocused: Vec<String> = gained
+            .iter()
+            .filter(|id| focused.as_ref() != Some(*id))
+            .cloned()
+            .collect();
+        let Some(snapshot) = self.snapshot.as_ref().filter(|_| !unfocused.is_empty()) else {
+            return;
+        };
+        let batch = self.peek_batch.add(&unfocused, Instant::now());
+        let sessions: Vec<_> = snapshot
+            .sessions
+            .iter()
+            .filter(|session| session.alerting && batch.contains(&session.session_id))
+            .collect();
+        if let Some(peek) = peek_for(&sessions) {
+            pill::peek(peek);
+        }
     }
 
     fn mode(&self) -> Option<Mode> {
@@ -239,6 +367,8 @@ impl Shell {
     }
 
     fn open(&mut self, mode: Mode, focused: bool) {
+        pill::dismiss_peek();
+        pill::reveal(self.settings.visibility != Visibility::Never, false);
         match &mut self.panel {
             Some(panel) if panel.closing.is_some() => {
                 panel.closing = None;
@@ -378,7 +508,7 @@ impl Shell {
             return;
         }
         let cursor = platform::cursor_position();
-        let inside = [pill::shown_rect(), self.panel_rect()]
+        let inside = [pill::shown_rect(), self.panel_rect(), pill::reveal_rect()]
             .into_iter()
             .flatten()
             .any(|rect| rect.contains(cursor));
@@ -394,9 +524,17 @@ impl Shell {
     }
 
     fn show_tab(&self) {
-        pill::show_tab(TabModel {
-            tone: tab_tone(self.snapshot.as_ref()),
-            unseen_since: self.unseen.since(),
+        pill::show_tab(match self.preview {
+            Some(started) => TabModel {
+                tone: TabTone::NeedsYou,
+                attention_since: Some(started),
+                alerting: true,
+            },
+            None => TabModel {
+                tone: tab_tone(self.snapshot.as_ref()),
+                attention_since: self.unseen.since().map(|(_, newest)| newest),
+                alerting: alerting_count(self.snapshot.as_ref()) > 0,
+            },
         });
     }
 
@@ -422,7 +560,8 @@ impl Shell {
             platform::play_system_sound(sound.system_alias());
         }
         self.snapshot = snapshot;
-        self.unseen.observe(self.snapshot.as_ref(), Instant::now());
+        let gained = self.unseen.observe(self.snapshot.as_ref(), Instant::now());
+        self.peek_gains(&gained);
         self.show_tab();
         if self.panel.is_some()
             && let Err(error) = self.app.emit_to(PANEL, "beacon://snapshot", &self.snapshot)

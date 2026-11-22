@@ -16,6 +16,7 @@ mod sounds;
 mod toasts;
 mod tray;
 
+use beacon_core::BACKGROUND_ARG;
 use feed::Feed;
 use shell::{Action, Shell};
 use tauri::{Manager, RunEvent, WindowEvent};
@@ -37,9 +38,10 @@ fn options() -> Result<Options, String> {
             "--tray-only" => options.tray_only = true,
             "--open-panel" => options.open_panel = true,
             "--list-displays" => options.list_displays = true,
+            BACKGROUND_ARG => {}
             other => {
                 return Err(format!(
-                    "unknown option {other}; expected --tray-only, --open-panel or --list-displays"
+                    "unknown option {other}; expected --tray-only, --open-panel, --background or --list-displays"
                 ));
             }
         }
@@ -61,8 +63,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let mut builder = tauri::Builder::default();
     if std::env::var_os("BEACON_HOME").is_none() {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            shell::post(app, Action::OpenPanel)
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, arguments, _| {
+            if !arguments.iter().any(|argument| argument == BACKGROUND_ARG) {
+                shell::post(app, Action::OpenPanel)
+            }
         }));
     }
     builder
@@ -92,6 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings::set_ui_settings,
             settings::get_login_start,
             settings::set_login_start,
+            settings::preview_attention,
             settings::open_logs_folder,
             settings::app_info,
         ])
@@ -112,19 +117,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Err(error) = settings::register_hotkey(&handle, &positions::hotkey(&feed.home)) {
                 eprintln!("{error}");
             }
-            if !std::env::current_exe()?
+            let installed = !std::env::current_exe()?
                 .to_string_lossy()
-                .contains(r"\target\")
+                .contains(r"\target\");
+            if installed
                 && let Err(error) =
                     toasts::register_identity(&feed.home, &handle.config().identifier)
             {
                 eprintln!("cannot register the notification identity: {error}");
             }
+            if let Err(error) = settings::apply_start_mode(
+                &feed.home,
+                positions::ui_settings(&feed.home).start_mode,
+                installed,
+            ) {
+                eprintln!("cannot apply the start mode: {error}");
+            }
             let publisher = handle.clone();
             feed.start(move |snapshot| shell::post(&publisher, Action::Snapshot(snapshot)))?;
-            if options.open_panel {
-                shell::dispatch(Action::OpenPanel);
-            }
+            shell::dispatch(if options.open_panel {
+                Action::OpenPanel
+            } else {
+                Action::Recheck
+            });
             Ok(())
         })
         .build(tauri::generate_context!())?

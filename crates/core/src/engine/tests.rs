@@ -1192,7 +1192,7 @@ fn the_timeline_keeps_sixty_entries_and_marks_answers_given_elsewhere() {
     }
     let timeline = fixture.engine.detail(SESSION).unwrap().timeline;
     assert_eq!(timeline.len(), 60);
-    assert!(timeline.iter().all(|entry| entry.label == "TaskCreated"));
+    assert!(timeline.iter().all(|entry| entry.label == "Task added"));
 }
 
 #[test]
@@ -1730,9 +1730,36 @@ fn task_subjects_are_redacted_and_cut_to_one_hundred_and_twenty_characters() {
         "Rotate API_KEY=abc123 in the vault",
     ));
     fixture.send(&task_event("TaskCreated", "2", &"ж".repeat(500)));
+    fixture.send(&task_event(
+        "TaskCompleted",
+        "1",
+        "Rotate API_KEY=abc123 in the vault",
+    ));
     let tasks = fixture.session().tasks;
     assert_eq!(tasks[0].subject, "Rotate API_KEY=*** in the vault");
     assert_eq!(tasks[1].subject.chars().count(), 120);
+    let labels: Vec<String> = fixture
+        .steps()
+        .into_iter()
+        .map(|(kind, label, ..)| {
+            assert_eq!(kind, StepKind::Task);
+            label
+        })
+        .collect();
+    assert_eq!(labels[0], "Task added: Rotate API_KEY=*** in the vault");
+    assert_eq!(labels[1].chars().count(), LABEL_CHARS);
+    assert!(labels[1].starts_with("Task added: жж"));
+    assert_eq!(labels[2], "Task done: Rotate API_KEY=*** in the vault");
+    let timeline: Vec<String> = fixture
+        .engine
+        .detail(SESSION)
+        .unwrap()
+        .timeline
+        .into_iter()
+        .map(|entry| entry.label)
+        .collect();
+    assert_eq!(timeline[0], "Task added: Rotate API_KEY=*** in the vault");
+    assert_eq!(timeline[2], "Task done: Rotate API_KEY=*** in the vault");
 }
 
 #[test]

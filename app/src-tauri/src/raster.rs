@@ -38,6 +38,12 @@ const GLOW_TAPER: f32 = 8.0;
 const GLOW_ALPHA: f32 = 0.45;
 const WORKING_TAB_OPACITY: f32 = 0.7;
 const DORMANT_TAB_OPACITY: f32 = 0.6;
+const PEEK_HEIGHT: f32 = 26.0;
+const PEEK_PADDING: f32 = 10.0;
+const PEEK_DOT: f32 = 6.0;
+const PEEK_DOT_GAP: f32 = 8.0;
+const PEEK_RADIUS: f32 = 8.0;
+const PEEK_FONT_SIZE: f32 = 12.0;
 
 pub struct PillMotion<'a> {
     pub growths: &'a [f32],
@@ -120,7 +126,7 @@ impl Canvas {
         }
     }
 
-    fn paint_bar(&mut self, scale: f32) {
+    fn paint_bar(&mut self, scale: f32, radius: f32) {
         let (width, height) = (self.width as f32, self.height as f32);
         for y in 0..self.height {
             for x in 0..self.width {
@@ -128,7 +134,7 @@ impl Canvas {
                     x as f32 + 0.5,
                     y as f32 + 0.5,
                     [width / 2.0, height / 2.0, width / 2.0, height / 2.0],
-                    height / 2.0,
+                    radius,
                 );
                 let outer = (0.5 - distance).clamp(0.0, 1.0);
                 let inner = (0.5 - distance - scale).clamp(0.0, 1.0);
@@ -379,7 +385,7 @@ pub fn paint_pill(
             .unwrap_or((content_end + PADDING * scale).round() as usize),
         (BAR_HEIGHT * scale).round() as usize,
     );
-    canvas.paint_bar(scale);
+    canvas.paint_bar(scale, canvas.height as f32 / 2.0);
     let top = (BAR_HEIGHT - MARK_SIZE) / 2.0 * scale;
     if model.marks.is_empty() {
         paint_shape(
@@ -496,6 +502,46 @@ pub fn paint_tab(
             }
         }
     }
+}
+
+pub fn paint_hit_area(canvas: &mut Canvas, (width, height): (usize, usize)) {
+    canvas.reset(width, height);
+    canvas.pixels.fill([0.0, 0.0, 0.0, TAB_HIT_ALPHA]);
+}
+
+pub fn paint_peek(
+    canvas: &mut Canvas,
+    label: &str,
+    colour: Rgb,
+    scale: f32,
+    text: &dyn TextRasterizer,
+) {
+    let mask = text.rasterize(label, PEEK_FONT_SIZE * scale);
+    let text_left = (PEEK_PADDING + PEEK_DOT + PEEK_DOT_GAP) * scale;
+    canvas.reset(
+        (text_left + mask.width as f32 + PEEK_PADDING * scale).round() as usize,
+        (PEEK_HEIGHT * scale).round() as usize,
+    );
+    canvas.paint_bar(scale, PEEK_RADIUS * scale);
+    let (centre, radius) = (
+        [
+            (PEEK_PADDING + PEEK_DOT / 2.0) * scale,
+            canvas.height as f32 / 2.0,
+        ],
+        PEEK_DOT / 2.0 * scale,
+    );
+    canvas.paint(
+        [
+            centre[0] - radius - 1.0,
+            centre[1] - radius - 1.0,
+            centre[0] + radius + 1.0,
+            centre[1] + radius + 1.0,
+        ],
+        colour,
+        1.0,
+        |x, y| circle(x, y, centre, radius),
+    );
+    canvas.paint_mask(&mask, text_left, INK);
 }
 
 pub fn render_tray(state: TrayState, size: usize, text: &dyn TextRasterizer) -> Canvas {
@@ -821,6 +867,31 @@ mod tests {
         );
         assert_eq!(canvas.width, 30);
         assert!(close_to(straight(&canvas, 11, 14), WIP, 2));
+    }
+
+    #[test]
+    fn the_peek_is_a_bordered_surface_with_a_state_dot_and_ink_text() {
+        for scale in SCALES {
+            let lp = |value: f32| (value * scale) as usize;
+            let mut canvas = Canvas::default();
+            paint_peek(&mut canvas, "abcd", LIVE, scale, &BlockText);
+            let text_width = (4.0 * 12.0 * scale * 0.6).round();
+            assert_eq!(canvas.height, lp(26.0));
+            assert_eq!(
+                canvas.width,
+                ((24.0 * scale + text_width) + 10.0 * scale).round() as usize
+            );
+            assert_eq!(straight(&canvas, 0, 0)[3], 0, "rounded corner");
+            let middle = canvas.height / 2;
+            assert!(close_to(straight(&canvas, lp(13.0), middle), LIVE, 2));
+            assert!(close_to(straight(&canvas, lp(20.0), middle), SURFACE, 1));
+            assert_eq!(straight(&canvas, lp(20.0), middle)[3], 245);
+            assert!(close_to(straight(&canvas, lp(30.0), middle), INK, 2));
+            assert!(close_to(straight(&canvas, lp(20.0), 0), LINE, 2));
+        }
+        let mut hit = Canvas::default();
+        paint_hit_area(&mut hit, (3, 2));
+        assert!(hit.straight_rgba().chunks(4).all(|pixel| pixel[3] == 1));
     }
 
     #[test]

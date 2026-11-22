@@ -5,9 +5,9 @@ const MIN_FRAME_RATE: u32 = 60;
 const POP_RISE: f64 = 0.12;
 const POP_FALL: f64 = 0.24;
 const BURST: f64 = 0.9;
-const FIRST_BURST_GAP: f64 = 3.0;
-const LATER_BURST_GAP: f64 = 10.0;
-const FREQUENT_BURSTS_FOR: f64 = 120.0;
+const FIRST_BURST_AT: f64 = 0.6;
+const PEEK_IN: f64 = 0.18;
+const PEEK_OUT: f64 = 0.16;
 const REST_THICKNESS: f64 = 6.0;
 const STILL_THICKNESS: f64 = 8.0;
 const POP_FROM: f64 = 4.0;
@@ -108,43 +108,38 @@ pub struct Strip {
     pub glow: f64,
 }
 
-fn last_burst_start(unseen_for: f64) -> Option<f64> {
-    if unseen_for < FIRST_BURST_GAP {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Attention {
+    pub since_gain: f64,
+    pub repeat: f64,
+}
+
+fn last_burst_start(Attention { since_gain, repeat }: Attention) -> Option<f64> {
+    if since_gain < FIRST_BURST_AT {
         None
-    } else if unseen_for <= FREQUENT_BURSTS_FOR {
-        Some((unseen_for / FIRST_BURST_GAP).floor() * FIRST_BURST_GAP)
+    } else if repeat > 0.0 && since_gain >= repeat {
+        Some((since_gain / repeat).floor() * repeat)
     } else {
-        Some(
-            FREQUENT_BURSTS_FOR
-                + ((unseen_for - FREQUENT_BURSTS_FOR) / LATER_BURST_GAP).floor() * LATER_BURST_GAP,
-        )
+        Some(FIRST_BURST_AT)
     }
 }
 
-pub fn next_burst(unseen_for: f64) -> f64 {
-    if unseen_for < FREQUENT_BURSTS_FOR {
-        ((unseen_for / FIRST_BURST_GAP).floor() + 1.0) * FIRST_BURST_GAP
+pub fn next_burst(Attention { since_gain, repeat }: Attention) -> Option<f64> {
+    if since_gain < FIRST_BURST_AT {
+        Some(FIRST_BURST_AT)
     } else {
-        FREQUENT_BURSTS_FOR
-            + (((unseen_for - FREQUENT_BURSTS_FOR) / LATER_BURST_GAP).floor() + 1.0)
-                * LATER_BURST_GAP
+        (repeat > 0.0).then(|| ((since_gain / repeat).floor() + 1.0) * repeat)
     }
 }
 
-fn burst_progress(unseen_for: f64) -> Option<f64> {
-    last_burst_start(unseen_for)
-        .map(|start| (unseen_for - start) / BURST)
+fn burst_progress(attention: Attention) -> Option<f64> {
+    last_burst_start(attention)
+        .map(|start| (attention.since_gain - start) / BURST)
         .filter(|progress| *progress < 1.0)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Attention {
-    pub since_first: f64,
-    pub since_newest: f64,
-}
-
 pub fn unseen_moving(attention: Attention) -> bool {
-    attention.since_first < POP_RISE + POP_FALL || burst_progress(attention.since_newest).is_some()
+    attention.since_gain < POP_RISE + POP_FALL || burst_progress(attention).is_some()
 }
 
 pub fn unseen_strip(attention: Attention, reduced_motion: bool) -> Strip {
@@ -152,31 +147,61 @@ pub fn unseen_strip(attention: Attention, reduced_motion: bool) -> Strip {
         thickness,
         glow: ((thickness - POP_FROM) / (POP_PEAK - POP_FROM)).clamp(0.0, 1.0),
     };
-    let Attention {
-        since_first,
-        since_newest,
-    } = attention;
+    let since_gain = attention.since_gain;
     if reduced_motion {
         Strip {
             thickness: STILL_THICKNESS,
             glow: 0.0,
         }
-    } else if since_first < POP_RISE {
-        popped(POP_FROM + (POP_PEAK - POP_FROM) * Curve::Pop.at(since_first / POP_RISE))
-    } else if since_first < POP_RISE + POP_FALL {
+    } else if since_gain < POP_RISE {
+        popped(POP_FROM + (POP_PEAK - POP_FROM) * Curve::Pop.at(since_gain / POP_RISE))
+    } else if since_gain < POP_RISE + POP_FALL {
         popped(
             POP_PEAK
                 - (POP_PEAK - REST_THICKNESS)
-                    * Curve::Settle.at((since_first - POP_RISE) / POP_FALL),
+                    * Curve::Settle.at((since_gain - POP_RISE) / POP_FALL),
         )
     } else {
-        let swell =
-            burst_progress(since_newest).map_or(0.0, |progress| (PI * progress).sin().powi(2));
+        let swell = burst_progress(attention).map_or(0.0, |progress| (PI * progress).sin().powi(2));
         Strip {
             thickness: REST_THICKNESS + BURST_SWELL * swell,
             glow: swell,
         }
     }
+}
+
+fn peek_phases(hold: f64, reduced_motion: bool) -> [f64; 3] {
+    let (rise, fall) = if reduced_motion {
+        (0.0, 0.0)
+    } else {
+        (PEEK_IN, PEEK_OUT)
+    };
+    [rise, rise + hold, rise + hold + fall]
+}
+
+pub fn peek_extent(elapsed: f64, hold: f64, reduced_motion: bool) -> Option<f64> {
+    let [risen, held, gone] = peek_phases(hold, reduced_motion);
+    if !(0.0..gone).contains(&elapsed) {
+        None
+    } else if elapsed < risen {
+        Some(Curve::Settle.at(elapsed / risen))
+    } else if elapsed < held {
+        Some(1.0)
+    } else {
+        Some(1.0 - Curve::Settle.at((elapsed - held) / (gone - held)))
+    }
+}
+
+pub fn peek_moving(elapsed: f64, hold: f64, reduced_motion: bool) -> bool {
+    let [risen, held, gone] = peek_phases(hold, reduced_motion);
+    (0.0..risen).contains(&elapsed) || (held..gone).contains(&elapsed)
+}
+
+pub fn peek_next_change(elapsed: f64, hold: f64, reduced_motion: bool) -> Option<f64> {
+    peek_phases(hold, reduced_motion)
+        .into_iter()
+        .find(|phase| *phase > elapsed)
+        .map(|phase| phase - elapsed)
 }
 
 pub fn frame_interval(refresh_rate: u32) -> Duration {
@@ -187,10 +212,10 @@ pub fn frame_interval(refresh_rate: u32) -> Duration {
 mod tests {
     use super::*;
 
-    fn steady(unseen_for: f64) -> Attention {
+    fn steady(since_gain: f64) -> Attention {
         Attention {
-            since_first: unseen_for,
-            since_newest: unseen_for,
+            since_gain,
+            repeat: 60.0,
         }
     }
 
@@ -256,7 +281,7 @@ mod tests {
 
     #[test]
     fn a_burst_swells_from_rest_to_ten_and_back() {
-        let at = |phase: f64| unseen_strip(steady(3.0 + phase * 0.9), false);
+        let at = |phase: f64| unseen_strip(steady(0.6 + phase * 0.9), false);
         assert_eq!(
             at(0.0),
             Strip {
@@ -276,22 +301,14 @@ mod tests {
     }
 
     #[test]
-    fn the_first_unseen_alert_pops_to_twelve_then_settles_at_six() {
+    fn each_gain_pops_to_twelve_then_settles_at_six() {
         assert!(near(unseen_strip(steady(0.0), false).thickness, 4.0));
         assert!(near(unseen_strip(steady(0.12), false).thickness, 12.0));
         assert!(near(unseen_strip(steady(0.36), false).thickness, 6.0));
         assert!(unseen_moving(steady(0.3)));
-        assert!(!unseen_moving(steady(1.0)));
-        let later_alert = Attention {
-            since_first: 10.0,
-            since_newest: 0.05,
-        };
-        assert_eq!(unseen_strip(later_alert, false).thickness, 6.0);
-        assert!(!unseen_moving(later_alert));
-        assert!(unseen_moving(Attention {
-            since_first: 10.0,
-            since_newest: 3.2,
-        }));
+        assert!(!unseen_moving(steady(0.5)));
+        assert!(unseen_moving(steady(1.0)));
+        assert!(!unseen_moving(steady(1.6)));
     }
 
     #[test]
@@ -308,14 +325,45 @@ mod tests {
     }
 
     #[test]
-    fn bursts_repeat_every_three_seconds_for_two_minutes_then_every_ten() {
-        assert_eq!(next_burst(0.0), 3.0);
-        assert_eq!(next_burst(3.5), 6.0);
-        assert_eq!(next_burst(119.0), 120.0);
-        assert_eq!(next_burst(120.0), 130.0);
-        assert_eq!(next_burst(131.0), 140.0);
-        assert!(unseen_moving(steady(117.5)) && !unseen_moving(steady(118.0)));
-        assert!(unseen_moving(steady(130.5)) && !unseen_moving(steady(133.0)));
+    fn one_burst_follows_the_gain_then_reminders_follow_the_repeat_setting() {
+        let every = |repeat: f64, since_gain: f64| Attention { since_gain, repeat };
+        assert_eq!(next_burst(every(60.0, 0.0)), Some(0.6));
+        assert_eq!(next_burst(every(60.0, 0.7)), Some(60.0));
+        assert_eq!(next_burst(every(60.0, 60.5)), Some(120.0));
+        assert_eq!(next_burst(every(30.0, 31.0)), Some(60.0));
+        assert_eq!(next_burst(every(300.0, 2.0)), Some(300.0));
+        assert_eq!(next_burst(every(0.0, 0.2)), Some(0.6));
+        assert_eq!(next_burst(every(0.0, 0.7)), None);
+        assert!(unseen_moving(every(60.0, 60.5)) && !unseen_moving(every(60.0, 61.0)));
+        assert!(unseen_moving(every(120.0, 240.3)) && !unseen_moving(every(120.0, 60.3)));
+        assert!(!unseen_moving(every(0.0, 60.3)) && !unseen_moving(every(0.0, 600.3)));
+        assert!(near(
+            unseen_strip(every(30.0, 30.45), false).thickness,
+            10.0
+        ));
+        assert_eq!(unseen_strip(every(0.0, 30.45), false).thickness, 6.0);
+    }
+
+    #[test]
+    fn a_peek_slides_out_holds_and_slides_back() {
+        assert_eq!(peek_extent(-0.1, 4.0, false), None);
+        assert!(near(peek_extent(0.0, 4.0, false).unwrap(), 0.0));
+        let rising = peek_extent(0.09, 4.0, false).unwrap();
+        assert!(rising > 0.5 && rising < 1.0, "{rising}");
+        assert_eq!(peek_extent(0.18, 4.0, false), Some(1.0));
+        assert_eq!(peek_extent(4.17, 4.0, false), Some(1.0));
+        let falling = peek_extent(4.26, 4.0, false).unwrap();
+        assert!(falling > 0.0 && falling < 0.5, "{falling}");
+        assert_eq!(peek_extent(4.34, 4.0, false), None);
+        assert!(peek_moving(0.1, 4.0, false) && !peek_moving(2.0, 4.0, false));
+        assert!(peek_moving(4.2, 4.0, false) && !peek_moving(4.4, 4.0, false));
+        assert!(near(peek_next_change(1.18, 4.0, false).unwrap(), 3.0));
+        assert_eq!(peek_next_change(4.4, 4.0, false), None);
+        assert_eq!(peek_extent(0.0, 2.0, true), Some(1.0));
+        assert_eq!(peek_extent(1.99, 2.0, true), Some(1.0));
+        assert_eq!(peek_extent(2.0, 2.0, true), None);
+        assert!(!peek_moving(0.0, 2.0, true));
+        assert_eq!(peek_next_change(0.5, 2.0, true), Some(1.5));
     }
 
     #[test]

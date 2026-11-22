@@ -20,7 +20,7 @@ pub use account::{
     AccountSources, AccountUsage, ClaudeUsageProber, ProbeFuture, UsageProber, UsageSource,
     claude_json_path,
 };
-pub use beacon_protocol::{Endpoint, home_dir};
+pub use beacon_protocol::{AUTOSTART_FILE, BACKGROUND_ARG, Endpoint, home_dir};
 pub use config::{Config, LiveConfig, LogLevel};
 pub use control::{
     ControlClient, Decision, PendingDecision, Reply, Request, Resolution, ResolvedDecision,

@@ -1,11 +1,12 @@
 mod platform;
 
 use beacon_protocol::{
-    DOCTOR_EVENT, Endpoint, FORWARDED_ENV, HookReply, HookRequest, VERSION, home_dir,
-    is_waiting_event,
+    AUTOSTART_FILE, BACKGROUND_ARG, DOCTOR_EVENT, Endpoint, FORWARDED_ENV, HookReply, HookRequest,
+    LAUNCHING_FILE, VERSION, home_dir, is_waiting_event,
 };
 use std::fmt::Write as _;
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
+use std::path::Path;
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -13,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const CONNECT_BUDGET: Duration = Duration::from_millis(150);
 const SEND_BUDGET: Duration = Duration::from_secs(2);
 const REPLY_BUDGET: Duration = Duration::from_secs(1);
+const LAUNCH_THROTTLE: Duration = Duration::from_secs(20);
 
 static STDOUT: Mutex<()> = Mutex::new(());
 
@@ -53,10 +55,22 @@ fn start_watchdog(started: Instant, reply_budget: Option<Duration>) -> Sender<()
 }
 
 fn forward(event: &str, started: Instant, sent: Sender<()>) -> Option<Vec<u8>> {
-    let endpoint = Endpoint::read(&home_dir()?)?;
+    let home = home_dir()?;
+    let Some(endpoint) = Endpoint::read(&home) else {
+        start_app(&home, event);
+        return None;
+    };
     let mut payload = Vec::new();
     std::io::stdin().read_to_end(&mut payload).ok()?;
-    let mut pipe = platform::open_pipe(&endpoint.pipe_name, started + CONNECT_BUDGET)?;
+    let mut pipe = match platform::open_pipe(&endpoint.pipe_name, started + CONNECT_BUDGET) {
+        Ok(pipe) => pipe,
+        Err(error) => {
+            if error.kind() == ErrorKind::NotFound {
+                start_app(&home, event);
+            }
+            return None;
+        }
+    };
     let request = HookRequest {
         meta: meta_json(event).into_bytes(),
         payload,
@@ -71,6 +85,26 @@ fn forward(event: &str, started: Instant, sent: Sender<()>) -> Option<Vec<u8>> {
         HookReply::Stdout(bytes) => Some(bytes),
         HookReply::NoDecision => None,
     }
+}
+
+fn start_app(home: &Path, event: &str) {
+    let wanted = matches!(event, "SessionStart" | "UserPromptSubmit")
+        && std::env::var_os("CLAUDE_CODE_SESSION_ATTENDED").is_none_or(|attended| attended != "0");
+    if !wanted {
+        return;
+    }
+    let Ok(app) = std::fs::read_to_string(home.join(AUTOSTART_FILE)) else {
+        return;
+    };
+    let throttle = home.join(LAUNCHING_FILE);
+    let launched_lately = std::fs::metadata(&throttle)
+        .and_then(|metadata| metadata.modified())
+        .is_ok_and(|touched| touched.elapsed().is_ok_and(|age| age < LAUNCH_THROTTLE));
+    if launched_lately {
+        return;
+    }
+    let _ = std::fs::write(&throttle, std::process::id().to_string());
+    platform::start_detached(Path::new(app.trim()), BACKGROUND_ARG);
 }
 
 fn meta_json(event: &str) -> String {

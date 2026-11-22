@@ -1,4 +1,5 @@
 mod frames;
+mod layer;
 pub mod pill;
 pub mod registry;
 mod text;

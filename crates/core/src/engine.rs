@@ -1159,6 +1159,8 @@ fn timeline_label(event_name: &str, event: &Event, cwd: Option<&str>) -> String 
         Event::SessionStart { source, .. } => described("Session started", source, parenthesised),
         Event::SessionEnd { reason } => described("Session ended", reason, parenthesised),
         Event::SubagentStart { agent_type } => described("Subagent started", agent_type, colon),
+        Event::TaskCreated { task_subject, .. } => described("Task added", task_subject, colon),
+        Event::TaskCompleted { task_subject, .. } => described("Task done", task_subject, colon),
         _ => event_name.to_string(),
     }
 }

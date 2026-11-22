@@ -6,8 +6,8 @@ const PANEL_GAP: f64 = 8.0;
 const PANEL_WIDTH: f64 = 340.0;
 const PANEL_MIN_HEIGHT: f64 = 120.0;
 const PANEL_SCREEN_ALLOWANCE: f64 = 24.0;
-const TAB_LENGTH: f64 = 72.0;
 const DOCK_DISTANCE: f64 = 80.0;
+const PEEK_GAP: f64 = 6.0;
 const EDGE_ORDER: [Edge; 4] = [Edge::Right, Edge::Left, Edge::Top, Edge::Bottom];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -285,8 +285,14 @@ fn span(bounds: &Rect, edge: Edge) -> (i32, i32) {
     }
 }
 
-pub fn tab_rect(bounds: &Rect, placement: TabPlacement, depth: f64, scale: f64) -> Rect {
-    let (length, depth) = (px(TAB_LENGTH, scale), px(depth, scale));
+pub fn tab_rect(
+    bounds: &Rect,
+    placement: TabPlacement,
+    length: f64,
+    depth: f64,
+    scale: f64,
+) -> Rect {
+    let (length, depth) = (px(length, scale), px(depth, scale));
     let (start, end) = span(bounds, placement.edge);
     let centre = start + (f64::from(end - start) * placement.offset.clamp(0.0, 1.0)).round() as i32;
     let along = (centre - length / 2).clamp(start, (end - length).max(start));
@@ -296,6 +302,50 @@ pub fn tab_rect(bounds: &Rect, placement: TabPlacement, depth: f64, scale: f64) 
         Edge::Top => Rect::sized(along, bounds.top, length, depth),
         Edge::Bottom => Rect::sized(along, bounds.bottom - depth, length, depth),
     }
+}
+
+pub fn pill_reveal_strip(pill: Rect, work: &Rect, depth: f64, scale: f64) -> Option<Rect> {
+    let (margin, depth) = (px(EDGE_MARGIN, scale), px(depth, scale));
+    if pill.top - work.top == margin {
+        Some(Rect::sized(pill.left, work.top, pill.width(), depth))
+    } else if work.bottom - pill.bottom == margin {
+        Some(Rect::sized(
+            pill.left,
+            work.bottom - depth,
+            pill.width(),
+            depth,
+        ))
+    } else if pill.left - work.left == margin {
+        Some(Rect::sized(work.left, pill.top, depth, pill.height()))
+    } else if work.right - pill.right == margin {
+        Some(Rect::sized(
+            work.right - depth,
+            pill.top,
+            depth,
+            pill.height(),
+        ))
+    } else {
+        None
+    }
+}
+
+pub fn peek_rect(
+    anchor: Rect,
+    edge: Edge,
+    (width, height): (i32, i32),
+    tucked: f64,
+    area: &Rect,
+    scale: f64,
+) -> Rect {
+    let (gap, tucked) = (px(PEEK_GAP, scale), px(tucked, scale));
+    let (x, y) = anchor.centre();
+    let (left, top) = match edge {
+        Edge::Left => (anchor.right + gap - tucked, y - height / 2),
+        Edge::Right => (anchor.left - gap - width + tucked, y - height / 2),
+        Edge::Top => (x - width / 2, anchor.bottom + gap - tucked),
+        Edge::Bottom => (x - width / 2, anchor.top - gap - height + tucked),
+    };
+    Rect::sized(left, top, width, height).kept_inside(area)
 }
 
 fn shares_segment(from: i32, to: i32, other_from: i32, other_to: i32) -> bool {
@@ -610,10 +660,10 @@ pub(crate) mod tests {
     fn a_span_shorter_than_the_tab_starts_the_tab_at_its_origin() {
         let empty = Rect::sized(0, 0, 0, 0);
         for edge in [Edge::Left, Edge::Right] {
-            assert_eq!(tab_rect(&empty, at(edge, 0.5), 4.0, 1.0).top, 0);
+            assert_eq!(tab_rect(&empty, at(edge, 0.5), 72.0, 4.0, 1.0).top, 0);
         }
         for edge in [Edge::Top, Edge::Bottom] {
-            assert_eq!(tab_rect(&empty, at(edge, 0.5), 4.0, 1.0).left, 0);
+            assert_eq!(tab_rect(&empty, at(edge, 0.5), 72.0, 4.0, 1.0).left, 0);
         }
     }
 
@@ -700,22 +750,22 @@ pub(crate) mod tests {
         ];
         for (edge, scale, strip, hover) in cases {
             assert_eq!(
-                tab_rect(&bar, at(edge, 0.5), 4.0, scale),
+                tab_rect(&bar, at(edge, 0.5), 72.0, 4.0, scale),
                 strip,
                 "{edge:?} at {scale}"
             );
             assert_eq!(
-                tab_rect(&bar, at(edge, 0.5), 8.0, scale),
+                tab_rect(&bar, at(edge, 0.5), 72.0, 8.0, scale),
                 hover,
                 "{edge:?} at {scale}"
             );
         }
         assert_eq!(
-            tab_rect(&bar, at(Edge::Left, 0.0), 8.0, 1.0),
+            tab_rect(&bar, at(Edge::Left, 0.0), 72.0, 8.0, 1.0),
             Rect::sized(-3000, 0, 8, 72)
         );
         assert_eq!(
-            tab_rect(&bar, at(Edge::Top, 1.0), 8.0, 1.0),
+            tab_rect(&bar, at(Edge::Top, 1.0), 72.0, 8.0, 1.0),
             Rect::sized(-1152, 0, 72, 8)
         );
     }
@@ -725,7 +775,7 @@ pub(crate) mod tests {
         let oled = monitor("oled", Rect::sized(0, 0, 2560, 1440), 48, 1.0, true);
         let place = |edge, offset| {
             place_panel_on_edge(
-                tab_rect(&oled.bounds, at(edge, offset), 8.0, 1.0),
+                tab_rect(&oled.bounds, at(edge, offset), 72.0, 8.0, 1.0),
                 edge,
                 &oled,
                 300.0,
@@ -757,7 +807,7 @@ pub(crate) mod tests {
         let oled = monitor("oled", Rect::sized(0, 0, 2560, 1440), 48, 1.0, true);
         let place = |edge, offset, content_height| {
             place_panel_on_edge(
-                tab_rect(&oled.bounds, at(edge, offset), 8.0, 1.0),
+                tab_rect(&oled.bounds, at(edge, offset), 72.0, 8.0, 1.0),
                 edge,
                 &oled,
                 content_height,
@@ -787,7 +837,7 @@ pub(crate) mod tests {
         );
         let bar = &owner_desk()[2];
         let on_bar = place_panel_on_edge(
-            tab_rect(&bar.bounds, at(Edge::Left, 0.5), 8.0, 1.0),
+            tab_rect(&bar.bounds, at(Edge::Left, 0.5), 72.0, 8.0, 1.0),
             Edge::Left,
             bar,
             3000.0,
@@ -819,6 +869,87 @@ pub(crate) mod tests {
         let philips = &owner_desk()[1];
         assert!(near_edge(philips, Edge::Top, (-500, 80)));
         assert!(!near_edge(philips, Edge::Top, (-500, 81)));
+    }
+
+    #[test]
+    fn the_tab_length_follows_the_chosen_size() {
+        let bar = Rect::sized(-3000, 0, 1920, 464);
+        assert_eq!(
+            tab_rect(&bar, at(Edge::Left, 0.5), 56.0, 3.0, 1.0),
+            Rect::sized(-3000, 204, 3, 56)
+        );
+        assert_eq!(
+            tab_rect(&bar, at(Edge::Top, 0.5), 96.0, 6.0, 1.5),
+            Rect::sized(-2112, 0, 144, 9)
+        );
+    }
+
+    #[test]
+    fn a_pill_has_a_reveal_strip_only_when_snapped_to_a_work_area_edge() {
+        let work = Rect::sized(0, 0, 1920, 1032);
+        let pill = |left, top| Rect::sized(left, top, 100, 28);
+        assert_eq!(
+            pill_reveal_strip(pill(1808, 12), &work, 2.0, 1.0),
+            Some(Rect::sized(1808, 0, 100, 2))
+        );
+        assert_eq!(
+            pill_reveal_strip(pill(400, 992), &work, 2.0, 1.0),
+            Some(Rect::sized(400, 1030, 100, 2))
+        );
+        assert_eq!(
+            pill_reveal_strip(pill(12, 500), &work, 2.0, 1.0),
+            Some(Rect::sized(0, 500, 2, 28))
+        );
+        assert_eq!(
+            pill_reveal_strip(pill(1808, 500), &work, 2.0, 1.0),
+            Some(Rect::sized(1918, 500, 2, 28))
+        );
+        assert_eq!(pill_reveal_strip(pill(800, 500), &work, 2.0, 1.0), None);
+        assert_eq!(
+            pill_reveal_strip(Rect::sized(18, 18, 150, 42), &work, 2.0, 1.5),
+            Some(Rect::sized(18, 0, 150, 3))
+        );
+    }
+
+    #[test]
+    fn the_peek_slides_from_the_anchor_toward_the_screen_interior() {
+        let bar = Rect::sized(-3000, 0, 1920, 464);
+        let size = (160, 26);
+        let tab = tab_rect(&bar, at(Edge::Left, 0.5), 72.0, 8.0, 1.0);
+        assert_eq!(
+            peek_rect(tab, Edge::Left, size, 0.0, &bar, 1.0),
+            Rect::sized(-3000 + 8 + 6, 219, 160, 26)
+        );
+        assert_eq!(
+            peek_rect(tab, Edge::Left, size, 12.0, &bar, 1.0),
+            Rect::sized(-3000 + 2, 219, 160, 26)
+        );
+        let right = tab_rect(&bar, at(Edge::Right, 0.0), 72.0, 8.0, 1.0);
+        assert_eq!(
+            peek_rect(right, Edge::Right, size, 0.0, &bar, 1.0),
+            Rect::sized(-1080 - 8 - 6 - 160, 23, 160, 26)
+        );
+        let top = tab_rect(&bar, at(Edge::Top, 0.5), 72.0, 8.0, 1.0);
+        assert_eq!(
+            peek_rect(top, Edge::Top, size, 12.0, &bar, 1.0),
+            Rect::sized(-2120, 2, 160, 26)
+        );
+        let pill = Rect::sized(-1200, 436, 100, 28);
+        assert_eq!(
+            peek_rect(pill, Edge::Bottom, size, 0.0, &bar, 1.0),
+            Rect::sized(-1240, 436 - 6 - 26, 160, 26)
+        );
+        assert_eq!(
+            peek_rect(
+                Rect::sized(-1150, 12, 100, 28),
+                Edge::Top,
+                size,
+                0.0,
+                &bar,
+                1.0
+            ),
+            Rect::sized(-1240, 46, 160, 26)
+        );
     }
 
     #[test]

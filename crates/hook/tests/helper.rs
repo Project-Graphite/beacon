@@ -63,6 +63,10 @@ fn start_core(home: &TempHome) -> CoreHandle {
 }
 
 fn spawn_helper(home: &TempHome, event: &str, payload: &[u8]) -> Child {
+    spawn_helper_attended(home, event, payload, "1")
+}
+
+fn spawn_helper_attended(home: &TempHome, event: &str, payload: &[u8], attended: &str) -> Child {
     let own_pid = std::process::id().to_string();
     let mut child = Command::new(env!("CARGO_BIN_EXE_beacon-hook"))
         .arg(event)
@@ -74,7 +78,7 @@ fn spawn_helper(home: &TempHome, event: &str, payload: &[u8]) -> Child {
         .env("BEACON_HOME", &home.0)
         .env("CLAUDE_PID", own_pid)
         .env("CLAUDE_CODE_ENTRYPOINT", "sdk-cli")
-        .env("CLAUDE_CODE_SESSION_ATTENDED", "1")
+        .env("CLAUDE_CODE_SESSION_ATTENDED", attended)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -417,4 +421,99 @@ fn timing_of_non_waiting_events() {
     println!(
         "beacon-hook {profile} median over 30 PreToolUse runs: {with_core:.2} ms with the core, {without_core:.2} ms without"
     );
+}
+
+fn with_marker(home: &TempHome) {
+    let stand_in = std::path::Path::new(env!("CARGO_BIN_EXE_beacon-hook"))
+        .with_file_name("examples")
+        .join("stand_in_app.exe");
+    assert!(stand_in.is_file(), "missing {}", stand_in.display());
+    std::fs::write(
+        home.0.join("autostart"),
+        stand_in.to_string_lossy().as_bytes(),
+    )
+    .unwrap();
+}
+
+fn quiet_run(home: &TempHome, event: &str, payload: &[u8], attended: &str) {
+    assert!(
+        finished(spawn_helper_attended(home, event, payload, attended))
+            .stdout
+            .is_empty()
+    );
+}
+
+fn launches(home: &TempHome) -> Vec<String> {
+    std::thread::sleep(Duration::from_secs(1));
+    std::fs::read_to_string(home.0.join("launches"))
+        .map(|text| text.lines().map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn with_the_core_down_a_session_start_launches_the_app_once_per_throttle_window() {
+    let home = TempHome::new();
+    with_marker(&home);
+    quiet_run(&home, "SessionStart", SESSION_START, "1");
+    assert_eq!(launches(&home), ["--background"]);
+    quiet_run(&home, "SessionStart", SESSION_START, "1");
+    quiet_run(&home, "UserPromptSubmit", USER_PROMPT_SUBMIT, "1");
+    assert_eq!(launches(&home), ["--background"]);
+    std::fs::File::options()
+        .write(true)
+        .open(home.0.join("launching"))
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - Duration::from_secs(21))
+        .unwrap();
+    quiet_run(&home, "SessionStart", SESSION_START, "1");
+    assert_eq!(launches(&home), ["--background", "--background"]);
+}
+
+#[test]
+fn a_prompt_launches_the_app_when_the_endpoint_names_a_missing_pipe() {
+    let home = TempHome::new();
+    with_marker(&home);
+    std::fs::write(
+        home.0.join("endpoint"),
+        beacon_protocol::Endpoint {
+            pipe_name: r"\\.\pipe\beacon-0000000000000000".to_string(),
+            token: "ab".repeat(32),
+        }
+        .to_file_text(),
+    )
+    .unwrap();
+    quiet_run(&home, "UserPromptSubmit", USER_PROMPT_SUBMIT, "1");
+    assert_eq!(launches(&home), ["--background"]);
+}
+
+#[test]
+fn other_events_unattended_sessions_and_a_missing_marker_launch_nothing() {
+    let home = TempHome::new();
+    with_marker(&home);
+    for (event, payload) in [
+        ("PreToolUse", PRE_TOOL_USE),
+        ("Stop", STOP),
+        ("SessionEnd", SESSION_END),
+    ] {
+        quiet_run(&home, event, payload, "1");
+    }
+    quiet_run(&home, "SessionStart", SESSION_START, "0");
+    assert!(launches(&home).is_empty());
+    assert!(!home.0.join("launching").exists());
+    let unmarked = TempHome::new();
+    quiet_run(&unmarked, "SessionStart", SESSION_START, "1");
+    assert!(launches(&unmarked).is_empty());
+    assert!(!unmarked.0.join("launching").exists());
+}
+
+#[test]
+fn with_the_core_up_nothing_is_launched() {
+    let home = TempHome::new();
+    let core = start_core(&home);
+    with_marker(&home);
+    quiet_run(&home, "SessionStart", SESSION_START, "1");
+    quiet_run(&home, "UserPromptSubmit", USER_PROMPT_SUBMIT, "1");
+    assert!(launches(&home).is_empty());
+    assert!(!home.0.join("launching").exists());
+    core.shutdown().unwrap();
 }
