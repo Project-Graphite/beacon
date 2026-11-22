@@ -37,6 +37,7 @@ test('settings the shell does not send yet read as their defaults', () => {
     start_mode: 'claude',
     quit_when_idle_minutes: 15,
     pin_while_active: false,
+    open_on_hover: true,
   });
   assert.deepEqual(uiSettings({}), UI_DEFAULTS);
 });
@@ -54,6 +55,7 @@ test('settings the shell sends are kept, clamped to their ranges and limited to 
     start_mode: 'manual',
     quit_when_idle_minutes: 0,
     pin_while_active: true,
+    open_on_hover: false,
   } as const;
   assert.deepEqual(uiSettings(sent), sent);
   const odd = uiSettings({
@@ -174,6 +176,7 @@ test('pinning while Claude is active is off by default and every other default i
     start_mode: 'claude',
     quit_when_idle_minutes: 15,
     pin_while_active: false,
+    open_on_hover: true,
   });
   assert.equal(uiSettings({ pin_while_active: true }).pin_while_active, true);
 });

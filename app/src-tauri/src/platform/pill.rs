@@ -1,6 +1,6 @@
 use super::frames::{self, WM_FRAME};
 use super::layer::Layer;
-use super::{GdiText, cursor_position, monitor_info, monitors, reduced_motion, refresh_rate};
+use super::{GdiText, monitor_info, monitors, reduced_motion, refresh_rate};
 use crate::displays::{Position, dock, landing, target};
 use crate::geometry::{
     Corner, Edge, Monitor, Rect, TabPlacement, corner_rect, default_placement, layout_signature,
@@ -14,8 +14,8 @@ use crate::motion::{
 };
 use crate::positions::{self, AttentionStyle, Style, UiSettings};
 use crate::raster::{
-    Canvas, PillMotion, Rgb, mix, paint_hit_area, paint_peek, paint_pill, paint_tab, render_pill,
-    tone_paint,
+    Canvas, Chevron, PillMotion, Rgb, mix, on_chevron, paint_hit_area, paint_peek, paint_pill,
+    paint_tab, render_pill, tone_paint,
 };
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -69,6 +69,7 @@ const STILL_DEPTH: f64 = 8.0;
 const PULSING_DEPTH: f64 = 18.0;
 const REVEAL_DEPTH: f64 = 2.0;
 const PEEK_SLIDE: f64 = 12.0;
+const CHEVRON_TURN: f64 = 0.18;
 
 static WINDOW: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 
@@ -77,6 +78,8 @@ pub enum PillEvent {
     Entered,
     Hovered,
     Clicked,
+    ChevronPressed,
+    Dragged,
     Moved,
     HoverTick,
     ForegroundChanged,
@@ -94,6 +97,7 @@ pub struct TabModel {
 
 struct Press {
     cursor: (i32, i32),
+    last: (i32, i32),
     origin: Rect,
     placement: TabPlacement,
     dragging: bool,
@@ -157,6 +161,8 @@ struct Pill {
     peek: Option<ShownPeek>,
     peek_layer: Layer,
     press_hook: HHOOK,
+    chevron: Tween,
+    chevron_hot: bool,
 }
 
 thread_local! {
@@ -256,6 +262,8 @@ pub fn create(
         peek: None,
         peek_layer: Layer::create(&class)?,
         press_hook: null_mut(),
+        chevron: Tween::rest(0.0),
+        chevron_hot: false,
     };
     pill.relocate();
     pill.fullscreen = foreground_is_fullscreen(hwnd);
@@ -365,6 +373,18 @@ pub fn peek(peek: Peek) {
 pub fn dismiss_peek() {
     with_pill(|pill| {
         if pill.peek.take().is_some() {
+            pill.present();
+            pill.schedule();
+        }
+    });
+}
+
+pub fn set_panel_open(open: bool) {
+    with_pill(|pill| {
+        let turn = if open { 1.0 } else { 0.0 };
+        if pill.chevron.target() != turn {
+            let (now, duration) = (pill.now(), pill.duration(CHEVRON_TURN));
+            pill.chevron.head_to(turn, now, duration, Curve::Settle);
             pill.present();
             pill.schedule();
         }
@@ -498,6 +518,13 @@ pub fn watch_presses(watching: bool) {
             pill.press_hook = null_mut();
         }
     });
+}
+
+fn pointer(lparam: LPARAM) -> (i32, i32) {
+    (
+        i32::from(lparam as u16 as i16),
+        i32::from((lparam >> 16) as u16 as i16),
+    )
 }
 
 fn track_hover(hwnd: HWND, hover_ms: u32) -> bool {
@@ -644,6 +671,10 @@ impl Pill {
             &PillMotion {
                 growths: &self.growths,
                 width: Some(self.width.value(now).round() as usize),
+                chevron: Chevron {
+                    turn: self.chevron.value(now) as f32,
+                    hot: self.chevron_hot,
+                },
             },
         );
         resize_anchored(
@@ -781,6 +812,7 @@ impl Pill {
             || match self.style {
                 Style::Pill => {
                     self.model.animates(self.reduced_motion)
+                        || self.chevron.moving(now)
                         || self.width.moving(now)
                         || self.mark_pops.iter().any(|start| now - start < MARK_POP)
                 }
@@ -933,7 +965,7 @@ impl Pill {
         self.save(&monitors, &monitor.id);
     }
 
-    fn finish_tab_drag(&mut self, origin: TabPlacement) {
+    fn finish_tab_drag(&mut self, origin: TabPlacement, cursor: (i32, i32)) {
         let monitors = monitors();
         let from = self.rect;
         let docked = monitors
@@ -941,7 +973,7 @@ impl Pill {
             .find(|monitor| monitor.id == self.display)
             .and_then(|current| {
                 dock(
-                    cursor_position(),
+                    cursor,
                     current,
                     self.placement.edge,
                     &monitors,
@@ -971,8 +1003,7 @@ impl Pill {
         }
     }
 
-    fn drag(&mut self, press_cursor: (i32, i32), origin: Rect) {
-        let (x, y) = cursor_position();
+    fn drag(&mut self, press_cursor: (i32, i32), origin: Rect, (x, y): (i32, i32)) {
         match self.style {
             Style::Pill => self.move_to(
                 origin.left + x - press_cursor.0,
@@ -982,6 +1013,22 @@ impl Pill {
                 self.placement = slide(&self.bounds, self.placement.edge, (x, y));
                 self.present();
             }
+        }
+    }
+
+    fn on_chevron(&self, (x, y): (i32, i32)) -> bool {
+        self.style == Style::Pill
+            && on_chevron(
+                (x as f32 + 0.5, y as f32 + 0.5),
+                self.canvas.width,
+                self.pill_scale() as f32,
+            )
+    }
+
+    fn light_chevron(&mut self, hot: bool) {
+        if self.chevron_hot != hot {
+            self.chevron_hot = hot;
+            self.present();
         }
     }
 
@@ -1026,16 +1073,20 @@ impl Pill {
                     self.tracking = track_hover(self.hwnd, HOVER_MS);
                 }
                 self.hover(true);
+                let point = pointer(lparam);
+                let screen = (self.rect.left + point.0, self.rect.top + point.1);
                 let slop = (CLICK_SLOP * self.scale) as i32;
                 let dragged = self.press.as_mut().and_then(|press| {
-                    let (x, y) = cursor_position();
-                    let (dx, dy) = (x - press.cursor.0, y - press.cursor.1);
+                    press.last = screen;
+                    let (dx, dy) = (screen.0 - press.cursor.0, screen.1 - press.cursor.1);
                     press.dragging |= dx.abs() > slop || dy.abs() > slop;
                     press.dragging.then_some((press.cursor, press.origin))
                 });
                 if let Some((cursor, origin)) = dragged {
-                    self.drag(cursor, origin);
+                    self.drag(cursor, origin, screen);
+                    return Some(Some(PillEvent::Dragged));
                 }
+                self.light_chevron(self.press.is_none() && self.on_chevron(point));
                 Some(entered.then_some(PillEvent::Entered))
             }
             WM_MOUSEHOVER => Some(
@@ -1044,16 +1095,23 @@ impl Pill {
             WM_MOUSELEAVE => {
                 self.tracking = false;
                 self.pressed_since_entry = false;
+                self.light_chevron(false);
                 if self.press.is_none() {
                     self.hover(false);
                 }
                 Some(None)
             }
             WM_LBUTTONDOWN => {
-                unsafe { SetCapture(self.hwnd) };
+                let point = pointer(lparam);
                 self.pressed_since_entry = true;
+                if self.on_chevron(point) {
+                    return Some(Some(PillEvent::ChevronPressed));
+                }
+                unsafe { SetCapture(self.hwnd) };
+                let screen = (self.rect.left + point.0, self.rect.top + point.1);
                 self.press = Some(Press {
-                    cursor: cursor_position(),
+                    cursor: screen,
+                    last: screen,
                     origin: self.rect,
                     placement: self.placement,
                     dragging: false,
@@ -1071,21 +1129,24 @@ impl Pill {
                         self.hover(false);
                         match self.style {
                             Style::Pill => self.finish_drag(press.origin),
-                            Style::Tab => self.finish_tab_drag(press.placement),
+                            Style::Tab => self.finish_tab_drag(press.placement, press.last),
                         }
                         Some(PillEvent::Moved)
                     }
-                    Some(_) if message == WM_LBUTTONUP => Some(PillEvent::Clicked),
+                    Some(_) if message == WM_LBUTTONUP && self.style == Style::Tab => {
+                        Some(PillEvent::Clicked)
+                    }
                     _ => None,
                 })
             }
             WM_FRAME => {
                 frames::received();
+                let gliding = self.glide.is_some();
                 if self.framing {
                     self.present();
                     self.schedule();
                 }
-                Some(None)
+                Some(gliding.then_some(PillEvent::Dragged))
             }
             WM_TIMER if wparam == WAKE_TIMER => {
                 unsafe { KillTimer(self.hwnd, WAKE_TIMER) };

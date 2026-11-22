@@ -31,6 +31,7 @@ export const UI_DEFAULTS: UiSettings = {
   start_mode: 'claude',
   quit_when_idle_minutes: 15,
   pin_while_active: false,
+  open_on_hover: true,
 };
 
 export const OPACITY_RANGE = { min: 0.2, max: 1, step: 0.05 };

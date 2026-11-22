@@ -253,6 +253,7 @@ export interface UiSettings {
   start_mode: StartMode;
   quit_when_idle_minutes: number;
   pin_while_active: boolean;
+  open_on_hover: boolean;
 }
 
 export type OverlayStyle = 'tab' | 'pill';

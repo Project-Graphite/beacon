@@ -182,6 +182,12 @@ struct UiFile {
         deserialize_with = "lenient"
     )]
     pin_while_active: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    open_on_hover: Option<bool>,
     #[serde(flatten)]
     choice: DisplayChoice,
 }
@@ -202,6 +208,7 @@ pub struct UiSettings {
     pub start_mode: StartMode,
     pub quit_when_idle_minutes: u64,
     pub pin_while_active: bool,
+    pub open_on_hover: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -220,6 +227,7 @@ pub struct UiSettingsChange {
     pub start_mode: Option<StartMode>,
     pub quit_when_idle_minutes: Option<u64>,
     pub pin_while_active: Option<bool>,
+    pub open_on_hover: Option<bool>,
 }
 
 fn read(home: &Path) -> UiFile {
@@ -274,7 +282,14 @@ fn settings_of(file: UiFile) -> UiSettings {
             DEFAULT_QUIT_MINUTES,
         ),
         pin_while_active: file.pin_while_active.unwrap_or(false),
+        open_on_hover: file
+            .open_on_hover
+            .unwrap_or_else(|| hover_opens_by_default(file.style.unwrap_or_default())),
     }
+}
+
+pub fn hover_opens_by_default(style: Style) -> bool {
+    style == Style::Tab
 }
 
 pub fn save_ui_settings(home: &Path, change: UiSettingsChange) -> io::Result<()> {
@@ -297,6 +312,7 @@ pub fn save_ui_settings(home: &Path, change: UiSettingsChange) -> io::Result<()>
             .quit_when_idle_minutes
             .or(file.quit_when_idle_minutes);
         file.pin_while_active = change.pin_while_active.or(file.pin_while_active);
+        file.open_on_hover = change.open_on_hover.or(file.open_on_hover);
     })
 }
 
@@ -514,6 +530,7 @@ mod tests {
                 toasts_enabled: false,
                 toast_on_finished: true,
                 sounds_enabled: true,
+                open_on_hover: false,
                 ..UiSettings::default()
             }
         );
@@ -584,6 +601,7 @@ mod tests {
                 start_mode: StartMode::Manual,
                 quit_when_idle_minutes: 60,
                 pin_while_active: false,
+                open_on_hover: false,
             }
         );
         let mut expected: serde_json::Value = serde_json::from_str(existing).unwrap();
@@ -655,6 +673,37 @@ mod tests {
         std::fs::write(home.join(UI_FILE), expected.to_string()).unwrap();
         assert!(!ui_settings(&home).pin_while_active);
         assert_eq!(ui_settings(&home).hotkey, "Ctrl+Shift+B");
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn hover_opens_the_panel_by_default_for_the_tab_and_not_for_the_pill() {
+        assert!(hover_opens_by_default(Style::Tab));
+        assert!(!hover_opens_by_default(Style::Pill));
+        let home = std::env::temp_dir().join(format!("beacon-hover-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let existing = r#"{"pill_positions":{"a":{"left":1,"top":2,"right":4,"bottom":6}},"hotkey":"Ctrl+Shift+B","pin_while_active":true,"display":"philips","avoid_displays":["oled"]}"#;
+        std::fs::write(home.join(UI_FILE), existing).unwrap();
+        assert!(ui_settings(&home).open_on_hover);
+        save_style(&home, Style::Pill).unwrap();
+        assert!(!ui_settings(&home).open_on_hover);
+        let change: UiSettingsChange = serde_json::from_str(r#"{"open_on_hover":true}"#).unwrap();
+        save_ui_settings(&home, change).unwrap();
+        save(&home, "a", Rect::sized(1, 2, 3, 4)).unwrap();
+        let settings = ui_settings(&home);
+        assert!(settings.open_on_hover);
+        assert!(settings.pin_while_active);
+        assert_eq!(settings.hotkey, "Ctrl+Shift+B");
+        let mut expected: serde_json::Value = serde_json::from_str(existing).unwrap();
+        expected["style"] = "pill".into();
+        expected["open_on_hover"] = true.into();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(home.join(UI_FILE)).unwrap()).unwrap();
+        assert_eq!(written, expected);
+        expected["open_on_hover"] = "yes".into();
+        std::fs::write(home.join(UI_FILE), expected.to_string()).unwrap();
+        assert!(!ui_settings(&home).open_on_hover);
         std::fs::remove_dir_all(&home).unwrap();
     }
 

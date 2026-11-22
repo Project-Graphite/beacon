@@ -117,6 +117,7 @@ pub struct Shell {
     was_active: bool,
     pin_dismissed: bool,
     pin_released: Option<Instant>,
+    revealed: Option<Instant>,
 }
 
 thread_local! {
@@ -169,6 +170,7 @@ impl Shell {
             was_active: false,
             pin_dismissed: false,
             pin_released: None,
+            revealed: None,
             feed,
         }
     }
@@ -178,11 +180,20 @@ impl Shell {
             Action::Snapshot(snapshot) => self.take_snapshot(snapshot),
             Action::Pill(PillEvent::Entered) => self.prepare(),
             Action::Pill(PillEvent::Hovered | PillEvent::RevealHovered)
-                if self.mode().is_none() =>
+                if self.mode().is_none() && self.settings.open_on_hover =>
             {
                 self.open(Mode::Hover, false)
             }
+            Action::Pill(PillEvent::RevealHovered) if self.mode().is_none() => {
+                self.revealed = Some(Instant::now());
+                self.recheck_after(LINGER);
+            }
             Action::Pill(PillEvent::Hovered | PillEvent::RevealHovered) => {}
+            Action::Pill(PillEvent::ChevronPressed) => match self.mode() {
+                Some(Mode::Sticky | Mode::Pinned) => self.put_away(),
+                _ => self.open(Mode::Sticky, false),
+            },
+            Action::Pill(PillEvent::Dragged) => self.place(),
             Action::Pill(PillEvent::PeekPressed) => self.open(Mode::Sticky, true),
             Action::Pill(PillEvent::Clicked) | Action::TogglePanel => match self.mode() {
                 Some(Mode::Sticky | Mode::Pinned) => self.put_away(),
@@ -257,6 +268,7 @@ impl Shell {
         self.announce();
         let mode = self.mode();
         pill::set_hover_polling(mode == Some(Mode::Hover));
+        pill::set_panel_open(mode.is_some());
         pill::watch_presses(mode.is_some_and(|mode| mode != Mode::Pinned));
         self.settle();
     }
@@ -355,6 +367,9 @@ impl Shell {
         let needed = !never
             && (self.mode().is_some()
                 || self.preview.is_some()
+                || self
+                    .revealed
+                    .is_some_and(|revealed| now.duration_since(revealed) < LINGER)
                 || overlay_wanted(self.snapshot.as_ref(), self.settings.visibility));
         let was_shown = self.presence == Presence::Shown;
         if let Some(linger) = self.presence.update(needed, now)

@@ -184,6 +184,11 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
             />
           )}
         </SettingsRow>
+        <SettingsRow label="Open on hover" help="Resting the pointer on the overlay opens the panel; otherwise click the tab or the pill's arrow.">
+          {(field) => (
+            <Switch field={field} checked={ui.open_on_hover} onChange={(open_on_hover) => change('overlay', { open_on_hover })} />
+          )}
+        </SettingsRow>
         <SettingsRow label="Size" help="Size of the edge tab or the pill.">
           {(field) => (
             <SegmentedControl

@@ -622,6 +622,25 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_dragged_pill_flips_the_panel_across_the_middle_and_keeps_it_in_the_work_area() {
+        let bar = monitor("bar", Rect::sized(-3000, 0, 1920, 464), 0, 1.0, false);
+        let place =
+            |left: i32, top: i32| place_panel(Some(Rect::sized(left, top, 46, 28)), &bar, 120.0).0;
+        assert_eq!(place(-2500, 200), Rect::sized(-2500, 236, 340, 120));
+        assert_eq!(place(-2500, 220), Rect::sized(-2500, 92, 340, 120));
+        assert_eq!(place(-1500, 200), Rect::sized(-1794, 236, 340, 120));
+        assert_eq!(place(-3000, 0), Rect::sized(-3000, 36, 340, 120));
+        assert_eq!(place(-1126, 0), Rect::sized(-1420, 36, 340, 120));
+        assert_eq!(place(-3000, 436), Rect::sized(-3000, 308, 340, 120));
+        assert_eq!(place(-1126, 436), Rect::sized(-1420, 308, 340, 120));
+        assert_eq!(place(-3020, 200), Rect::sized(-3000, 236, 340, 120));
+        assert_eq!(place(-1060, 200), Rect::sized(-1420, 236, 340, 120));
+        assert_eq!(place(-2500, 420), Rect::sized(-2500, 292, 340, 120));
+        let tall = place_panel(Some(Rect::sized(-2500, 200, 46, 28)), &bar, 2000.0).0;
+        assert_eq!(tall, Rect::sized(-2500, 24, 340, 440));
+    }
+
+    #[test]
     fn the_panel_scales_clamps_its_height_and_stays_inside_the_work_area() {
         let main = monitor("main", Rect::sized(0, 0, 1920, 1080), 48, 1.5, true);
         let (panel, scale) = place_panel(Some(Rect::sized(1800, 18, 100, 42)), &main, 40.0);

@@ -1,7 +1,7 @@
 use crate::geometry::Edge;
 use crate::model::{Mark, MarkKind, PillModel, TabTone, TrayState};
 use crate::motion::Curve;
-use std::f32::consts::TAU;
+use std::f32::consts::{PI, TAU};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
@@ -21,6 +21,8 @@ const PADDING: f32 = 10.0;
 const MARK_SIZE: f32 = 10.0;
 const MARK_GAP: f32 = 8.0;
 const COUNT_GAP: f32 = 6.0;
+const CHEVRON_GAP: f32 = 6.0;
+const CHEVRON_SIZE: f32 = 10.0;
 const FONT_SIZE: f32 = 11.0;
 const BAR_OPACITY: f32 = 0.96;
 const SNOOZED_OPACITY: f32 = 0.45;
@@ -46,6 +48,13 @@ const PEEK_FONT_SIZE: f32 = 12.0;
 pub struct PillMotion<'a> {
     pub growths: &'a [f32],
     pub width: Option<usize>,
+    pub chevron: Chevron,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Chevron {
+    pub turn: f32,
+    pub hot: bool,
 }
 
 #[derive(Clone)]
@@ -349,6 +358,7 @@ pub fn render_pill(
         &PillMotion {
             growths: &[],
             width: None,
+            chevron: Chevron::default(),
         },
     );
     canvas
@@ -378,9 +388,9 @@ pub fn paint_pill(
         .as_ref()
         .map_or(overflow_end, |mask| count_left + mask.width as f32);
     canvas.reset(
-        motion
-            .width
-            .unwrap_or((content_end + PADDING * scale).round() as usize),
+        motion.width.unwrap_or(
+            (content_end + (CHEVRON_GAP + CHEVRON_SIZE + PADDING) * scale).round() as usize,
+        ),
         (BAR_HEIGHT * scale).round() as usize,
     );
     canvas.paint_bar(scale, canvas.height as f32 / 2.0);
@@ -418,6 +428,47 @@ pub fn paint_pill(
     if let Some(mask) = &count {
         canvas.paint_mask(mask, count_left, WIP);
     }
+    let [left, top, ..] = chevron_box(canvas.width, scale);
+    let angle = motion.chevron.turn * PI;
+    let (sin, cos) = angle.sin_cos();
+    paint_shape(
+        canvas,
+        [left, top],
+        CHEVRON_SIZE,
+        scale,
+        if motion.chevron.hot { INK } else { MUTED },
+        1.0,
+        |x, y| {
+            let (dx, dy) = (x - MARK_CENTRE, y - MARK_CENTRE);
+            let (x, y) = (
+                MARK_CENTRE + dx * cos + dy * sin,
+                MARK_CENTRE - dx * sin + dy * cos,
+            );
+            segment(x, y, [2.0, 3.5], [5.0, 6.5], 1.5).min(segment(
+                x,
+                y,
+                [5.0, 6.5],
+                [8.0, 3.5],
+                1.5,
+            ))
+        },
+    );
+}
+
+fn chevron_box(width: usize, scale: f32) -> [f32; 4] {
+    let right = width as f32 - PADDING * scale;
+    let top = (BAR_HEIGHT - CHEVRON_SIZE) / 2.0 * scale;
+    [
+        right - CHEVRON_SIZE * scale,
+        top,
+        right,
+        top + CHEVRON_SIZE * scale,
+    ]
+}
+
+pub fn on_chevron((x, y): (f32, f32), width: usize, scale: f32) -> bool {
+    let [left, ..] = chevron_box(width, scale);
+    x >= left - CHEVRON_GAP / 2.0 * scale && x < width as f32 && y >= 0.0 && y < BAR_HEIGHT * scale
 }
 
 pub fn tone_paint(tone: TabTone) -> Rgb {
@@ -664,7 +715,7 @@ mod tests {
             let widths: Vec<usize> = (1..=10)
                 .map(|count| render(&model(&vec![MarkKind::Working; count], 0), scale).width)
                 .collect();
-            assert_eq!(widths[0], (30.0 * scale) as usize);
+            assert_eq!(widths[0], (46.0 * scale) as usize);
             for pair in widths.windows(2) {
                 assert_eq!(pair[1] - pair[0], (18.0 * scale) as usize, "scale {scale}");
             }
@@ -735,7 +786,7 @@ mod tests {
     fn the_alerting_count_appears_only_when_a_session_is_alerting() {
         for scale in SCALES {
             let quiet = render(&model(&[MarkKind::NeedsInput], 0), scale);
-            assert_eq!(quiet.width, (30.0 * scale) as usize);
+            assert_eq!(quiet.width, (46.0 * scale) as usize);
             let alerting = render(&model(&[MarkKind::NeedsInput], 1), scale);
             let count_left = (26.0 * scale) as usize;
             let count_pixels = (count_left..alerting.width - (10.0 * scale) as usize)
@@ -758,9 +809,69 @@ mod tests {
     #[test]
     fn the_empty_pill_is_a_single_dormant_ring() {
         let canvas = render(&model(&[], 0), 1.0);
-        assert_eq!(canvas.width, 30);
+        assert_eq!(canvas.width, 46);
         assert!(close_to(straight(&canvas, 18, 14), DORMANT, 2));
         assert!(close_to(straight(&canvas, 15, 14), SURFACE, 1));
+    }
+
+    #[test]
+    fn the_chevron_points_down_closed_and_up_open_in_muted_or_ink() {
+        for scale in SCALES {
+            let paint = |chevron: Chevron| {
+                let mut canvas = Canvas::default();
+                paint_pill(
+                    &mut canvas,
+                    &model(&[MarkKind::Idle], 0),
+                    scale,
+                    0.0,
+                    true,
+                    &BlockText,
+                    &PillMotion {
+                        growths: &[],
+                        width: None,
+                        chevron,
+                    },
+                );
+                canvas
+            };
+            let at = |canvas: &Canvas, [x, y]: [f32; 2]| {
+                straight(
+                    canvas,
+                    ((26.0 + x) * scale) as usize,
+                    ((9.0 + y) * scale) as usize,
+                )
+            };
+            let (below, above) = ([5.0, 6.3], [5.0, 3.7]);
+            let closed = paint(Chevron::default());
+            assert_eq!(closed.width, (46.0 * scale) as usize);
+            let red = |canvas: &Canvas, point: [f32; 2]| at(canvas, point)[0];
+            assert!(
+                (100..=MUTED.0).contains(&red(&closed, below)),
+                "scale {scale}"
+            );
+            assert!(red(&closed, above) < 30, "scale {scale}");
+            let open = paint(Chevron {
+                turn: 1.0,
+                hot: true,
+            });
+            assert!(red(&open, above) > 180, "scale {scale}");
+            assert!(red(&open, below) < 30, "scale {scale}");
+        }
+    }
+
+    #[test]
+    fn only_the_chevron_end_of_the_pill_takes_a_press_for_the_panel() {
+        for scale in SCALES {
+            let width = (46.0 * scale) as usize;
+            let lp = |value: f32| value * scale;
+            assert!(on_chevron((lp(35.0), lp(14.0)), width, scale));
+            assert!(on_chevron((lp(28.0), lp(2.0)), width, scale));
+            assert!(on_chevron((lp(45.0), lp(27.0)), width, scale));
+            assert!(!on_chevron((lp(22.0), lp(14.0)), width, scale));
+            assert!(!on_chevron((lp(15.0), lp(14.0)), width, scale));
+            assert!(!on_chevron((lp(35.0), lp(28.5)), width, scale));
+            assert!(!on_chevron((lp(46.5), lp(14.0)), width, scale));
+        }
     }
 
     #[test]
@@ -830,7 +941,11 @@ mod tests {
     fn a_growing_mark_starts_small_and_an_animated_width_overrides_the_layout() {
         let model = model(&[MarkKind::NeedsInput], 0);
         let mut canvas = Canvas::default();
-        let motion = |growths, width| PillMotion { growths, width };
+        let motion = |growths, width| PillMotion {
+            growths,
+            width,
+            chevron: Chevron::default(),
+        };
         paint_pill(
             &mut canvas,
             &model,
@@ -852,7 +967,7 @@ mod tests {
             &BlockText,
             &motion(&[1.0], None),
         );
-        assert_eq!(canvas.width, 30);
+        assert_eq!(canvas.width, 46);
         assert!(close_to(straight(&canvas, 11, 14), WIP, 2));
     }
 
