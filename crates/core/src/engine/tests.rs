@@ -1497,7 +1497,12 @@ fn a_stop_delivers_the_oldest_queued_prompt_and_keeps_the_turn_running() {
     assert!(fixture.queue("second").ok);
     assert_eq!(
         stdout(fixture.send(STOP)),
-        r#"{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"The user sent this follow-up from Beacon: Reply with \"PINEAPPLE\"."}}"#
+        r#"{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"The user sent this follow-up from Beacon: Reply with \"PINEAPPLE\"."},"systemMessage":"Beacon follow-up: Reply with \"PINEAPPLE\"."}"#
+    );
+    assert!(
+        String::from_utf8(crate::prompts::stop_output(&"x".repeat(400)))
+            .unwrap()
+            .contains(&format!("Beacon follow-up: {}…\"", "x".repeat(300)))
     );
     assert_eq!(fixture.state(), SessionState::Working);
     assert_eq!(fixture.session().turn_ended_ms, None);
@@ -1604,7 +1609,7 @@ fn a_queued_prompt_survives_a_core_restart() {
             .collect::<Vec<_>>(),
         [1, 2]
     );
-    assert!(stdout(restored.send(STOP)).ends_with("from Beacon: after restart\"}}"));
+    assert!(stdout(restored.send(STOP)).contains("from Beacon: after restart\"}"));
 }
 
 #[test]

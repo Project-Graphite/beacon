@@ -63,11 +63,27 @@ pub fn check_text(text: &str) -> Result<(), String> {
     Ok(())
 }
 
+const SHOWN_IN_CHAT_CHARS: usize = 300;
+
+fn shown_in_chat(text: &str) -> String {
+    if text.chars().count() > SHOWN_IN_CHAT_CHARS {
+        format!(
+            "{}…",
+            text.chars().take(SHOWN_IN_CHAT_CHARS).collect::<String>()
+        )
+    } else {
+        text.to_owned()
+    }
+}
+
 pub fn stop_output(text: &str) -> Vec<u8> {
-    json!({"hookSpecificOutput": {
-        "hookEventName": "Stop",
-        "additionalContext": format!("The user sent this follow-up from Beacon: {text}"),
-    }})
+    json!({
+        "hookSpecificOutput": {
+            "hookEventName": "Stop",
+            "additionalContext": format!("The user sent this follow-up from Beacon: {text}"),
+        },
+        "systemMessage": format!("Beacon follow-up: {}", shown_in_chat(text)),
+    })
     .to_string()
     .into_bytes()
 }
