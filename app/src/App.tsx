@@ -88,7 +88,7 @@ export function App() {
   const [closing, setClosing] = useState(false);
   const [entrance, setEntrance] = useState(0);
   const [moreOpen, setMoreOpen] = useState<string[]>([]);
-  const [settingsParts, setSettingsParts] = useState<SettingsPart[]>(['overlay', 'attention']);
+  const [settingsParts, setSettingsParts] = useState<SettingsPart[]>([]);
   const panel = useRef<HTMLElement>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
