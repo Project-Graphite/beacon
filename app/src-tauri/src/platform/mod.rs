@@ -26,8 +26,9 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC, SND_NODEFAULT};
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, MONITORINFOF_PRIMARY, SM_CXSMICON, SPI_GETCLIENTAREAANIMATION, SWP_NOACTIVATE,
-    SWP_NOZORDER, SetForegroundWindow, SetWindowPos, SystemParametersInfoW,
+    GetCursorPos, MONITORINFOF_PRIMARY, SM_CXSMICON, SPI_GETCLIENTAREAANIMATION, SW_HIDE,
+    SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowPos, ShowWindow,
+    SystemParametersInfoW,
 };
 use windows_sys::core::BOOL;
 
@@ -249,6 +250,14 @@ pub fn tray_icon_size() -> usize {
 
 pub fn focus_window(hwnd: *mut c_void) {
     unsafe { SetForegroundWindow(hwnd) };
+}
+
+pub fn show_without_activation(hwnd: *mut c_void) {
+    unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+}
+
+pub fn hide_window(hwnd: *mut c_void) {
+    unsafe { ShowWindow(hwnd, SW_HIDE) };
 }
 
 pub fn place_window(hwnd: *mut c_void, rect: Rect) -> io::Result<()> {

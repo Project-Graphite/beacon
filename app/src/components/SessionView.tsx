@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { cachedDetail, getDetail, type PendingDecision, type Session, type SessionDetail } from '../beacon';
 import { errorText } from '../lib/format.ts';
+import { reservedDetailHeight } from '../lib/steps.ts';
 import type { JumpReport } from '../lib/jump.ts';
 import type { ResolutionNotice } from '../lib/queue.ts';
 import {
@@ -83,6 +84,7 @@ export function SessionView({
   }, [session.session_id, session.event_count]);
 
   const phrase = statePhrase(session);
+  const reserved = detail ? 0 : reservedDetailHeight(session);
   const meta = metaItems(session);
   const facts = [
     session.project && <span key="project">{session.project}</span>,
@@ -178,6 +180,7 @@ export function SessionView({
             <CommandBlock command={session.command_current} live />
           </section>
         )}
+        {reserved > 0 && <div aria-hidden="true" style={{ height: reserved }} />}
         {detail && detail.tasks.length > 0 && <PlanList tasks={detail.tasks} />}
         {failure && <p className="text-micro text-danger">Cannot load details: {failure}</p>}
         {detail && detail.steps.length > 0 && <ActivityList steps={detail.steps} />}

@@ -2,7 +2,7 @@ use crate::feed::{self, Feed};
 use crate::geometry::Rect;
 use crate::platform::pill;
 use crate::shell::{self, Action};
-use beacon_core::{Decision, Reply, Request, Session, SessionDetail, Snapshot};
+use beacon_core::{Decision, Reply, Request, Session, SessionDetail};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -12,9 +12,11 @@ pub const PANEL: &str = "panel";
 pub fn create(
     app: &AppHandle,
     (rect, scale): (Rect, f64),
-    focused: bool,
+    initial: &str,
 ) -> tauri::Result<WebviewWindow> {
     WebviewWindowBuilder::new(app, PANEL, WebviewUrl::default())
+        .initialization_script(format!("window.__BEACON_INITIAL__ = {initial};"))
+        .visible(false)
         .title("Beacon")
         .position(f64::from(rect.left) / scale, f64::from(rect.top) / scale)
         .inner_size(
@@ -27,7 +29,7 @@ pub fn create(
         .owner_raw(unsafe { std::mem::transmute_copy(&pill::window()) })
         .resizable(false)
         .shadow(false)
-        .focused(focused)
+        .focused(false)
         .build()
 }
 
@@ -35,14 +37,6 @@ async fn ask(home: PathBuf, request: Request) -> Result<Reply, String> {
     tauri::async_runtime::spawn_blocking(move || feed::request(&home, &request))
         .await
         .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-pub async fn get_snapshot(feed: State<'_, Arc<Feed>>) -> Result<Snapshot, String> {
-    ask(feed.home.clone(), Request::Snapshot)
-        .await?
-        .snapshot
-        .ok_or_else(|| "the Beacon core sent no snapshot".to_string())
 }
 
 #[tauri::command]

@@ -284,7 +284,20 @@ export interface AppInfo {
 type WireSnapshot = Omit<Snapshot, 'sessions'> & { sessions: WireSession[] };
 const snapshotFrom = (snapshot: WireSnapshot): Snapshot => ({ ...snapshot, sessions: snapshot.sessions.map(withDefaults) });
 
-export const getSnapshot = () => invoke<WireSnapshot>('get_snapshot').then(snapshotFrom);
+interface InitialData {
+  snapshot: WireSnapshot | null;
+  ui: Partial<UiSettings>;
+}
+
+export interface OpenedEvent {
+  opened: Opened;
+  snapshot: Snapshot | null;
+  ui: UiSettings;
+}
+
+const initial = (window as unknown as { __BEACON_INITIAL__: InitialData }).__BEACON_INITIAL__;
+export const initialSnapshot = initial.snapshot && snapshotFrom(initial.snapshot);
+export const initialUi = uiSettings(initial.ui);
 const details = new Map<string, SessionDetail>();
 export const getDetail = (sessionId: string) =>
   invoke<SessionDetail>('get_detail', { sessionId }).then((detail) => {
@@ -314,7 +327,6 @@ export const hooksStatus = () => invoke<HooksStatus>('hooks_status').then((statu
 export const cachedHooksStatus = () => lastHooksStatus;
 export const hooksPlan = (action: HooksAction) => invoke<string>('hooks_plan', { action });
 export const hooksApply = (action: HooksAction) => invoke<HooksStatus>('hooks_apply', { action });
-export const getUiSettings = () => invoke<Partial<UiSettings>>('get_ui_settings').then(uiSettings);
 export const setUiSettings = (change: Partial<UiSettings>) =>
   invoke<Partial<UiSettings>>('set_ui_settings', { change }).then(uiSettings);
 export const previewAttention = () =>
@@ -337,8 +349,10 @@ export const quitApp = () => invoke<void>('quit_app');
 export const onSnapshot = (handler: (snapshot: Snapshot | null) => void): Promise<UnlistenFn> =>
   listen<WireSnapshot | null>('beacon://snapshot', (event) => handler(event.payload && snapshotFrom(event.payload)));
 
-export const onOpened = (handler: (opened: Opened) => void): Promise<UnlistenFn> =>
-  listen<OpenedPayload>('beacon://opened', (event) => handler(openedFrom(event.payload)));
+export const onOpened = (handler: (opened: OpenedEvent) => void): Promise<UnlistenFn> =>
+  listen<OpenedPayload & InitialData>('beacon://opened', ({ payload }) =>
+    handler({ opened: openedFrom(payload), snapshot: payload.snapshot && snapshotFrom(payload.snapshot), ui: uiSettings(payload.ui) }),
+  );
 
 export const onClosing = (handler: () => void): Promise<UnlistenFn> => listen('beacon://closing', handler);
 

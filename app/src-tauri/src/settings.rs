@@ -130,11 +130,6 @@ fn change_settings(
 }
 
 #[tauri::command]
-pub async fn get_ui_settings(feed: State<'_, Arc<Feed>>) -> Result<UiSettings, String> {
-    Ok(positions::ui_settings(&feed.home))
-}
-
-#[tauri::command]
 pub async fn set_ui_settings(
     app: AppHandle,
     feed: State<'_, Arc<Feed>>,

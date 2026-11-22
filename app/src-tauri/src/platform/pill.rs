@@ -74,6 +74,7 @@ static WINDOW: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PillEvent {
+    Entered,
     Hovered,
     Clicked,
     Moved,
@@ -987,10 +988,11 @@ impl Pill {
     fn handle_reveal(&mut self, message: u32) -> Option<Option<PillEvent>> {
         match message {
             WM_MOUSEMOVE => {
-                if !self.reveal_tracking {
+                let entered = !self.reveal_tracking;
+                if entered {
                     self.reveal_tracking = track_hover(self.reveal.hwnd, REVEAL_HOVER_MS);
                 }
-                Some(None)
+                Some(entered.then_some(PillEvent::Entered))
             }
             WM_MOUSEHOVER => {
                 self.reveal_tracking = false;
@@ -1019,7 +1021,8 @@ impl Pill {
         }
         match message {
             WM_MOUSEMOVE => {
-                if !self.tracking {
+                let entered = !self.tracking;
+                if entered {
                     self.tracking = track_hover(self.hwnd, HOVER_MS);
                 }
                 self.hover(true);
@@ -1033,7 +1036,7 @@ impl Pill {
                 if let Some((cursor, origin)) = dragged {
                     self.drag(cursor, origin);
                 }
-                Some(None)
+                Some(entered.then_some(PillEvent::Entered))
             }
             WM_MOUSEHOVER => Some(
                 (self.press.is_none() && !self.pressed_since_entry).then_some(PillEvent::Hovered),

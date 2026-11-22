@@ -33,6 +33,8 @@ const CLOSE_DELAY: Duration = Duration::from_millis(160);
 const TOAST_BATCH: Duration = Duration::from_secs(2);
 const PREVIEW_TAIL: Duration = Duration::from_secs(1);
 const INITIAL_PANEL_HEIGHT: f64 = 120.0;
+const KEPT_WARM: Duration = Duration::from_secs(45);
+const KEPT_WARM_WHILE_ACTIVE: Duration = Duration::from_secs(60);
 const PREVIEW_TEXT: &str = "A session needs you (preview)";
 
 pub enum Action {
@@ -71,6 +73,20 @@ struct Opened {
     edge: Option<Edge>,
 }
 
+#[derive(Clone, Serialize)]
+struct OpenedPayload<'a> {
+    #[serde(flatten)]
+    opened: Opened,
+    snapshot: Option<&'a Snapshot>,
+    ui: &'a UiSettings,
+}
+
+#[derive(Serialize)]
+struct InitialData<'a> {
+    snapshot: Option<&'a Snapshot>,
+    ui: &'a UiSettings,
+}
+
 struct Panel {
     window: WebviewWindow,
     mode: Mode,
@@ -79,6 +95,7 @@ struct Panel {
     announced: Option<Opened>,
     left_at: Option<Instant>,
     closing: Option<u64>,
+    hidden_since: Option<Instant>,
 }
 
 pub struct Shell {
@@ -159,6 +176,7 @@ impl Shell {
     fn handle(&mut self, action: Action) {
         match action {
             Action::Snapshot(snapshot) => self.take_snapshot(snapshot),
+            Action::Pill(PillEvent::Entered) => self.prepare(),
             Action::Pill(PillEvent::Hovered | PillEvent::RevealHovered)
                 if self.mode().is_none() =>
             {
@@ -187,7 +205,7 @@ impl Shell {
                     .as_ref()
                     .is_some_and(|panel| panel.closing == Some(closing))
                 {
-                    self.destroy();
+                    self.hide();
                 }
             }
             Action::PanelHeight(height) => {
@@ -347,7 +365,20 @@ impl Shell {
         let shown = self.presence.shown();
         pill::reveal(shown, !never && !shown && self.settings.reveal_on_hover);
         self.unused
-            .observe(in_use(self.snapshot.as_ref(), self.panel.is_some()), now);
+            .observe(in_use(self.snapshot.as_ref(), self.mode().is_some()), now);
+        let kept_warm = if claude_active(self.snapshot.as_ref()) {
+            KEPT_WARM_WHILE_ACTIVE
+        } else {
+            KEPT_WARM
+        };
+        if self
+            .panel
+            .as_ref()
+            .and_then(|panel| panel.hidden_since)
+            .is_some_and(|since| since.elapsed() >= kept_warm)
+        {
+            self.destroy();
+        }
         let minutes = if self.settings.start_mode == StartMode::Claude {
             self.settings.quit_when_idle_minutes
         } else {
@@ -395,7 +426,7 @@ impl Shell {
     fn mode(&self) -> Option<Mode> {
         self.panel
             .as_ref()
-            .filter(|panel| panel.closing.is_none())
+            .filter(|panel| panel.closing.is_none() && panel.hidden_since.is_none())
             .map(|panel| panel.mode)
     }
 
@@ -417,37 +448,57 @@ impl Shell {
             })
     }
 
+    fn prepare(&mut self) {
+        if self.panel.is_some() {
+            return;
+        }
+        let Some(placement) = self.placement() else {
+            return;
+        };
+        let initial = serde_json::to_string(&InitialData {
+            snapshot: self.snapshot.as_ref(),
+            ui: &self.settings,
+        });
+        match initial
+            .map_err(tauri::Error::from)
+            .and_then(|initial| panel::create(&self.app, placement, &initial))
+        {
+            Ok(window) => {
+                self.panel = Some(Panel {
+                    window,
+                    mode: Mode::Hover,
+                    focused: false,
+                    ready: false,
+                    announced: None,
+                    left_at: None,
+                    closing: None,
+                    hidden_since: Some(Instant::now()),
+                });
+                self.recheck_after(KEPT_WARM);
+                self.recheck_after(KEPT_WARM_WHILE_ACTIVE);
+            }
+            Err(error) => eprintln!("cannot create the panel: {error}"),
+        }
+    }
+
     fn open(&mut self, mode: Mode, focused: bool) {
         self.pin_dismissed &= mode == Mode::Pinned;
         pill::dismiss_peek();
         pill::reveal(self.settings.visibility != Visibility::Never, false);
-        match &mut self.panel {
-            Some(panel) if panel.closing.is_some() => {
-                panel.closing = None;
-                panel.mode = mode;
-                panel.announced = None;
-                panel.left_at = None;
-            }
-            Some(_) => {}
-            None => {
-                let Some(placement) = self.placement() else {
-                    return;
-                };
-                match panel::create(&self.app, placement, focused) {
-                    Ok(window) => {
-                        self.panel = Some(Panel {
-                            window,
-                            mode,
-                            focused: false,
-                            ready: false,
-                            announced: None,
-                            left_at: None,
-                            closing: None,
-                        })
-                    }
-                    Err(error) => return eprintln!("cannot open the panel: {error}"),
-                }
-            }
+        self.prepare();
+        let Some(panel) = &mut self.panel else {
+            return;
+        };
+        if panel.closing.is_some() || panel.hidden_since.is_some() {
+            panel.closing = None;
+            panel.mode = mode;
+            panel.focused = false;
+            panel.announced = None;
+            panel.left_at = None;
+        }
+        if panel.hidden_since.take().is_some() {
+            self.place();
+            self.show();
         }
         self.unseen.clear();
         self.show_tab();
@@ -465,8 +516,42 @@ impl Shell {
         self.place();
     }
 
+    fn show(&self) {
+        let Some(panel) = &self.panel else {
+            return;
+        };
+        match panel.window.hwnd() {
+            Ok(hwnd) => platform::show_without_activation(hwnd.0),
+            Err(error) => eprintln!("cannot show the panel: {error}"),
+        }
+        if let Err(error) = panel.window.as_ref().show() {
+            eprintln!("cannot show the panel page: {error}");
+        }
+    }
+
+    fn hide(&mut self) {
+        let Some(panel) = &mut self.panel else {
+            return;
+        };
+        panel.closing = None;
+        panel.hidden_since = Some(Instant::now());
+        if let Err(error) = panel.window.as_ref().hide() {
+            eprintln!("cannot hide the panel page: {error}");
+        }
+        match panel.window.hwnd() {
+            Ok(hwnd) => platform::hide_window(hwnd.0),
+            Err(error) => eprintln!("cannot hide the panel: {error}"),
+        }
+        self.recheck_after(KEPT_WARM);
+        self.recheck_after(KEPT_WARM_WHILE_ACTIVE);
+    }
+
     fn close(&mut self) {
-        let Some(panel) = self.panel.as_mut().filter(|panel| panel.closing.is_none()) else {
+        let Some(panel) = self
+            .panel
+            .as_mut()
+            .filter(|panel| panel.closing.is_none() && panel.hidden_since.is_none())
+        else {
             return;
         };
         self.closings += 1;
@@ -509,7 +594,7 @@ impl Shell {
         let Some(panel) = self
             .panel
             .as_mut()
-            .filter(|panel| panel.ready && panel.closing.is_none())
+            .filter(|panel| panel.ready && panel.closing.is_none() && panel.hidden_since.is_none())
         else {
             return;
         };
@@ -520,7 +605,12 @@ impl Shell {
         };
         if panel.announced != Some(opened) {
             panel.announced = Some(opened);
-            if let Err(error) = self.app.emit_to(PANEL, "beacon://opened", opened) {
+            let payload = OpenedPayload {
+                opened,
+                snapshot: self.snapshot.as_ref(),
+                ui: &self.settings,
+            };
+            if let Err(error) = self.app.emit_to(PANEL, "beacon://opened", payload) {
                 eprintln!("cannot tell the panel it opened: {error}");
             }
         }
@@ -612,7 +702,7 @@ impl Shell {
         let gained = self.unseen.observe(self.snapshot.as_ref(), Instant::now());
         self.peek_gains(&gained);
         self.show_tab();
-        if self.panel.is_some()
+        if self.mode().is_some()
             && let Err(error) = self.app.emit_to(PANEL, "beacon://snapshot", &self.snapshot)
         {
             eprintln!("cannot send the snapshot to the panel: {error}");

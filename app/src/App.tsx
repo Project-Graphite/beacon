@@ -3,14 +3,18 @@ import { flushSync } from 'react-dom';
 import {
   acknowledge,
   appInfo,
+  cachedAppInfo,
+  cachedDetail,
+  cachedHooksStatus,
+  cachedOverlay,
   closePanel,
   dismiss,
   getDetail,
   getEnded,
   getOverlay,
-  getSnapshot,
-  getUiSettings,
   hooksStatus,
+  initialSnapshot,
+  initialUi,
   jump,
   onClosing,
   onOpened,
@@ -18,6 +22,7 @@ import {
   setUiSettings,
   snooze,
   type Opened,
+  type OpenedEvent,
   type Session,
   type Snapshot,
   type UiSettings,
@@ -60,7 +65,6 @@ import { flashRow } from './motion.ts';
 
 const NOTICE_MS = 4000;
 const SCROLL_IDLE_MS = 800;
-const SNAPSHOT_RETRY_MS = 1000;
 const PRELOAD_WAIT_MS = 150;
 const DETAIL_PREFIX = 'detail:';
 
@@ -73,7 +77,7 @@ const isTextField = (target: EventTarget | null): target is HTMLElement =>
   (target instanceof HTMLInputElement && target.type !== 'radio' && target.type !== 'checkbox');
 
 export function App() {
-  const [snapshot, setSnapshot] = useState<Snapshot | null | undefined>(undefined);
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(initialSnapshot);
   const [opened, setOpened] = useState<Opened | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now);
@@ -86,9 +90,10 @@ export function App() {
   const [chosenRequestId, setChosenRequestId] = useState<number | null>(null);
   const [notices, setNotices] = useState<ResolutionNotice[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [ui, setUi] = useState<UiSettings | null>(null);
+  const [ui, setUi] = useState<UiSettings>(initialUi);
   const [closing, setClosing] = useState(false);
   const [entrance, setEntrance] = useState(0);
+  const [viewReset, setViewReset] = useState(0);
   const [moreOpen, setMoreOpen] = useState<string[]>([]);
   const [settingsParts, setSettingsParts] = useState<SettingsPart[]>([]);
   const panel = useRef<HTMLElement>(null);
@@ -97,10 +102,11 @@ export function App() {
   const content = useRef<HTMLDivElement>(null);
   const ghosts = useRef<HTMLDivElement>(null);
   const shown = useRef(false);
-  const pendingIds = useRef<number[]>([]);
+  const pendingIds = useRef<number[]>(initialSnapshot?.pending.map((request) => request.id) ?? []);
   const requestKeys = useRef(new Map<number, (key: string) => void>());
   const nextJumpNoticeId = useRef(-1);
   const opening = useRef<string | null>(null);
+  const shownView = useRef('list');
 
   const fail = useCallback((error: unknown) => setFailure(errorText(error)), []);
 
@@ -128,8 +134,16 @@ export function App() {
       setSnapshot(next);
       setNow(Date.now());
     };
-    const open = (next: Opened) => {
-      if (!shown.current) setEntrance((count) => count + 1);
+    const open = ({ opened: next, snapshot: latest, ui: settings }: OpenedEvent) => {
+      receive(latest);
+      setUi(settings);
+      if (!shown.current) {
+        opening.current = null;
+        setOpenId(null);
+        setSettingsOpen(false);
+        if (shownView.current !== 'list') setViewReset((count) => count + 1);
+        setEntrance((count) => count + 1);
+      }
       shown.current = true;
       setClosing(false);
       setOpened(next);
@@ -138,25 +152,12 @@ export function App() {
       shown.current = false;
       setClosing(true);
     };
-    let live = true;
-    const load = (): Promise<void> =>
-      getSnapshot().then(receive, (error) => {
-        fail(error);
-        return new Promise((retry) => window.setTimeout(retry, SNAPSHOT_RETRY_MS)).then(() => (live ? load() : undefined));
-      });
     const subscriptions = Promise.all([onSnapshot(receive), onOpened(open), onClosing(close)]);
-    run(
-      subscriptions.then(() => {
-        setListening(true);
-        return load();
-      }),
-    );
-    getUiSettings().then(setUi, fail);
+    run(subscriptions.then(() => setListening(true)));
     return () => {
-      live = false;
       void subscriptions.then((unlisteners) => unlisteners.forEach((unlisten) => unlisten()));
     };
-  }, [run, fail, showNotices]);
+  }, [run, showNotices]);
 
   useEffect(() => {
     const [area, list, inner] = [scrollArea.current, scroller.current, content.current];
@@ -206,6 +207,10 @@ export function App() {
       : { key: 'list', depth: 0 };
 
   useEffect(() => {
+    shownView.current = view.key;
+  }, [view.key]);
+
+  useEffect(() => {
     const syncHidden = () => document.documentElement.toggleAttribute('data-hidden', document.hidden);
     document.addEventListener('visibilitychange', syncHidden);
     return () => document.removeEventListener('visibilitychange', syncHidden);
@@ -251,7 +256,7 @@ export function App() {
   const openDetail = (sessionId: string) => {
     setSelectedId(sessionId);
     opening.current = sessionId;
-    return whenLoaded(getDetail(sessionId)).then(() => {
+    return (cachedDetail(sessionId) ? Promise.resolve() : whenLoaded(getDetail(sessionId))).then(() => {
       if (opening.current !== sessionId) return;
       opening.current = null;
       flushSync(() => setOpenId(sessionId));
@@ -261,7 +266,10 @@ export function App() {
   const toggleSettings = () => {
     if (settingsOpen) setSettingsOpen(false);
     else
-      void whenLoaded(Promise.all([hooksStatus(), appInfo(), getOverlay()])).then(() => flushSync(() => setSettingsOpen(true)));
+      void (cachedHooksStatus() && cachedAppInfo() && cachedOverlay()
+        ? Promise.resolve()
+        : whenLoaded(Promise.all([hooksStatus(), appInfo(), getOverlay()]))
+      ).then(() => flushSync(() => setSettingsOpen(true)));
   };
 
   const closeDetail = () => {
@@ -486,11 +494,11 @@ export function App() {
           accountUsage={snapshot?.account_usage ?? null}
           snoozedUntil={snapshot?.snoozed_until_ms ?? null}
           queue={current && queue.length > 1 ? { position: queue.indexOf(current) + 1, total: queue.length } : null}
-          soundsEnabled={ui?.sounds_enabled ?? null}
+          soundsEnabled={ui.sounds_enabled}
           settingsOpen={settingsOpen}
           pinned={opened?.mode === 'pinned'}
           onUnpin={() => run(closePanel())}
-          onToggleSounds={() => ui && run(changeUi({ sounds_enabled: !ui.sounds_enabled }))}
+          onToggleSounds={() => run(changeUi({ sounds_enabled: !ui.sounds_enabled }))}
           onToggleSettings={toggleSettings}
           run={run}
         />
@@ -502,7 +510,7 @@ export function App() {
                   {failure}
                 </p>
               )}
-              <ViewStack view={view} scroller={scroller} render={renderView} />
+              <ViewStack key={viewReset} view={view} scroller={scroller} render={renderView} />
               <div ref={ghosts} aria-hidden="true" className="pointer-events-none absolute inset-0" />
             </div>
           </div>

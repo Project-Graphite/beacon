@@ -74,7 +74,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(feed.clone())
         .invoke_handler(tauri::generate_handler![
-            panel::get_snapshot,
             panel::get_detail,
             panel::get_ended,
             panel::acknowledge,
@@ -93,7 +92,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings::hooks_status,
             settings::hooks_plan,
             settings::hooks_apply,
-            settings::get_ui_settings,
             settings::set_ui_settings,
             settings::get_login_start,
             settings::set_login_start,

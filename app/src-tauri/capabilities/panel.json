@@ -4,7 +4,6 @@
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
-    "allow-get-snapshot",
     "allow-get-detail",
     "allow-get-ended",
     "allow-acknowledge",
@@ -23,7 +22,6 @@
     "allow-hooks-status",
     "allow-hooks-plan",
     "allow-hooks-apply",
-    "allow-get-ui-settings",
     "allow-set-ui-settings",
     "allow-get-login-start",
     "allow-set-login-start",

@@ -1,7 +1,6 @@
 fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
-            "get_snapshot",
             "get_detail",
             "get_ended",
             "acknowledge",
@@ -20,7 +19,6 @@ fn main() {
             "hooks_status",
             "hooks_plan",
             "hooks_apply",
-            "get_ui_settings",
             "set_ui_settings",
             "get_login_start",
             "set_login_start",
