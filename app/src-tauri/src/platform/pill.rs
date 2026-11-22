@@ -142,7 +142,7 @@ struct Pill {
     framing: bool,
     fade: Tween,
     opacity: Tween,
-    paint_from: (Rgb, f32),
+    paint_from: Rgb,
     tone_fade: Tween,
     strip: Tween,
     glide: Option<Glide>,
@@ -349,7 +349,7 @@ pub fn peek(peek: Peek) {
         paint_peek(
             &mut canvas,
             &peek.text,
-            tone_paint(peek.tone).0,
+            tone_paint(peek.tone),
             pill.scale as f32,
             &pill.text,
         );
@@ -541,7 +541,7 @@ impl Pill {
         }
     }
 
-    fn tone_paint(&self, now: f64) -> (Rgb, f32) {
+    fn tone_paint(&self, now: f64) -> Rgb {
         mix(
             self.paint_from,
             tone_paint(self.tab.tone),

@@ -36,8 +36,6 @@ const TAB_HIT_ALPHA: f32 = 1.0 / 255.0;
 const GLOW_REACH: f32 = 18.0;
 const GLOW_TAPER: f32 = 8.0;
 const GLOW_ALPHA: f32 = 0.45;
-const WORKING_TAB_OPACITY: f32 = 0.7;
-const DORMANT_TAB_OPACITY: f32 = 0.6;
 const PEEK_HEIGHT: f32 = 26.0;
 const PEEK_PADDING: f32 = 10.0;
 const PEEK_DOT: f32 = 6.0;
@@ -422,30 +420,23 @@ pub fn paint_pill(
     }
 }
 
-pub fn tone_paint(tone: TabTone) -> (Rgb, f32) {
+pub fn tone_paint(tone: TabTone) -> Rgb {
     match tone {
-        TabTone::NeedsYou => (WIP, 1.0),
-        TabTone::Failed => (DANGER, 1.0),
-        TabTone::Finished => (LIVE, 1.0),
-        TabTone::Working => (INK, WORKING_TAB_OPACITY),
-        TabTone::Dormant => (DORMANT, DORMANT_TAB_OPACITY),
+        TabTone::NeedsYou => WIP,
+        TabTone::Failed => DANGER,
+        TabTone::Finished => LIVE,
+        TabTone::Working => INK,
+        TabTone::Dormant => DORMANT,
     }
 }
 
-pub fn mix(
-    (from, from_opacity): (Rgb, f32),
-    (to, to_opacity): (Rgb, f32),
-    amount: f32,
-) -> (Rgb, f32) {
+pub fn mix(from: Rgb, to: Rgb, amount: f32) -> Rgb {
     let channel =
         |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * amount).round() as u8;
-    (
-        Rgb(
-            channel(from.0, to.0),
-            channel(from.1, to.1),
-            channel(from.2, to.2),
-        ),
-        from_opacity + (to_opacity - from_opacity) * amount,
+    Rgb(
+        channel(from.0, to.0),
+        channel(from.1, to.1),
+        channel(from.2, to.2),
     )
 }
 
@@ -453,7 +444,7 @@ pub fn paint_tab(
     canvas: &mut Canvas,
     (width, height): (usize, usize),
     edge: Edge,
-    (colour, opacity): (Rgb, f32),
+    colour: Rgb,
     thickness: f32,
     glow: f32,
     scale: f32,
@@ -490,13 +481,12 @@ pub fn paint_tab(
             if glow > 0.0 && depth > thickness {
                 let fade = (1.0 - (depth - thickness) / (reach - thickness)).clamp(0.0, 1.0);
                 let ends = (along.min(length - along) / taper).clamp(0.0, 1.0);
-                let coverage = glow * GLOW_ALPHA * fade * fade * ends * opacity;
+                let coverage = glow * GLOW_ALPHA * fade * fade * ends;
                 if coverage > 0.0 {
                     canvas.blend(x, y, colour, coverage);
                 }
             }
-            let coverage =
-                (0.5 - rounded_box(along, depth, strip, radius)).clamp(0.0, 1.0) * opacity;
+            let coverage = (0.5 - rounded_box(along, depth, strip, radius)).clamp(0.0, 1.0);
             if coverage > 0.0 {
                 canvas.blend(x, y, colour, coverage);
             }
@@ -782,7 +772,7 @@ mod tests {
                 &mut canvas,
                 (lp(18.0), lp(72.0)),
                 Edge::Left,
-                (WIP, 1.0),
+                WIP,
                 4.0,
                 0.0,
                 scale,
@@ -803,19 +793,19 @@ mod tests {
                 &mut canvas,
                 (lp(72.0), lp(8.0)),
                 Edge::Bottom,
-                (DORMANT, 0.6),
+                DORMANT,
                 4.0,
                 0.0,
                 scale,
             );
             let bottom = straight(&canvas, middle, lp(8.0) - 1);
-            assert!(close_to(bottom, DORMANT, 1) && bottom[3] == to_byte(0.6));
+            assert!(close_to(bottom, DORMANT, 1) && bottom[3] == to_byte(1.0));
             assert_eq!(straight(&canvas, middle, 0)[3], 1);
             paint_tab(
                 &mut canvas,
                 (lp(18.0), lp(72.0)),
                 Edge::Right,
-                (LIVE, 1.0),
+                LIVE,
                 6.0,
                 1.0,
                 scale,
@@ -828,15 +818,12 @@ mod tests {
 
     #[test]
     fn tones_follow_the_palette_and_mix_smoothly() {
-        assert_eq!(tone_paint(TabTone::NeedsYou), (WIP, 1.0));
-        assert_eq!(tone_paint(TabTone::Working), (INK, 0.7));
-        assert_eq!(tone_paint(TabTone::Dormant), (DORMANT, 0.6));
-        assert_eq!(mix((WIP, 1.0), (LIVE, 0.5), 0.0), (WIP, 1.0));
-        assert_eq!(mix((WIP, 1.0), (LIVE, 0.5), 1.0), (LIVE, 0.5));
-        assert_eq!(
-            mix((Rgb(0, 0, 0), 0.0), (Rgb(200, 100, 50), 1.0), 0.5),
-            (Rgb(100, 50, 25), 0.5)
-        );
+        assert_eq!(tone_paint(TabTone::NeedsYou), WIP);
+        assert_eq!(tone_paint(TabTone::Working), INK);
+        assert_eq!(tone_paint(TabTone::Dormant), DORMANT);
+        assert_eq!(mix(WIP, LIVE, 0.0), WIP);
+        assert_eq!(mix(WIP, LIVE, 1.0), LIVE);
+        assert_eq!(mix(Rgb(0, 0, 0), Rgb(200, 100, 50), 0.5), Rgb(100, 50, 25));
     }
 
     #[test]
