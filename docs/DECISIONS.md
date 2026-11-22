@@ -3,6 +3,101 @@
 Decisions taken while building Beacon, newest phase first. Evidence for the phase 0 entries is in
 [SPIKES.md](SPIKES.md). An entry marked **needs Amr** is a proposal until he answers.
 
+## Pill arrow, a lighter panel, settings and idle wake (2026-11-22)
+
+### The pill's arrow and hover
+
+- **The pill opens its panel from a chevron, not from a click anywhere.** The chevron at the end of
+  the pill points down while the panel is closed and turns up while it is open; a press on it
+  toggles the panel in sticky mode without taking focus. A press elsewhere on the pill only starts a
+  drag, so moving the pill no longer risks opening the panel. The edge tab still toggles on a click.
+- **Hover opening is a setting.** `open_on_hover` ("Open on hover" under Overlay) is on by default
+  for the edge tab and off for the pill; until it is set, the default follows the current style.
+  With it off, hovering the reveal strip of a hidden overlay only brings the overlay back.
+- **The open panel follows the overlay.** While the pill or the tab is dragged, and while the tab
+  glides to its dock, the panel is placed against the overlay's current rectangle on every move.
+  The overlay reads drag positions from its own mouse messages instead of polling the cursor.
+
+### A lighter panel and core
+
+The core re-sent every session it held, including every ended session from the last 24 hours with
+its task list, on every change, and the panel's WebView was built from scratch on each open.
+
+- **A snapshot carries live sessions and the five latest ended ones.** Ended sessions are kept for
+  2 hours and at most 20 (was 24 hours with no cap), and the five newest go out in a slim form with
+  `ended_count`. The panel fetches the full ended list with the new `ended` request when its Ended
+  group is expanded. Task lists come only with the session detail, and empty fields are left out of
+  the JSON. Trade-offs: less history is kept, `beacon status` shows only the five latest ended
+  sessions, and the Ended group fills in after a request when it is expanded.
+- **The panel WebView is kept warm.** It is created hidden when the pointer enters the overlay or
+  its reveal strip, and shown without activation when the hover dwell ends. A closed panel is hidden
+  instead of destroyed and kept for 45 s (60 s while Claude is active); its page is hidden, so its
+  clock and animations stop. The shell hands the page the latest snapshot and UI settings in an
+  initialization script and in the opened event, so `get_snapshot` and `get_ui_settings` are gone
+  and the page no longer handles missing UI settings. This revises the M2 decision that the panel is
+  destroyed when it closes. Trade-off: the M2 measurement put a live WebView2 at about 160 MB shown
+  or hidden, so Beacon now holds that memory for up to 60 s after the panel closes, and also after
+  the pointer merely passes over the overlay. The warm-panel memory itself was not measured.
+- **Rows re-render only when their data changed.** Snapshots reuse the previous session and request
+  objects when they are unchanged, rows are memoized with stable callbacks, and the once-a-second
+  clock lives in the time cells, runs only while a turn or request is shown, and stops while the
+  page is hidden.
+- **`claude agents --json` runs on events and every 5 minutes, not every minute.** A pass runs at
+  start, when a session's process exits, when a hook names an unknown session and when the panel
+  opens (the new `reconcile` request), at most once per 15 s; otherwise every 5 minutes
+  (`reconcile_seconds: 300`) while a session is live. The account cache is still checked every
+  minute. Trade-off: sessions known only from that list, their listed names and status, and
+  sessions that disappeared without a watched process can be up to 5 minutes late when none of
+  those events happens.
+- **Snapshots are coalesced over 250 ms** (was 100 ms). A snapshot that changes what needs the user,
+  a pending decision or an alerting session appearing or going, is still sent at once. The git
+  branch is read when the working folder changes and at session start, prompt and stop instead of
+  on every event, `state.json` is written at most every 2 s (was 500 ms), and the shell reads the
+  sound setting from memory instead of `ui.json` on every snapshot. Trade-offs: other updates can
+  arrive up to 250 ms later, a branch switched mid-turn shows at the next prompt or stop, and a
+  crash can lose up to 2 s of state.
+
+### Settings, titles, idle wake and clearing
+
+- **Every setting is in one compact settings view.** Overlay style, display, avoided displays and
+  position, which were only in the tray menu, are in the settings view too, beside a `Quit Beacon`
+  button. Rows use switches, segmented controls and dropdowns with shorter labels, and the six
+  sections start collapsed, each with a one-line summary of its choices.
+- **The panel can be pinned while Claude is active.** With `pin_while_active` on (off by default),
+  the panel opens by itself without focus while a session is starting, working, stalled or needs
+  the user, ignores presses outside it, and closes 5 s after Claude is done. Its pin button hides it
+  until Claude is next active; it does not open over a fullscreen window. This is an opt-in
+  exception to "the panel never holds itself open" from 2026-11-20.
+- **Session titles come from the transcript.** A row shows the first of: the custom title (from the
+  hooks, or else from the transcript), Claude Code's AI title, the last prompt, the name `claude
+  agents` lists (skipped when it is only the project name with a two-digit hex suffix), the project
+  name, and the first 8 characters of the id. Titles are redacted and cut to one line of 80
+  characters. A session seen only through `claude agents` has its transcript found by id under
+  Claude Code's `projects` folder.
+- **A prompt sent from Beacon can wake an idle session.** Install now adds a 23rd handler, a second
+  `Stop` handler with the argument `StopWaiter`, `asyncRewake` and a 24-hour timeout. The core holds
+  it open while the session is idle; a prompt for an idle, done or errored attended session that
+  holds one is answered at once, and the helper exits with code 2 and the text "The user sent this
+  follow-up from Beacon: ..." on stderr, which starts a new turn. A prompt typed in the session, a
+  newer waiter or the session ending releases it; headless runs never get one. This brings back the
+  idle wake the v1 scope cut dropped and replaces the VS Code prefill and copy-and-jump paths
+  wherever the session can be woken. Spike S6b showed Claude treats the text as an automated
+  notification, not user input, so the prompt box says so. **Not yet confirmed on a real
+  interactive session.**
+- **Finished sessions clear themselves.** `clear_finished_minutes` in `config.json` (10 by default;
+  "Clear finished after" offers Never, 5, 10, 30 minutes and 1 hour) acknowledges a `done` session
+  that long after its turn ended, checked with the stall check every 30 s. `error` and `stalled`
+  sessions are left for the user.
+- `core.log` moves to `core.log.1` before it would pass 5 MB, so the log no longer grows without
+  bound.
+
+### Fixes
+
+- **Idle opacity is the overlay's real opacity.** The tab dimmed its working and dormant tones on
+  top of the idle opacity, so the default 60% showed as 36%; the tone is now a colour only.
+- **The tab does not pulse while the panel is open.** Alerts that arrive while the panel is shown
+  count as seen.
+
 ## Overlay options, peek and starting with Claude (2026-11-22)
 
 Changed on Amr's feedback: the overlay being on screen all the time was annoying, attention should

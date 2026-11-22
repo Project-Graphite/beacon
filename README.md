@@ -41,9 +41,11 @@ run `beacon install`. Either way you see the plan with the diff first, and nothi
 you choose `Apply` (or run `beacon install --yes`).
 
 Install copies `beacon-hook.exe` into `<Beacon home>\bin`, backs up the Claude Code settings file
-into `<Beacon home>\backups`, and adds one Beacon handler to each of the 22 hook events in
-`%USERPROFILE%\.claude\settings.json` (or `%CLAUDE_CONFIG_DIR%\settings.json`). Everything else in
-the file keeps its order. Installing again repairs a damaged registration.
+into `<Beacon home>\backups`, and adds 23 Beacon handlers to `%USERPROFILE%\.claude\settings.json`
+(or `%CLAUDE_CONFIG_DIR%\settings.json`): one for each of 22 hook events, plus a second `Stop`
+handler (`StopWaiter`, run with `asyncRewake`) that lets Beacon wake an idle session. Everything
+else in the file keeps its order. Installing again repairs a damaged registration; an installation
+made before `StopWaiter` existed shows `Needs repair` until it is installed again.
 
 Uninstall restores the original bytes of the settings file when it has not changed since install.
 If it has changed, only Beacon's handlers and the empty containers install created are removed.
@@ -55,13 +57,15 @@ Running sessions pick up hook changes without a restart.
 
 The edge tab is the default native form: a strip 4 px thick and 72 px long, flush against a screen
 edge and coloured by the overall state. Hovering the tab opens the panel against that edge and a
-click keeps it open. A display's default edge is the first one that touches no other display.
+click opens or closes it. A display's default edge is the first one that touches no other display.
 
 ### The pill
 
-The pill is the alternative style, chosen from `Style` in the tray menu. It is a small always-on-top
-strip with one mark per session, at most ten and then `+N`, followed by the number of sessions that
-need you. Each state has its own shape as well as colour:
+The pill is the alternative style, chosen from `Style` in the tray menu or the settings view. It is
+a small always-on-top strip with one mark per session, at most ten and then `+N`, followed by the
+number of sessions that need you and a chevron. The chevron points down while the panel is closed
+and up while it is open; pressing it opens or closes the panel without taking focus. Pressing
+anywhere else on the pill only drags it. Each state has its own shape as well as colour:
 
 | Mark | Meaning |
 |---|---|
@@ -73,42 +77,58 @@ need you. Each state has its own shape as well as colour:
 | Hollow ring | Idle |
 
 The pill hides while a fullscreen window is in front on its monitor, snaps to edges and corners,
-and remembers its position per monitor layout.
+and remembers its position per monitor layout. An open panel moves with the pill or the tab while
+it is dragged, and while the tab glides back to its edge.
 
 ### Visibility and attention
 
 The edge tab and the pill are the overlay. `Show it` under `Overlay` in the settings view chooses
-when it is on screen: `Always`, `While Claude is working or needs you` (the default), `Only when
-Claude needs you` or `Never (tray icon only)`. It fades out 5 s after its condition stops holding.
-While it is hidden, hovering its screen edge reveals it (`Reveal when I hover its screen edge`, on
-by default). `Size` (`Small`, `Medium` or `Large`) and `Opacity when nothing needs you` (20% to
-100%, 60% by default) set how it looks.
+when it is on screen: `Always`, `While Claude is active` (working or needs you; the default), `When
+Claude needs you` or `Never` (tray icon only). It fades out 5 s after its condition stops holding.
+While it is hidden, hovering its screen edge reveals it (`Reveal on edge hover`, on by default).
+`Open on hover` decides whether resting the pointer on the overlay opens the panel; until it is
+set, it is on for the edge tab and off for the pill. `Size` (`Small`, `Medium` or `Large`) and
+`Idle opacity` (the overlay's opacity while nothing needs you, 20% to 100%, 60% by default) set how
+it looks.
 
 When a session starts needing you, the overlay pops, pulses once and slides out a short peek label
 naming the session and what it needs. The label stays for `Label stays for` (2 to 10 s, 4 s by
 default), never takes focus, and opens the panel when clicked. The session whose window is in front
 gets no peek. Until the panel is opened, a reminder pulse repeats at the `Remind me` interval:
-`Off`, 30 s, 1, 2 or 5 minutes (1 minute by default). `When a session needs you` picks the style:
-`Change colour only`, `Pulse` or `Pulse and show a short label` (the default). `Preview` plays the
-current choice.
+`Off`, 30 s, 1, 2 or 5 minutes (1 minute by default). Alerts that arrive while the panel is open
+count as seen, so the tab does not pulse for them. `Style` under `Attention` picks the style:
+`Colour only`, `Pulse` or `Pulse and label` (the default). `Preview` plays the current choice.
 
 ### The panel
 
-The panel has two modes:
+The panel has three modes:
 
-- Hover: opens when the cursor rests on the tab or pill and closes 400 ms after it leaves both.
-- Sticky: opened with a click on the tab or pill, the hotkey, the tray or a second launch.
+- Hover: with `Open on hover` on, opens when the cursor rests on the tab or pill and closes 400 ms
+  after it leaves both.
+- Sticky: opened with a click on the tab, the pill's chevron, the hotkey, the tray or a second
+  launch.
+- Pinned: with `Pin while Claude is active` on (off by default), the panel opens by itself without
+  taking focus while a session is starting, working, stalled or needs you, and closes 5 s after
+  that stops. A press outside does not close it. The pin button in its header hides it until Claude
+  is next active. It does not open while a fullscreen window is in front.
 
-The panel never opens by itself and never stays open. It closes on a press outside it, when the
-cursor leaves it (hover), on Escape in the list, or when a sticky panel loses focus.
+Apart from the pinned mode, the panel never opens by itself and never stays open. It closes on a
+press outside it, when the cursor leaves it (hover), on Escape in the list, or when a sticky panel
+loses focus. A reopened panel starts on the session list.
 
 The panel is compact: each session is a 36 px row, with a second row carrying `Allow` and `Deny`
 when it is waiting. A row starts with the session's avatar, whose colour is fixed per session and
-whose face follows its state, with the state mark as a badge. Next come the session's title, or the
-project name when it has none, and a second line with task progress such as `3/7` and the current
-task, or else the current step, or else the state. A session with tasks has a thin progress bar
-along the bottom of its row. Two icon buttons jump to the session's window and cross it off.
-Sessions are grouped by state.
+whose face follows its state, with the state mark as a badge. Next come the session's title and a
+second line with task progress such as `3/7` and the current task, or else the current step, or
+else the state. A session with tasks has a thin progress bar along the bottom of its row. Two icon
+buttons jump to the session's window and cross it off. Sessions are grouped by state; ended
+sessions are in a collapsed `Ended (n)` group, kept for 2 hours and at most 20.
+
+The title is the first of: the session's custom title, the title Claude Code generated for it, its
+last prompt, the name `claude agents` lists for it (unless that is only the project name with a
+two-digit hex suffix), the project name, and the first 8 characters of the session id. Titles are
+read from the hooks and the session's transcript, shown on one line of at most 80 characters, and
+redacted like the request preview.
 
 Opening a row, with a click or Enter, replaces the list with the session's detail view: avatar tabs
 for the other sessions, the header, any pending request, a `Terminal` block with the command running
@@ -158,46 +178,65 @@ found through the process tree. For a VS Code session it then opens the session'
 
 ### Sending a prompt
 
-The prompt box in a session's detail view sends text by one of three paths:
+The prompt box in a session's detail view sends text by one of four paths, tried in this order:
 
 | Session | Path |
 |---|---|
 | Turn running | Queued and handed to Claude when the turn ends, through the `Stop` hook |
-| Idle in VS Code | The session opens in VS Code with the text in its prompt box, unsent |
+| Idle, and it can be woken | Sent at once: the `StopWaiter` hook wakes the session and Claude starts a new turn |
+| Idle in VS Code | The session opens in VS Code with the text in its prompt box; VS Code asks you to send it |
 | Idle elsewhere | The text goes to the clipboard and the window is raised |
 
-A queued prompt shows `queued`, `delivered`, `acknowledged` or `failed`, and survives a restart.
-A prompt delivered at turn end also appears in the session as a `Beacon follow-up: ...` line.
+A session can be woken while it is idle, done or in error, attended (not `claude -p`), and Claude
+Code is holding its `StopWaiter` hook, which it starts at each turn end and keeps for up to 24
+hours or until a prompt is typed in the session. Claude sees a woken prompt as a follow-up from
+Beacon, not as a message you typed. This path has not been confirmed on a real interactive session
+yet.
+
+A queued prompt shows `queued`, `delivered`, `acknowledged` or `failed`, and survives a restart; a
+woken prompt shows `delivered` at once. A prompt delivered at turn end also appears in the session
+as a `Beacon follow-up: ...` line.
 
 ### Snooze and acknowledge
 
 Snooze silences one session, or all of them from the bell in the header or the tray, for 5 or 15
 minutes: no pulse or peek on the overlay, no count on the pill and no notification. Acknowledge
 clears a `done`, `error` or `stalled` session. Bringing a finished session's window to the front
-acknowledges it when that window holds exactly one session.
+acknowledges it when that window holds exactly one session. A `done` session also acknowledges
+itself once its turn has been over for `Clear finished after` under `Behaviour`: `Never`, 5, 10
+(the default) or 30 minutes, or 1 hour, checked every 30 s. `error` and `stalled` sessions are not
+cleared this way.
 
 ### Notifications
 
 Windows notifications announce sessions that start needing you or finish. Sessions that change
 within 2 seconds of each other share one notification, and the session whose window is in front
-gets none. Both kinds can be turned off in the settings view.
+gets none. `Notifications` and `Also when finished` under `Attention` turn the two kinds off.
 
-Sounds are off by default. `Sounds` in the bell menu in the panel header, or `Play a sound when a
-session needs you or finishes` under `Attention` in the settings view, turns them on; they are
-Windows' own notification sounds, played when a session starts needing you or finishes.
+Sounds are off by default. `Sounds` in the bell menu in the panel header, or `Sounds` under
+`Attention` in the settings view, turns them on; they are Windows' own notification sounds, played
+when a session starts needing you or finishes.
 
 ### Settings
 
-The gear icon in the panel header opens the settings view; Escape returns to the sessions. It holds
-the hooks status with install, repair and uninstall; the overlay and attention choices, with
-notifications and sounds; when Beacon starts; whether headless runs are answered from Beacon; the
-stall time; the panel shortcut; and the version, the Beacon home and its logs folder.
+The gear icon in the panel header opens the settings view; Escape returns to the sessions. Every
+setting is there, in six sections that start collapsed, each with a one-line summary of its current
+choices:
+
+| Section | Settings |
+|---|---|
+| Overlay | `Style`, `Display`, `Never show on`, `Position`, `Show it`, `Reveal on edge hover`, `Open on hover`, `Size`, `Idle opacity`, `Pin while Claude is active` |
+| Attention | `Style`, `Remind me`, `Label stays for`, `Notifications`, `Also when finished`, `Sounds`, `Preview` |
+| Startup | `Start Beacon`, `Close when unused for` |
+| Behaviour | `Answer headless runs`, `Stalled after`, `Clear finished after`, `Shortcut` |
+| Claude Code hooks | Status, with install, repair and uninstall |
+| About | Version, the Beacon home, `Open logs folder`, `Quit Beacon` |
 
 `Start Beacon` is `When Claude is used` (the default), `When I sign in to Windows` or `Only when I
 open it`. When Claude is used, the hook starts Beacon in the background when an attended session
 starts or sends a prompt and Beacon is not running; headless `claude -p` runs never start it. In
-that mode `Close it after Claude has been unused for` quits Beacon after 5 minutes, 15 minutes (the
-default) or 1 hour without Claude in use, or never.
+that mode `Close when unused for` quits Beacon after 5 minutes, 15 minutes (the default) or 1 hour
+without Claude in use, or never.
 
 ### Tray menu
 
@@ -213,7 +252,7 @@ style) and `Quit`.
 |---|---|
 | `beacon daemon` | Runs the core without the app |
 | `beacon stop` | Stops the core |
-| `beacon status [--watch] [--json] [--all]` | Lists sessions and pending requests; `--all` includes crossed-off sessions |
+| `beacon status [--watch] [--json] [--all]` | Lists live sessions, the five most recently ended ones and pending requests; `--all` includes crossed-off sessions |
 | `beacon decide <id> allow` | Allows a pending request |
 | `beacon decide <id> deny [--message <text>] [--stop]` | Denies it, optionally with a message or stopping Claude |
 | `beacon decide <id> answer "<question>=<label>" ...` | Answers a question |
@@ -222,7 +261,7 @@ style) and `Quit`.
 | `beacon dismiss <session>` | Crosses a session off |
 | `beacon jump <session>` | Raises the session's window |
 | `beacon where <session>` | Prints the window the session runs in |
-| `beacon prompt <session> "<text>"` | Queues a prompt for the end of the current turn |
+| `beacon prompt <session> "<text>"` | Queues a prompt for the end of the current turn, or sends it at once to an idle session that can be woken |
 | `beacon snooze <session\|all> <minutes>` | Snoozes one session or all |
 | `beacon unsnooze <session\|all>` | Clears a snooze |
 | `beacon usage [--refresh]` | Shows token use per session and the account limits |
@@ -243,17 +282,17 @@ style) and `Quit`.
 | Send a prompt | Built, not verified on this surface | Built, not verified on this surface | Built, not verified on this surface | Verified [4] |
 | Usage | Built, not verified on this surface | Built, not verified on this surface | Built, not verified on this surface | Verified |
 
-1. Only with `Answer headless runs from Beacon` on. Off (the default), a run with nobody attached
-   is passed straight through so it never waits.
+1. Only with `Answer headless runs` on. Off (the default), a run with nobody attached is passed
+   straight through so it never waits.
 2. Finding the window was checked read-only for running VS Code and desktop sessions. The focus
    change and the VS Code link are not verified on any surface.
 3. A headless run has no window.
-4. The prompt at turn end. A headless run has no window for the other two paths.
+4. The prompt at turn end. A headless run is never woken and has no window for the other paths.
 
 Every end-to-end check so far ran against headless `claude -p` sessions: state, allow, deny,
 always allow, a question, a plan, a prompt at turn end and usage. The hooks have not been installed
 for the interactive terminal, the VS Code extension or the desktop Code tab, so those surfaces are
-built but unverified.
+built but unverified. Waking an idle session from Beacon is unverified on every surface.
 
 ## Limits and known gaps
 
@@ -265,8 +304,13 @@ built but unverified.
 - Notifications have no action buttons.
 - A session that the default-terminal setting handed to Windows Terminal has no Windows Terminal
   ancestor, so jump does not find its window.
-- Per-session usage is read from the transcript, whose format is internal to Claude Code and may
-  change. The account limits come from a cached value in `~/.claude.json`, also internal.
+- Per-session usage and the transcript titles are read from the transcript, whose format is
+  internal to Claude Code and may change. The account limits come from a cached value in
+  `~/.claude.json`, also internal.
+- `claude agents --json` runs every 5 minutes while a session is live, and also at start, when a
+  session's process exits, when a hook names an unknown session and when the panel opens, at most
+  once every 15 s. Sessions Beacon knows only from that list, their listed names, and sessions that
+  vanished without a watched process can therefore lag by up to 5 minutes.
 - Several sessions in one editor window cannot be told apart, so "no notification for the focused
   session" and "focus acknowledges a finished session" apply only when one session maps to the
   window in front.
@@ -284,8 +328,8 @@ built but unverified.
 - It fails open. The helper exits 0 on every path, prints only a complete decision, and gives up
   after short timeouts, so a stopped or hung core never blocks a session. Permission requests wait
   for you, up to the one-hour timeout the hook is registered with.
-- The one-line request preview and the activity line are redacted in the core before any front end
-  sees them. Everything from a session is shown as plain text.
+- The one-line request preview, the activity line and session titles are redacted in the core
+  before any front end sees them. Everything from a session is shown as plain text.
 - The helper forwards the hook payload and an allowlist of 18 environment variables; no other
   variable leaves the session.
 
@@ -293,7 +337,7 @@ What is stored where:
 
 | Place | Contents |
 |---|---|
-| `%LOCALAPPDATA%\Beacon` (or `BEACON_HOME`) | `endpoint` (pipe name and token, removed on a clean stop), `state.json` (sessions, snoozes, queued prompts), `config.json`, `ui.json` (style, tab placement, pill positions, displays, shortcut, notification and sound choices, overlay visibility, reveal, size and opacity, attention style, reminder interval and label time, start mode and idle close time), `autostart` (the app's path, only while `Start Beacon` is `When Claude is used`), `launching` (written when the hook starts the app, so it starts it at most once every 20 s), `install.json`, `bin\beacon-hook.exe`, `backups\` (copies of the settings file), `logs\core.log`, `icon.png` |
+| `%LOCALAPPDATA%\Beacon` (or `BEACON_HOME`) | `endpoint` (pipe name and token, removed on a clean stop), `state.json` (sessions, snoozes, queued prompts; written at most every 2 s), `config.json` (`stall_minutes`, `answer_unattended`, `clear_finished_minutes`, `reconcile_seconds` (300), `log_level`), `ui.json` (style, tab placement, pill positions, displays, shortcut, notification and sound choices, overlay visibility, reveal, open on hover, size and opacity, pin while active, attention style, reminder interval and label time, start mode and idle close time), `autostart` (the app's path, only while `Start Beacon` is `When Claude is used`), `launching` (written when the hook starts the app, so it starts it at most once every 20 s), `install.json`, `bin\beacon-hook.exe`, `backups\` (copies of the settings file), `logs\core.log` (moved to `core.log.1` before it passes 5 MB), `icon.png` |
 | Claude Code `settings.json` | The Beacon hook handlers |
 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `Beacon` | Only while `Start Beacon` is `When I sign in to Windows` |
 | `HKCU\Software\Classes\AppUserModelId\com.project-graphite.beacon` | The name and icon Windows shows on Beacon's notifications |
