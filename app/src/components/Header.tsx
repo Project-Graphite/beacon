@@ -13,6 +13,8 @@ interface HeaderProps {
   queue: QueuePlace | null;
   soundsEnabled: boolean | null;
   settingsOpen: boolean;
+  pinned: boolean;
+  onUnpin: () => void;
   onToggleSounds: () => void;
   onToggleSettings: () => void;
   run: (action: Promise<unknown>) => void;
@@ -25,6 +27,8 @@ export function Header({
   queue,
   soundsEnabled,
   settingsOpen,
+  pinned,
+  onUnpin,
   onToggleSounds,
   onToggleSettings,
   run,
@@ -50,6 +54,17 @@ export function Header({
       </p>
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
         {accountUsage && <UsageButton usage={accountUsage} />}
+        {pinned && (
+          <button
+            type="button"
+            aria-label="Hide until Claude is next active"
+            title="Pinned while Claude is active. Click to hide until Claude is next active"
+            onClick={onUnpin}
+            className="press grid size-6 place-items-center rounded-field text-ink hover:bg-surface"
+          >
+            <Icon name="pin" />
+          </button>
+        )}
         <SnoozeMenu snoozedUntil={snoozedUntil} soundsEnabled={soundsEnabled} onToggleSounds={onToggleSounds} run={run} />
         <button
           type="button"

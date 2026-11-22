@@ -203,7 +203,7 @@ export type Decision =
   | { type: 'deny'; message?: string }
   | { type: 'deny_and_stop'; message?: string };
 
-export type PanelMode = 'hover' | 'sticky';
+export type PanelMode = 'hover' | 'sticky' | 'pinned';
 
 export type PanelEdge = 'left' | 'right' | 'top' | 'bottom';
 
@@ -246,6 +246,29 @@ export interface UiSettings {
   peek_seconds: number;
   start_mode: StartMode;
   quit_when_idle_minutes: number;
+  pin_while_active: boolean;
+}
+
+export type OverlayStyle = 'tab' | 'pill';
+
+export type OverlayCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+
+export type OverlayPosition = PanelEdge | OverlayCorner;
+
+export interface OverlayDisplay {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  primary: boolean;
+  target: boolean;
+  avoided: boolean;
+}
+
+export interface Overlay {
+  style: OverlayStyle;
+  position: OverlayPosition | null;
+  displays: OverlayDisplay[];
 }
 
 export interface AppInfo {
@@ -293,6 +316,14 @@ export const openLogsFolder = () => invoke<void>('open_logs_folder');
 let lastAppInfo: AppInfo | null = null;
 export const appInfo = () => invoke<AppInfo>('app_info').then((info) => (lastAppInfo = info));
 export const cachedAppInfo = () => lastAppInfo;
+let lastOverlay: Overlay | null = null;
+export const getOverlay = () => invoke<Overlay>('get_overlay').then((overlay) => (lastOverlay = overlay));
+export const cachedOverlay = () => lastOverlay;
+export const setStyle = (style: OverlayStyle) => invoke<void>('set_style', { style });
+export const setDisplay = (id: string) => invoke<void>('set_display', { id });
+export const setDisplayAvoided = (id: string, avoided: boolean) => invoke<void>('set_display_avoided', { id, avoided });
+export const setOverlayPosition = (position: OverlayPosition) => invoke<void>('set_overlay_position', { position });
+export const quitApp = () => invoke<void>('quit_app');
 
 export const onSnapshot = (handler: (snapshot: Snapshot | null) => void): Promise<UnlistenFn> =>
   listen<Snapshot | null>('beacon://snapshot', (event) => handler(event.payload));
@@ -301,3 +332,6 @@ export const onOpened = (handler: (opened: Opened) => void): Promise<UnlistenFn>
   listen<OpenedPayload>('beacon://opened', (event) => handler(openedFrom(event.payload)));
 
 export const onClosing = (handler: () => void): Promise<UnlistenFn> => listen('beacon://closing', handler);
+
+export const onSettingsChanged = (handler: () => void): Promise<UnlistenFn> =>
+  listen('beacon://settings-changed', handler);

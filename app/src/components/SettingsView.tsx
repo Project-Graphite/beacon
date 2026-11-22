@@ -1,60 +1,97 @@
 import { useEffect, useState } from 'react';
-import { appInfo, cachedAppInfo, openLogsFolder, previewAttention, setConfig, type AppInfo, type LiveConfig, type UiSettings } from '../beacon';
+import {
+  appInfo,
+  cachedAppInfo,
+  cachedOverlay,
+  getOverlay,
+  onSettingsChanged,
+  openLogsFolder,
+  previewAttention,
+  quitApp,
+  setConfig,
+  setDisplay,
+  setDisplayAvoided,
+  setOverlayPosition,
+  setStyle,
+  type AppInfo,
+  type LiveConfig,
+  type Overlay,
+  type UiSettings,
+} from '../beacon';
 import { errorText } from '../lib/format.ts';
 import {
   ATTENTION_CHOICES,
+  attentionSummary,
+  avoidedLabel,
+  behaviourSummary,
+  displayLabel,
+  labelOf,
   OPACITY_RANGE,
+  overlaySummary,
   PEEK_RANGE,
   percent,
+  positionChoices,
   QUIT_CHOICES,
   REPEAT_CHOICES,
   SIZE_CHOICES,
   stallMinutes,
   START_CHOICES,
+  startupSummary,
+  STYLE_CHOICES,
   UI_DEFAULTS,
   VISIBILITY_CHOICES,
 } from '../lib/settings.ts';
-import { CheckboxField } from './CheckboxField';
 import { HooksSection } from './HooksSection';
 import { OutlineButton } from './OutlineButton';
-import { RadioList } from './RadioList';
 import { SegmentedControl } from './SegmentedControl';
+import { Select } from './Select';
+import { SettingsRow } from './SettingsRow';
 import { SettingsSection } from './SettingsSection';
 import { Slider } from './Slider';
+import { Switch } from './Switch';
 import { TextButton } from './TextButton';
 
-type Section = 'overlay' | 'attention' | 'startup' | 'behaviour' | 'shortcut' | 'about';
+export type SettingsPart = 'overlay' | 'attention' | 'startup' | 'behaviour' | 'hooks' | 'about';
 
 const FIELD =
-  'h-6 rounded-field border border-line bg-paper px-2 font-mono text-secondary text-ink placeholder:text-faint focus:border-muted focus:outline-none';
+  'h-6 rounded-field border border-line bg-paper px-2 font-mono text-secondary text-ink placeholder:text-faint focus:border-muted focus:outline-none disabled:opacity-50';
 
 interface SettingsViewProps {
   config: LiveConfig | null;
   ui: UiSettings | null;
+  openParts: SettingsPart[];
+  onToggle: (part: SettingsPart) => void;
   onChangeUi: (change: Partial<UiSettings>) => Promise<UiSettings>;
 }
 
-export function SettingsView({ config, ui, onChangeUi }: SettingsViewProps) {
+export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: SettingsViewProps) {
   const [editedHotkey, setEditedHotkey] = useState<string | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(cachedAppInfo);
+  const [overlay, setOverlay] = useState<Overlay | null>(cachedOverlay);
   const [stallText, setStallText] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Partial<Record<Section, string | null>>>({});
+  const [errors, setErrors] = useState<Partial<Record<SettingsPart, string | null>>>({});
 
-  const attempt = <T,>(section: Section, work: Promise<T>, done?: (value: T) => void) =>
+  const attempt = <T,>(part: SettingsPart, work: Promise<T>, done?: (value: T) => void) =>
     work.then(
       (value) => {
-        setErrors((current) => ({ ...current, [section]: null }));
+        setErrors((current) => ({ ...current, [part]: null }));
         done?.(value);
       },
-      (error) => setErrors((current) => ({ ...current, [section]: errorText(error) })),
+      (error) => setErrors((current) => ({ ...current, [part]: errorText(error) })),
     );
 
-  const change = (section: Section, update: Partial<UiSettings>) => attempt(section, onChangeUi(update));
+  const change = (part: SettingsPart, update: Partial<UiSettings>) => attempt(part, onChangeUi(update));
+  const changeOverlay = (work: Promise<void>) => attempt('overlay', work.then(getOverlay), setOverlay);
   const shown = ui ?? UI_DEFAULTS;
   const hotkey = editedHotkey ?? ui?.hotkey ?? '';
+  const section = (part: SettingsPart) => ({ open: openParts.includes(part), onToggle: () => onToggle(part), error: errors[part] });
 
   useEffect(() => {
+    const reload = () => attempt('overlay', getOverlay(), setOverlay);
     attempt('about', appInfo(), setInfo);
+    reload();
+    const subscription = onSettingsChanged(reload);
+    return () => void subscription.then((unlisten) => unlisten());
   }, []);
 
   const commitStall = () => {
@@ -67,155 +104,316 @@ export function SettingsView({ config, ui, onChangeUi }: SettingsViewProps) {
     attempt('behaviour', setConfig({ stall_minutes: minutes }), () => setStallText(null));
   };
 
-  const applyHotkey = () => attempt('shortcut', onChangeUi({ hotkey: hotkey.trim() }), () => setEditedHotkey(null));
+  const applyHotkey = () => attempt('behaviour', onChangeUi({ hotkey: hotkey.trim() }), () => setEditedHotkey(null));
+  const target = overlay?.displays.find((display) => display.target);
 
   return (
     <div>
-      <HooksSection />
-      <SettingsSection label="Overlay" error={errors.overlay}>
-        <RadioList
-          label="Show it"
-          choices={VISIBILITY_CHOICES}
-          value={shown.visibility}
-          disabled={!ui}
-          onChange={(visibility) => change('overlay', { visibility })}
-        />
-        <CheckboxField
-          label="Reveal when I hover its screen edge"
-          checked={shown.reveal_on_hover}
+      <SettingsSection label="Overlay" summary={overlaySummary(shown, overlay)} {...section('overlay')}>
+        <SettingsRow label="Style" help="The edge tab is a thin strip on a screen edge; the pill floats near a corner." disabled={!overlay}>
+          {(field) => (
+            <SegmentedControl
+              field={field}
+              choices={STYLE_CHOICES}
+              value={overlay?.style ?? 'tab'}
+              disabled={!overlay}
+              onChange={(style) => changeOverlay(setStyle(style))}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Display" help="The display the overlay and the panel appear on." disabled={!overlay}>
+          {(field) => (
+            <Select
+              field={field}
+              choices={(overlay?.displays ?? []).map((display) => ({ value: display.id, label: displayLabel(display) }))}
+              text={target ? displayLabel(target) : 'None'}
+              selected={(id) => id === target?.id}
+              disabled={!overlay}
+              onChoose={(id) => changeOverlay(setDisplay(id))}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Never show on" help="Displays Beacon never uses, even when the chosen one is gone." disabled={!overlay}>
+          {(field) => (
+            <Select
+              field={field}
+              multiple
+              choices={(overlay?.displays ?? []).map((display) => ({ value: display.id, label: displayLabel(display) }))}
+              text={avoidedLabel(overlay?.displays ?? [])}
+              selected={(id) => overlay?.displays.some((display) => display.id === id && display.avoided) ?? false}
+              disabled={!overlay}
+              onChoose={(id) =>
+                changeOverlay(setDisplayAvoided(id, !overlay?.displays.some((display) => display.id === id && display.avoided)))
+              }
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Position" help="Where the overlay sits on its display." disabled={!overlay?.position}>
+          {(field) => (
+            <Select
+              field={field}
+              choices={positionChoices(overlay?.style ?? 'tab')}
+              text={overlay?.position ? labelOf(positionChoices(overlay.style), overlay.position) : 'None'}
+              selected={(position) => position === overlay?.position}
+              disabled={!overlay?.position}
+              onChoose={(position) => changeOverlay(setOverlayPosition(position))}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Show it" help="When the overlay is on screen." disabled={!ui}>
+          {(field) => (
+            <Select
+              field={field}
+              choices={VISIBILITY_CHOICES}
+              text={labelOf(VISIBILITY_CHOICES, shown.visibility)}
+              selected={(visibility) => visibility === shown.visibility}
+              disabled={!ui}
+              onChoose={(visibility) => change('overlay', { visibility })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow
+          label="Reveal on edge hover"
+          help="While the overlay is hidden, hovering its screen edge brings it back."
           disabled={!ui || shown.visibility === 'never'}
-          onChange={(reveal_on_hover) => change('overlay', { reveal_on_hover })}
-        />
-        <SegmentedControl
-          label="Size"
-          choices={SIZE_CHOICES}
-          value={shown.size}
+        >
+          {(field) => (
+            <Switch
+              field={field}
+              checked={shown.reveal_on_hover}
+              disabled={!ui || shown.visibility === 'never'}
+              onChange={(reveal_on_hover) => change('overlay', { reveal_on_hover })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Size" help="Size of the edge tab or the pill." disabled={!ui}>
+          {(field) => (
+            <SegmentedControl
+              field={field}
+              choices={SIZE_CHOICES}
+              value={shown.size}
+              disabled={!ui}
+              onChange={(size) => change('overlay', { size })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Idle opacity" help="Opacity of the overlay while nothing needs you." disabled={!ui}>
+          {(field) => (
+            <Slider
+              field={field}
+              value={shown.idle_opacity}
+              range={OPACITY_RANGE}
+              format={percent}
+              disabled={!ui}
+              onCommit={(idle_opacity) => change('overlay', { idle_opacity })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow
+          label="Pin while Claude is active"
+          help="While Claude is working or needs you, the panel opens by itself without taking focus and stays open until 5 s after Claude is done."
           disabled={!ui}
-          onChange={(size) => change('overlay', { size })}
-        />
-        <Slider
-          label="Opacity when nothing needs you"
-          value={shown.idle_opacity}
-          range={OPACITY_RANGE}
-          format={percent}
-          disabled={!ui}
-          onCommit={(idle_opacity) => change('overlay', { idle_opacity })}
-        />
+        >
+          {(field) => (
+            <Switch
+              field={field}
+              checked={shown.pin_while_active}
+              disabled={!ui}
+              onChange={(pin_while_active) => change('overlay', { pin_while_active })}
+            />
+          )}
+        </SettingsRow>
       </SettingsSection>
-      <SettingsSection label="Attention" error={errors.attention}>
-        <RadioList
-          label="When a session needs you"
-          choices={ATTENTION_CHOICES}
-          value={shown.attention_style}
-          disabled={!ui}
-          onChange={(attention_style) => change('attention', { attention_style })}
-        />
-        <SegmentedControl
-          label="Remind me"
-          choices={REPEAT_CHOICES}
-          value={shown.attention_repeat_seconds}
-          disabled={!ui}
-          onChange={(attention_repeat_seconds) => change('attention', { attention_repeat_seconds })}
-        />
-        <Slider
+      <SettingsSection label="Attention" summary={attentionSummary(shown)} {...section('attention')}>
+        <SettingsRow label="Style" help="How the overlay shows that a session needs you." disabled={!ui}>
+          {(field) => (
+            <SegmentedControl
+              field={field}
+              choices={ATTENTION_CHOICES}
+              value={shown.attention_style}
+              disabled={!ui}
+              onChange={(attention_style) => change('attention', { attention_style })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Remind me" help="How often the pulse repeats until you open the panel." disabled={!ui}>
+          {(field) => (
+            <Select
+              field={field}
+              choices={REPEAT_CHOICES}
+              text={labelOf(REPEAT_CHOICES, shown.attention_repeat_seconds)}
+              selected={(seconds) => seconds === shown.attention_repeat_seconds}
+              disabled={!ui}
+              onChoose={(attention_repeat_seconds) => change('attention', { attention_repeat_seconds })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow
           label="Label stays for"
-          value={shown.peek_seconds}
-          range={PEEK_RANGE}
-          format={(seconds) => `${seconds} s`}
+          help="How long the label naming the session stays out."
           disabled={!ui || shown.attention_style !== 'pulse_peek'}
-          onCommit={(peek_seconds) => change('attention', { peek_seconds })}
-        />
-        <CheckboxField
-          label="Show notifications"
-          checked={shown.toasts_enabled}
-          disabled={!ui}
-          onChange={(toasts_enabled) => change('attention', { toasts_enabled })}
-        />
-        <CheckboxField
-          label="Also when a session finishes"
-          checked={shown.toast_on_finished}
-          disabled={!ui?.toasts_enabled}
-          onChange={(toast_on_finished) => change('attention', { toast_on_finished })}
-        />
-        <CheckboxField
-          label="Play a sound when a session needs you or finishes"
-          checked={shown.sounds_enabled}
-          disabled={!ui}
-          onChange={(sounds_enabled) => change('attention', { sounds_enabled })}
-        />
-        <div className="mt-1">
-          <OutlineButton disabled={!ui} onClick={() => attempt('attention', previewAttention())}>
-            Preview
-          </OutlineButton>
-        </div>
+        >
+          {(field) => (
+            <Slider
+              field={field}
+              value={shown.peek_seconds}
+              range={PEEK_RANGE}
+              format={(seconds) => `${seconds} s`}
+              disabled={!ui || shown.attention_style !== 'pulse_peek'}
+              onCommit={(peek_seconds) => change('attention', { peek_seconds })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Notifications" help="A Windows notification when a session needs you." disabled={!ui}>
+          {(field) => (
+            <Switch
+              field={field}
+              checked={shown.toasts_enabled}
+              disabled={!ui}
+              onChange={(toasts_enabled) => change('attention', { toasts_enabled })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Also when finished" help="Also notify when a session finishes." disabled={!ui?.toasts_enabled}>
+          {(field) => (
+            <Switch
+              field={field}
+              checked={shown.toast_on_finished}
+              disabled={!ui?.toasts_enabled}
+              onChange={(toast_on_finished) => change('attention', { toast_on_finished })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Sounds" help="Play a sound when a session needs you or finishes." disabled={!ui}>
+          {(field) => (
+            <Switch
+              field={field}
+              checked={shown.sounds_enabled}
+              disabled={!ui}
+              onChange={(sounds_enabled) => change('attention', { sounds_enabled })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Preview" help="Shows the attention style on the overlay once." disabled={!ui}>
+          {(field) => (
+            <OutlineButton
+              compact
+              id={field.id}
+              aria-describedby={field.helpId}
+              disabled={!ui}
+              onClick={() => attempt('attention', previewAttention())}
+            >
+              Show
+            </OutlineButton>
+          )}
+        </SettingsRow>
       </SettingsSection>
-      <SettingsSection label="Startup" error={errors.startup}>
-        <RadioList
-          label="Start Beacon"
-          choices={START_CHOICES}
-          value={shown.start_mode}
-          disabled={!ui}
-          onChange={(start_mode) => change('startup', { start_mode })}
-        />
-        <SegmentedControl
-          label="Close it after Claude has been unused for"
-          choices={QUIT_CHOICES}
-          value={shown.quit_when_idle_minutes}
+      <SettingsSection label="Startup" summary={startupSummary(shown)} {...section('startup')}>
+        <SettingsRow label="Start Beacon" help="When Beacon starts by itself." disabled={!ui}>
+          {(field) => (
+            <Select
+              field={field}
+              choices={START_CHOICES}
+              text={labelOf(START_CHOICES, shown.start_mode)}
+              selected={(mode) => mode === shown.start_mode}
+              disabled={!ui}
+              onChoose={(start_mode) => change('startup', { start_mode })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow
+          label="Close when unused for"
+          help="Beacon quits after Claude has been unused this long. Only when it starts with Claude."
           disabled={!ui || shown.start_mode !== 'claude'}
-          onChange={(quit_when_idle_minutes) => change('startup', { quit_when_idle_minutes })}
-        />
+        >
+          {(field) => (
+            <Select
+              field={field}
+              choices={QUIT_CHOICES}
+              text={labelOf(QUIT_CHOICES, shown.quit_when_idle_minutes)}
+              selected={(minutes) => minutes === shown.quit_when_idle_minutes}
+              disabled={!ui || shown.start_mode !== 'claude'}
+              onChoose={(quit_when_idle_minutes) => change('startup', { quit_when_idle_minutes })}
+            />
+          )}
+        </SettingsRow>
       </SettingsSection>
-      <SettingsSection label="Behaviour" error={errors.behaviour}>
-        <CheckboxField
-          label="Answer headless runs from Beacon"
+      <SettingsSection label="Behaviour" summary={behaviourSummary(shown, config)} {...section('behaviour')}>
+        <SettingsRow
+          label="Answer headless runs"
           help="Off: a claude -p run with nobody attached is passed straight through, so it never waits on you."
-          checked={config?.answer_unattended ?? false}
           disabled={!config}
-          onChange={(checked) => attempt('behaviour', setConfig({ answer_unattended: checked }))}
-        />
-        <label className="flex items-center gap-2 py-1">
-          <span className="text-ink">Mark a session as stalled after</span>
-          <input
-            inputMode="numeric"
-            disabled={!config}
-            value={stallText ?? String(config?.stall_minutes ?? '')}
-            onChange={(event) => setStallText(event.target.value)}
-            onBlur={commitStall}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') commitStall();
-            }}
-            className={`${FIELD} w-12 text-right tabular-nums`}
-          />
-          <span className="text-secondary text-muted">minutes</span>
-        </label>
+        >
+          {(field) => (
+            <Switch
+              field={field}
+              checked={config?.answer_unattended ?? false}
+              disabled={!config}
+              onChange={(checked) => attempt('behaviour', setConfig({ answer_unattended: checked }))}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Stalled after" help="Mark a session as stalled after this many minutes without news. Enter to apply." disabled={!config}>
+          {(field) => (
+            <span className="flex shrink-0 items-center gap-1.5">
+              <input
+                id={field.id}
+                aria-describedby={field.helpId}
+                inputMode="numeric"
+                disabled={!config}
+                value={stallText ?? String(config?.stall_minutes ?? '')}
+                onChange={(event) => setStallText(event.target.value)}
+                onBlur={commitStall}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') commitStall();
+                }}
+                className={`${FIELD} w-12 text-right tabular-nums`}
+              />
+              <span className="text-secondary text-muted">min</span>
+            </span>
+          )}
+        </SettingsRow>
+        <SettingsRow label="Shortcut" help="Opens and closes the panel from anywhere." disabled={!ui}>
+          {(field) => (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <input
+                id={field.id}
+                aria-describedby={field.helpId}
+                placeholder="Ctrl+Alt+B"
+                value={hotkey}
+                disabled={!ui}
+                onChange={(event) => setEditedHotkey(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && hotkey.trim()) applyHotkey();
+                }}
+                className={`${FIELD} w-40 min-w-0`}
+              />
+              <OutlineButton compact disabled={!ui || !hotkey.trim() || hotkey.trim() === ui.hotkey} onClick={applyHotkey}>
+                Apply
+              </OutlineButton>
+            </span>
+          )}
+        </SettingsRow>
       </SettingsSection>
-      <SettingsSection label="Shortcut" error={errors.shortcut}>
-        <div className="flex items-center gap-1.5">
-          <input
-            aria-label="Shortcut that opens the panel"
-            placeholder="Ctrl+Alt+B"
-            value={hotkey}
-            disabled={!ui}
-            onChange={(event) => setEditedHotkey(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && hotkey.trim()) applyHotkey();
-            }}
-            className={`${FIELD} min-w-0 flex-1`}
-          />
-          <OutlineButton disabled={!ui || !hotkey.trim() || hotkey.trim() === ui.hotkey} onClick={applyHotkey}>
-            Apply
-          </OutlineButton>
-        </div>
-      </SettingsSection>
-      <SettingsSection label="About" error={errors.about}>
-        <p className="text-ink">
-          Beacon <span className="font-mono text-secondary text-muted tabular-nums">{info?.version}</span>
-        </p>
-        <p title={info?.home} className="truncate font-mono text-micro text-muted">
-          {info?.home}
-        </p>
-        <div className="mt-1">
+      <HooksSection open={openParts.includes('hooks')} onToggle={() => onToggle('hooks')} />
+      <SettingsSection label="About" summary={info ? `Beacon ${info.version}` : ''} {...section('about')}>
+        <SettingsRow label="Version">
+          {(field) => (
+            <span id={field.id} className="font-mono text-secondary text-muted tabular-nums">
+              {info?.version}
+            </span>
+          )}
+        </SettingsRow>
+        <SettingsRow label="Home" help={info?.home}>
+          {(field) => (
+            <span id={field.id} className="min-w-0 truncate font-mono text-micro text-muted">
+              {info?.home}
+            </span>
+          )}
+        </SettingsRow>
+        <div className="flex h-7 items-center justify-between px-2.5">
           <TextButton onClick={() => attempt('about', openLogsFolder())}>Open logs folder</TextButton>
+          <TextButton onClick={() => attempt('about', quitApp())}>Quit Beacon</TextButton>
         </div>
       </SettingsSection>
     </div>

@@ -5,9 +5,15 @@ import { HOOKS_STATES, hooksButtons, splitPlan } from '../lib/settings.ts';
 import { DiffBlock } from './DiffBlock';
 import { FilledButton } from './FilledButton';
 import { OutlineButton } from './OutlineButton';
+import { SettingsRow } from './SettingsRow';
 import { SettingsSection } from './SettingsSection';
 
-export function HooksSection() {
+interface HooksSectionProps {
+  open: boolean;
+  onToggle: () => void;
+}
+
+export function HooksSection({ open, onToggle }: HooksSectionProps) {
   const [status, setStatus] = useState<HooksStatus | null>(cachedHooksStatus);
   const [plan, setPlan] = useState<{ action: HooksAction; text: string } | null>(null);
   const [applied, setApplied] = useState(false);
@@ -27,18 +33,43 @@ export function HooksSection() {
   const shownPlan = plan && splitPlan(plan.text);
 
   return (
-    <SettingsSection label="Claude Code hooks" error={error}>
+    <SettingsSection
+      label="Claude Code hooks"
+      summary={status ? HOOKS_STATES[status.state].label : ''}
+      open={open}
+      onToggle={onToggle}
+      error={error}
+    >
       {status && (
         <>
-          <p className="flex items-center gap-1.5 text-ink">
-            <span aria-hidden="true" className={`size-1.5 rounded-full ${HOOKS_STATES[status.state].dot}`} />
-            {HOOKS_STATES[status.state].label}
-          </p>
-          <p title={status.settings_path} className="truncate font-mono text-micro text-muted">
-            {status.settings_path}
-          </p>
+          <SettingsRow label="Status" help={status.settings_path}>
+            {(field) => (
+              <span id={field.id} aria-describedby={field.helpId} className="flex shrink-0 items-center gap-1.5">
+                <span className="flex items-center gap-1.5 text-secondary text-ink">
+                  <span aria-hidden="true" className={`size-1.5 rounded-full ${HOOKS_STATES[status.state].dot}`} />
+                  {HOOKS_STATES[status.state].label}
+                </span>
+                {!plan &&
+                  hooksButtons(status.state).map(({ label, action }) => (
+                    <OutlineButton
+                      key={action}
+                      compact
+                      disabled={busy}
+                      onClick={() =>
+                        attempt(hooksPlan(action), (text) => {
+                          setApplied(false);
+                          setPlan({ action, text });
+                        })
+                      }
+                    >
+                      {label}
+                    </OutlineButton>
+                  ))}
+              </span>
+            )}
+          </SettingsRow>
           {status.problems.length + status.warnings.length > 0 && (
-            <ul className="mt-1 space-y-0.5 text-secondary">
+            <ul className="space-y-0.5 px-2.5 pb-1 text-micro">
               {status.problems.map((problem) => (
                 <li key={problem} className="break-words text-danger">
                   {problem}
@@ -51,8 +82,8 @@ export function HooksSection() {
               ))}
             </ul>
           )}
-          {plan && shownPlan ? (
-            <div className="mt-2">
+          {plan && shownPlan && (
+            <div className="px-2.5 pb-1.5">
               <div className="space-y-0.5 font-mono text-micro text-muted">
                 {shownPlan.notes.map((note, index) => (
                   <p key={index} className="whitespace-pre-wrap wrap-anywhere">
@@ -61,7 +92,7 @@ export function HooksSection() {
                 ))}
               </div>
               {shownPlan.diff.length > 0 && <DiffBlock lines={shownPlan.diff} />}
-              <div className="mt-2 flex items-center gap-1.5">
+              <div className="mt-1.5 flex items-center gap-1.5">
                 <FilledButton
                   autoFocus
                   disabled={busy}
@@ -80,28 +111,9 @@ export function HooksSection() {
                 </OutlineButton>
               </div>
             </div>
-          ) : (
-            <div className="mt-2 flex items-center gap-1.5">
-              {hooksButtons(status.state).map(({ label, action }) => (
-                <OutlineButton
-                  key={action}
-                  disabled={busy}
-                  onClick={() =>
-                    attempt(hooksPlan(action), (text) => {
-                      setApplied(false);
-                      setPlan({ action, text });
-                    })
-                  }
-                >
-                  {label}
-                </OutlineButton>
-              ))}
-            </div>
           )}
           {applied && (
-            <p className="mt-1.5 text-secondary text-muted">
-              Running Claude sessions pick up the change by themselves
-            </p>
+            <p className="px-2.5 pb-1 text-micro text-muted">Running Claude sessions pick up the change by themselves</p>
           )}
         </>
       )}

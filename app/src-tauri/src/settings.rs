@@ -1,6 +1,7 @@
+use crate::displays::{self, Overlay, Position};
 use crate::feed::Feed;
-use crate::platform::registry;
-use crate::positions::{self, StartMode, UiSettings, UiSettingsChange};
+use crate::platform::{self, pill, registry};
+use crate::positions::{self, StartMode, Style, UiSettings, UiSettingsChange};
 use crate::shell::{self, Action};
 use beacon_cli::doctor::{self, HooksStatus};
 use beacon_cli::installer::{self, Paths};
@@ -183,6 +184,55 @@ pub async fn open_logs_folder(feed: State<'_, Arc<Feed>>) -> Result<(), String> 
         .spawn()
         .map(drop)
         .map_err(|error| format!("cannot open the logs folder: {error}"))
+}
+
+#[tauri::command]
+pub fn get_overlay(feed: State<'_, Arc<Feed>>) -> Overlay {
+    displays::overlay(
+        &platform::monitors(),
+        &positions::display_choice(&feed.home),
+        positions::style(&feed.home),
+        pill::position(),
+    )
+}
+
+#[tauri::command]
+pub fn set_style(style: Style) {
+    shell::dispatch(Action::SetStyle(style));
+}
+
+#[tauri::command]
+pub fn set_display(id: String) {
+    shell::dispatch(Action::ShowOn(id));
+}
+
+#[tauri::command]
+pub fn set_display_avoided(feed: State<'_, Arc<Feed>>, id: String, avoided: bool) {
+    if positions::display_choice(&feed.home)
+        .avoid_displays
+        .contains(&id)
+        != avoided
+    {
+        shell::dispatch(Action::ToggleAvoided(id));
+    }
+}
+
+#[tauri::command]
+pub fn set_overlay_position(position: String) -> Result<(), String> {
+    shell::dispatch(
+        match displays::position(&position)
+            .ok_or_else(|| format!("unknown overlay position {position}"))?
+        {
+            Position::Edge(edge) => Action::MoveToEdge(edge),
+            Position::Corner(corner) => Action::MoveToCorner(corner),
+        },
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    shell::post(&app, Action::Quit);
 }
 
 #[tauri::command]

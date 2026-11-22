@@ -99,6 +99,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings::preview_attention,
             settings::open_logs_folder,
             settings::app_info,
+            settings::get_overlay,
+            settings::set_style,
+            settings::set_display,
+            settings::set_display_avoided,
+            settings::set_overlay_position,
+            settings::quit_app,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

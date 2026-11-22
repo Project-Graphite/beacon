@@ -26,6 +26,12 @@ fn main() {
             "preview_attention",
             "open_logs_folder",
             "app_info",
+            "get_overlay",
+            "set_style",
+            "set_display",
+            "set_display_avoided",
+            "set_overlay_position",
+            "quit_app",
         ]),
     ))
     .expect("the Tauri build script failed");

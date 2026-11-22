@@ -5,8 +5,8 @@ use crate::geometry::{
 };
 use crate::jump;
 use crate::model::{
-    Peek, PeekBatch, PillModel, Presence, TabTone, Unseen, Unused, alerting_count, in_use,
-    overlay_wanted, peek_for, tab_tone,
+    LINGER, Peek, PeekBatch, PillModel, Pin, Presence, TabTone, Unseen, Unused, alerting_count,
+    claude_active, in_use, overlay_wanted, peek_for, pin_decision, tab_tone,
 };
 use crate::panel::{self, PANEL};
 use crate::platform::{
@@ -56,11 +56,12 @@ pub enum Action {
     Quit,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum Mode {
     Hover,
     Sticky,
+    Pinned,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -96,6 +97,9 @@ pub struct Shell {
     quit_armed: Option<Instant>,
     peek_batch: PeekBatch,
     preview: Option<Instant>,
+    was_active: bool,
+    pin_dismissed: bool,
+    pin_released: Option<Instant>,
 }
 
 thread_local! {
@@ -145,6 +149,9 @@ impl Shell {
             quit_armed: None,
             peek_batch: PeekBatch::default(),
             preview: None,
+            was_active: false,
+            pin_dismissed: false,
+            pin_released: None,
             feed,
         }
     }
@@ -160,13 +167,10 @@ impl Shell {
             Action::Pill(PillEvent::Hovered | PillEvent::RevealHovered) => {}
             Action::Pill(PillEvent::PeekPressed) => self.open(Mode::Sticky, true),
             Action::Pill(PillEvent::Clicked) | Action::TogglePanel => match self.mode() {
-                Some(Mode::Sticky) => self.close(),
+                Some(Mode::Sticky | Mode::Pinned) => self.put_away(),
                 _ => self.open(Mode::Sticky, true),
             },
-            Action::Pill(PillEvent::Moved) => {
-                self.place();
-                self.tray.refresh_displays();
-            }
+            Action::Pill(PillEvent::Moved) => self.overlay_changed(),
             Action::Pill(PillEvent::HoverTick) => self.check_hover(),
             Action::Pill(PillEvent::ForegroundChanged) => {
                 jump::acknowledge_focused(&self.feed.home, self.snapshot.as_ref());
@@ -176,7 +180,7 @@ impl Shell {
             }
             Action::Pill(PillEvent::Pressed(point)) => self.pressed(point),
             Action::OpenPanel => self.open(Mode::Sticky, true),
-            Action::ClosePanel => self.close(),
+            Action::ClosePanel => self.put_away(),
             Action::FinishClosing(closing) => {
                 if self
                     .panel
@@ -206,8 +210,7 @@ impl Shell {
                 }
                 pill::set_style(style);
                 self.tray.show_pill_state(pill::user_visible());
-                self.tray.refresh_displays();
-                self.place();
+                self.overlay_changed();
             }
             Action::ShowOn(display) => {
                 self.change_displays(positions::choose_display(&self.feed.home, &display))
@@ -217,11 +220,11 @@ impl Shell {
             }
             Action::MoveToCorner(corner) => {
                 pill::move_to_corner(corner);
-                self.place();
+                self.overlay_changed();
             }
             Action::MoveToEdge(edge) => {
                 pill::move_to_edge(edge);
-                self.place();
+                self.overlay_changed();
             }
             Action::SettingsChanged => {
                 self.settings = positions::ui_settings(&self.feed.home);
@@ -232,11 +235,60 @@ impl Shell {
             Action::Recheck => {}
             Action::Quit => return self.quit(),
         }
+        self.follow_activity();
         self.announce();
         let mode = self.mode();
         pill::set_hover_polling(mode == Some(Mode::Hover));
-        pill::watch_presses(mode.is_some());
+        pill::watch_presses(mode.is_some_and(|mode| mode != Mode::Pinned));
         self.settle();
+    }
+
+    fn put_away(&mut self) {
+        self.pin_dismissed |= self.mode() == Some(Mode::Pinned);
+        self.close();
+    }
+
+    fn follow_activity(&mut self) {
+        let active = claude_active(self.snapshot.as_ref());
+        let (pin, dismissed) = pin_decision(
+            self.was_active,
+            active,
+            self.settings.pin_while_active,
+            self.pin_dismissed,
+        );
+        (self.was_active, self.pin_dismissed) = (active, dismissed);
+        let pinned = self.mode() == Some(Mode::Pinned);
+        match pin {
+            Pin::Open => {
+                self.pin_released = None;
+                if !pinned && !pill::fullscreen_in_front() {
+                    self.open(Mode::Pinned, false);
+                }
+            }
+            Pin::Close if pinned && self.pin_released.is_none() => {
+                self.pin_released = Some(Instant::now());
+                self.recheck_after(LINGER);
+            }
+            Pin::Close | Pin::Keep | Pin::StayHidden => {}
+        }
+        if pinned
+            && self
+                .pin_released
+                .is_some_and(|released| released.elapsed() >= LINGER)
+        {
+            self.pin_released = None;
+            self.close();
+        }
+    }
+
+    fn overlay_changed(&self) {
+        self.place();
+        self.tray.refresh_displays();
+        if self.panel.is_some()
+            && let Err(error) = self.app.emit_to(PANEL, "beacon://settings-changed", ())
+        {
+            eprintln!("cannot tell the panel the settings changed: {error}");
+        }
     }
 
     fn quit(&mut self) {
@@ -352,8 +404,7 @@ impl Shell {
             eprintln!("cannot save the display choice: {error}");
         }
         pill::retarget();
-        self.place();
-        self.tray.refresh_displays();
+        self.overlay_changed();
     }
 
     fn placement(&self) -> Option<(Rect, f64)> {
@@ -367,6 +418,7 @@ impl Shell {
     }
 
     fn open(&mut self, mode: Mode, focused: bool) {
+        self.pin_dismissed &= mode == Mode::Pinned;
         pill::dismiss_peek();
         pill::reveal(self.settings.visibility != Visibility::Never, false);
         match &mut self.panel {
@@ -402,9 +454,7 @@ impl Shell {
         let Some(panel) = &mut self.panel else {
             return;
         };
-        if mode == Mode::Sticky {
-            panel.mode = Mode::Sticky;
-        }
+        panel.mode = panel.mode.max(mode);
         if focused {
             panel.focused = true;
             match panel.window.hwnd() {
@@ -497,8 +547,8 @@ impl Shell {
             &[pill::shown_rect(), self.tray.rect()],
         ) {
             PressTarget::Panel => self.open(Mode::Sticky, false),
-            PressTarget::Anchor => {}
-            PressTarget::Outside => self.close(),
+            PressTarget::Outside if self.mode() != Some(Mode::Pinned) => self.close(),
+            PressTarget::Anchor | PressTarget::Outside => {}
         }
     }
 

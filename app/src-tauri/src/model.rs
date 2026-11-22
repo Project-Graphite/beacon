@@ -197,11 +197,9 @@ pub fn tab_tone(snapshot: Option<&Snapshot>) -> TabTone {
     }
 }
 
-pub fn overlay_wanted(snapshot: Option<&Snapshot>, visibility: Visibility) -> bool {
-    let sessions = snapshot.map_or(&[][..], |snapshot| &snapshot.sessions[..]);
-    match visibility {
-        Visibility::Always => true,
-        Visibility::Active => sessions.iter().any(|session| {
+pub fn claude_active(snapshot: Option<&Snapshot>) -> bool {
+    snapshot.is_some_and(|snapshot| {
+        snapshot.sessions.iter().any(|session| {
             session.alerting
                 || matches!(
                     mark_kind(session.state),
@@ -212,9 +210,34 @@ pub fn overlay_wanted(snapshot: Option<&Snapshot>, visibility: Visibility) -> bo
                             | MarkKind::Stalled
                     )
                 )
-        }),
-        Visibility::Attention => sessions.iter().any(|session| session.alerting),
+        })
+    })
+}
+
+pub fn overlay_wanted(snapshot: Option<&Snapshot>, visibility: Visibility) -> bool {
+    match visibility {
+        Visibility::Always => true,
+        Visibility::Active => claude_active(snapshot),
+        Visibility::Attention => alerting_count(snapshot) > 0,
         Visibility::Never => false,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pin {
+    Open,
+    Keep,
+    Close,
+    StayHidden,
+}
+
+pub fn pin_decision(was_active: bool, active: bool, enabled: bool, dismissed: bool) -> (Pin, bool) {
+    match (enabled, was_active, active, dismissed) {
+        (false, ..) => (Pin::Close, false),
+        (true, true, true, true) => (Pin::StayHidden, true),
+        (true, _, true, _) => (Pin::Open, false),
+        (true, true, false, _) => (Pin::Close, false),
+        (true, false, false, _) => (Pin::Keep, false),
     }
 }
 
@@ -663,6 +686,66 @@ pub mod tests {
             vec![session("a", SessionState::NeedsPermission)]
         ));
         assert!(wanted(Always, vec![session("a", SessionState::Idle)]));
+    }
+
+    #[test]
+    fn claude_is_active_exactly_when_the_active_visibility_shows_the_overlay() {
+        assert!(!claude_active(None));
+        for state in [
+            SessionState::Starting,
+            SessionState::Working,
+            SessionState::NeedsPermission,
+            SessionState::NeedsAnswer,
+            SessionState::NeedsPlanApproval,
+            SessionState::NeedsMcpInput,
+            SessionState::Stalled,
+            SessionState::Done,
+            SessionState::Error,
+            SessionState::Idle,
+            SessionState::Ended,
+        ] {
+            for sessions in [
+                vec![session("a", state)],
+                vec![snoozed(session("a", state))],
+            ] {
+                let snapshot = snapshot(sessions);
+                assert_eq!(
+                    claude_active(Some(&snapshot)),
+                    overlay_wanted(Some(&snapshot), Visibility::Active),
+                    "{state:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_pinned_panel_follows_activity_and_a_dismissal_lasts_until_claude_rests() {
+        use Pin::*;
+        let table = [
+            ((false, false, false, false), (Close, false)),
+            ((false, false, true, false), (Close, false)),
+            ((false, true, false, false), (Close, false)),
+            ((false, true, true, false), (Close, false)),
+            ((false, false, false, true), (Close, false)),
+            ((false, false, true, true), (Close, false)),
+            ((false, true, false, true), (Close, false)),
+            ((false, true, true, true), (Close, false)),
+            ((true, false, false, false), (Keep, false)),
+            ((true, false, false, true), (Keep, false)),
+            ((true, false, true, false), (Open, false)),
+            ((true, false, true, true), (Open, false)),
+            ((true, true, true, false), (Open, false)),
+            ((true, true, true, true), (StayHidden, true)),
+            ((true, true, false, false), (Close, false)),
+            ((true, true, false, true), (Close, false)),
+        ];
+        for ((enabled, was_active, active, dismissed), expected) in table {
+            assert_eq!(
+                pin_decision(was_active, active, enabled, dismissed),
+                expected,
+                "enabled {enabled}, was active {was_active}, active {active}, dismissed {dismissed}"
+            );
+        }
     }
 
     #[test]

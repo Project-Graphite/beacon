@@ -1,14 +1,22 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { Overlay, OverlayDisplay } from '../beacon';
 import {
+  attentionSummary,
+  avoidedLabel,
+  behaviourSummary,
   commandMissing,
+  displayLabel,
   hooksButtons,
+  overlaySummary,
   percent,
+  positionChoices,
   QUIT_CHOICES,
   REPEAT_CHOICES,
   spanLabel,
   splitPlan,
   stallMinutes,
+  startupSummary,
   UI_DEFAULTS,
   uiSettings,
 } from './settings.ts';
@@ -27,6 +35,7 @@ test('settings the shell does not send yet read as their defaults', () => {
     peek_seconds: 4,
     start_mode: 'claude',
     quit_when_idle_minutes: 15,
+    pin_while_active: false,
   });
   assert.deepEqual(uiSettings({}), UI_DEFAULTS);
 });
@@ -43,6 +52,7 @@ test('settings the shell sends are kept, clamped to their ranges and limited to 
     peek_seconds: 7,
     start_mode: 'manual',
     quit_when_idle_minutes: 0,
+    pin_while_active: true,
   } as const;
   assert.deepEqual(uiSettings(sent), sent);
   const odd = uiSettings({
@@ -145,6 +155,75 @@ test('the buttons follow the hooks state', () => {
     { label: 'Uninstall', action: 'uninstall' },
   ]);
   assert.deepEqual(hooksButtons('installed'), [{ label: 'Uninstall', action: 'uninstall' }]);
+});
+
+test('pinning while Claude is active is off by default and every other default is unchanged', () => {
+  assert.deepEqual(UI_DEFAULTS, {
+    hotkey: 'Ctrl+Alt+Space',
+    toasts_enabled: true,
+    toast_on_finished: true,
+    sounds_enabled: false,
+    visibility: 'active',
+    reveal_on_hover: true,
+    size: 'medium',
+    idle_opacity: 0.6,
+    attention_style: 'pulse_peek',
+    attention_repeat_seconds: 60,
+    peek_seconds: 4,
+    start_mode: 'claude',
+    quit_when_idle_minutes: 15,
+    pin_while_active: false,
+  });
+  assert.equal(uiSettings({ pin_while_active: true }).pin_while_active, true);
+});
+
+const DISPLAYS: OverlayDisplay[] = [
+  { id: 'a', name: 'XG27AQDMES', width: 2560, height: 1440, primary: true, target: false, avoided: true },
+  { id: 'b', name: '24M2N3200', width: 1080, height: 1920, primary: false, target: false, avoided: false },
+  { id: 'c', name: 'Display 3', width: 1920, height: 464, primary: false, target: true, avoided: false },
+];
+
+test('closed sections sum up their current values on one line', () => {
+  const overlay: Overlay = { style: 'tab', position: 'right', displays: DISPLAYS };
+  assert.equal(overlaySummary(UI_DEFAULTS, overlay), 'Edge tab · right edge · while Claude is active');
+  assert.equal(
+    overlaySummary({ ...UI_DEFAULTS, visibility: 'never', pin_while_active: true }, { ...overlay, style: 'pill', position: 'bottom-left' }),
+    'Pill · bottom left · never · pinned while active',
+  );
+  assert.equal(overlaySummary(UI_DEFAULTS, null), 'while Claude is active');
+  assert.equal(attentionSummary(UI_DEFAULTS), 'Pulse and label · every 1 min · notifications on');
+  assert.equal(
+    attentionSummary({ ...UI_DEFAULTS, attention_style: 'colour', attention_repeat_seconds: 0, toasts_enabled: false }),
+    'Colour only · no reminders · notifications off',
+  );
+  assert.equal(startupSummary(UI_DEFAULTS), 'When Claude is used · closes after 15 min');
+  assert.equal(startupSummary({ ...UI_DEFAULTS, quit_when_idle_minutes: 0 }), 'When Claude is used · stays open');
+  assert.equal(startupSummary({ ...UI_DEFAULTS, quit_when_idle_minutes: 60 }), 'When Claude is used · closes after 1 hour');
+  assert.equal(startupSummary({ ...UI_DEFAULTS, start_mode: 'login' }), 'When I sign in to Windows');
+  assert.equal(
+    behaviourSummary(UI_DEFAULTS, { stall_minutes: 10, answer_unattended: false }),
+    'Headless runs pass through · stalled after 10 min · Ctrl+Alt+Space',
+  );
+  assert.equal(
+    behaviourSummary({ ...UI_DEFAULTS, hotkey: 'Ctrl+Shift+B' }, { stall_minutes: 3, answer_unattended: true }),
+    'Headless runs answered here · stalled after 3 min · Ctrl+Shift+B',
+  );
+  assert.equal(behaviourSummary(UI_DEFAULTS, null), 'Ctrl+Alt+Space');
+});
+
+test('displays read as their name and size, and the avoided ones as a name or a count', () => {
+  assert.equal(displayLabel(DISPLAYS[2]), 'Display 3 (1920x464)');
+  assert.equal(avoidedLabel(DISPLAYS), 'XG27AQDMES');
+  assert.equal(avoidedLabel(DISPLAYS.map((display) => ({ ...display, avoided: false }))), 'None');
+  assert.equal(avoidedLabel(DISPLAYS.map((display) => ({ ...display, avoided: true }))), '3 displays');
+  assert.deepEqual(
+    positionChoices('tab').map((choice) => choice.value),
+    ['left', 'right', 'top', 'bottom'],
+  );
+  assert.deepEqual(
+    positionChoices('pill').map((choice) => choice.value),
+    ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
+  );
 });
 
 test('stall minutes are whole numbers from 1 to 240', () => {

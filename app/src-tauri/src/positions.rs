@@ -176,6 +176,12 @@ struct UiFile {
         deserialize_with = "lenient"
     )]
     quit_when_idle_minutes: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    pin_while_active: Option<bool>,
     #[serde(flatten)]
     choice: DisplayChoice,
 }
@@ -195,6 +201,7 @@ pub struct UiSettings {
     pub peek_seconds: f64,
     pub start_mode: StartMode,
     pub quit_when_idle_minutes: u64,
+    pub pin_while_active: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -212,6 +219,7 @@ pub struct UiSettingsChange {
     pub peek_seconds: Option<f64>,
     pub start_mode: Option<StartMode>,
     pub quit_when_idle_minutes: Option<u64>,
+    pub pin_while_active: Option<bool>,
 }
 
 fn read(home: &Path) -> UiFile {
@@ -265,6 +273,7 @@ fn settings_of(file: UiFile) -> UiSettings {
             &QUIT_MINUTES,
             DEFAULT_QUIT_MINUTES,
         ),
+        pin_while_active: file.pin_while_active.unwrap_or(false),
     }
 }
 
@@ -287,6 +296,7 @@ pub fn save_ui_settings(home: &Path, change: UiSettingsChange) -> io::Result<()>
         file.quit_when_idle_minutes = change
             .quit_when_idle_minutes
             .or(file.quit_when_idle_minutes);
+        file.pin_while_active = change.pin_while_active.or(file.pin_while_active);
     })
 }
 
@@ -573,6 +583,7 @@ mod tests {
                 peek_seconds: 7.5,
                 start_mode: StartMode::Manual,
                 quit_when_idle_minutes: 60,
+                pin_while_active: false,
             }
         );
         let mut expected: serde_json::Value = serde_json::from_str(existing).unwrap();
@@ -608,6 +619,42 @@ mod tests {
         assert!(fallen_back.sounds_enabled);
         assert_eq!(load(&home, "a"), Some(Rect::sized(1, 2, 3, 4)));
         assert_eq!(style(&home), Style::Pill);
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn pinning_while_active_is_off_by_default_and_round_trips_beside_every_existing_key() {
+        let home = std::env::temp_dir().join(format!("beacon-pin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let existing = r#"{"pill_positions":{"a":{"left":1,"top":2,"right":4,"bottom":6}},"display_positions":{"philips":{"left":5,"top":6,"right":12,"bottom":14}},"style":"pill","tab_positions":{"philips":{"edge":"top","offset":0.25}},"hotkey":"Ctrl+Shift+B","toasts_enabled":false,"toast_on_finished":true,"sounds_enabled":true,"visibility":"attention","reveal_on_hover":false,"size":"large","idle_opacity":0.35,"attention_style":"pulse","attention_repeat_seconds":120,"peek_seconds":7.5,"start_mode":"manual","quit_when_idle_minutes":60,"display":"philips","avoid_displays":["oled"]}"#;
+        std::fs::write(home.join(UI_FILE), existing).unwrap();
+        let before = ui_settings(&home);
+        assert!(!before.pin_while_active);
+        let change: UiSettingsChange =
+            serde_json::from_str(r#"{"pin_while_active":true}"#).unwrap();
+        save_ui_settings(&home, change).unwrap();
+        save(&home, "a", Rect::sized(1, 2, 3, 4)).unwrap();
+        assert_eq!(
+            ui_settings(&home),
+            UiSettings {
+                pin_while_active: true,
+                ..before
+            }
+        );
+        let mut expected: serde_json::Value = serde_json::from_str(existing).unwrap();
+        expected["pin_while_active"] = true.into();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(home.join(UI_FILE)).unwrap()).unwrap();
+        assert_eq!(written, expected);
+        assert_eq!(
+            serde_json::to_value(ui_settings(&home)).unwrap()["pin_while_active"],
+            true
+        );
+        expected["pin_while_active"] = "yes".into();
+        std::fs::write(home.join(UI_FILE), expected.to_string()).unwrap();
+        assert!(!ui_settings(&home).pin_while_active);
+        assert_eq!(ui_settings(&home).hotkey, "Ctrl+Shift+B");
         std::fs::remove_dir_all(&home).unwrap();
     }
 

@@ -2,8 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { entryOffset, openedFrom } from './panel.ts';
 
-test('an opened event without an edge reads as no edge, and only hover and sticky modes exist', () => {
+test('an opened event without an edge reads as no edge, and the modes are hover, sticky and pinned', () => {
   assert.deepEqual(openedFrom({ mode: 'hover', focused: false }), { mode: 'hover', focused: false, edge: null });
+  assert.deepEqual(openedFrom({ mode: 'pinned', focused: false, edge: 'right' }), {
+    mode: 'pinned',
+    focused: false,
+    edge: 'right',
+  });
   assert.deepEqual(openedFrom({ mode: 'sticky', focused: true, edge: 'bottom' }), {
     mode: 'sticky',
     focused: true,

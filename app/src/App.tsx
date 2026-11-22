@@ -6,6 +6,7 @@ import {
   closePanel,
   dismiss,
   getDetail,
+  getOverlay,
   getSnapshot,
   getUiSettings,
   hooksStatus,
@@ -25,7 +26,7 @@ import { Header } from './components/Header';
 import { SessionList } from './components/SessionList';
 import { SessionRow } from './components/SessionRow';
 import { SessionView } from './components/SessionView';
-import { SettingsView } from './components/SettingsView';
+import { SettingsView, type SettingsPart } from './components/SettingsView';
 import { ViewStack } from './components/ViewStack';
 import { useListMotion } from './hooks/useListMotion.ts';
 import { PanelFit, usePanelHeight } from './hooks/usePanelHeight.ts';
@@ -87,6 +88,7 @@ export function App() {
   const [closing, setClosing] = useState(false);
   const [entrance, setEntrance] = useState(0);
   const [moreOpen, setMoreOpen] = useState<string[]>([]);
+  const [settingsParts, setSettingsParts] = useState<SettingsPart[]>(['overlay', 'attention']);
   const panel = useRef<HTMLElement>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -248,7 +250,8 @@ export function App() {
 
   const toggleSettings = () => {
     if (settingsOpen) setSettingsOpen(false);
-    else void whenLoaded(Promise.all([hooksStatus(), appInfo()])).then(() => flushSync(() => setSettingsOpen(true)));
+    else
+      void whenLoaded(Promise.all([hooksStatus(), appInfo(), getOverlay()])).then(() => flushSync(() => setSettingsOpen(true)));
   };
 
   const closeDetail = () => {
@@ -372,7 +375,16 @@ export function App() {
 
   const renderView = (key: string, active: boolean) => {
     const keys = active ? requestKeys.current : null;
-    if (key === 'settings') return <SettingsView config={snapshot?.config ?? null} ui={ui} onChangeUi={changeUi} />;
+    if (key === 'settings')
+      return (
+        <SettingsView
+          config={snapshot?.config ?? null}
+          ui={ui}
+          openParts={settingsParts}
+          onToggle={(part) => setSettingsParts((open) => toggleOpen(open, part))}
+          onChangeUi={changeUi}
+        />
+      );
     if (key.startsWith(DETAIL_PREFIX)) {
       const session = sessions.find((each) => each.session_id === key.slice(DETAIL_PREFIX.length));
       return (
@@ -453,6 +465,8 @@ export function App() {
           queue={current && queue.length > 1 ? { position: queue.indexOf(current) + 1, total: queue.length } : null}
           soundsEnabled={ui?.sounds_enabled ?? null}
           settingsOpen={settingsOpen}
+          pinned={opened?.mode === 'pinned'}
+          onUnpin={() => run(closePanel())}
           onToggleSounds={() => ui && run(changeUi({ sounds_enabled: !ui.sounds_enabled }))}
           onToggleSettings={toggleSettings}
           run={run}

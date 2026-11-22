@@ -13,7 +13,8 @@ export type IconName =
   | 'cross'
   | 'box'
   | 'dash'
-  | 'bell';
+  | 'bell'
+  | 'pin';
 
 const QUESTION = (
   <>
@@ -43,6 +44,12 @@ const PATHS: Record<IconName, ReactNode> = {
     <path d="M4.5 10.5V7a3.5 3.5 0 0 1 5.6-2.8M11.5 7v3.5l1 1.25h-9M6.75 13.5a1.4 1.4 0 0 0 2.5 0M2.5 2.5l11 11" />
   ),
   bell: <path d="M4.5 10.5V7a3.5 3.5 0 0 1 7 0v3.5l1 1.25h-9ZM6.75 13.5a1.4 1.4 0 0 0 2.5 0" />,
+  pin: (
+    <>
+      <path fill="currentColor" d="M9.75 2 14 6.25l-1.5.75-2.25 2.25.25 2.5-1 1L3.25 6.5l1-1 2.5.25L9 3.5Z" />
+      <path d="M6.25 9.75 2.5 13.5" />
+    </>
+  ),
   chevron: <path d="m6 4 4 4-4 4" />,
   check: <path d="m3.5 8.5 3 3 6-7" />,
   cross: <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />,

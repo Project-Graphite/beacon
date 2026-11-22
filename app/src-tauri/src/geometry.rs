@@ -255,6 +255,16 @@ pub fn pill_edge(pill: Rect, work: &Rect) -> Edge {
     }
 }
 
+pub fn nearest_corner(pill: Rect, work: &Rect) -> Corner {
+    let ((x, y), (middle_x, middle_y)) = (pill.centre(), work.centre());
+    match (y < middle_y, x < middle_x) {
+        (true, true) => Corner::TopLeft,
+        (true, false) => Corner::TopRight,
+        (false, true) => Corner::BottomLeft,
+        (false, false) => Corner::BottomRight,
+    }
+}
+
 pub fn place_panel_on_edge(
     tab: Rect,
     edge: Edge,
@@ -967,5 +977,15 @@ pub(crate) mod tests {
         );
         assert_eq!(press_target((4, 250), None, &anchors), PressTarget::Anchor);
         assert_eq!(press_target((200, 200), None, &[]), PressTarget::Outside);
+    }
+
+    #[test]
+    fn a_pill_reads_as_the_corner_of_its_quarter() {
+        let work = Rect::sized(-3000, 0, 1920, 464);
+        let corner = |left, top| nearest_corner(Rect::sized(left, top, 100, 28), &work);
+        assert_eq!(corner(-2988, 12), Corner::TopLeft);
+        assert_eq!(corner(-1192, 12), Corner::TopRight);
+        assert_eq!(corner(-2988, 424), Corner::BottomLeft);
+        assert_eq!(corner(-1192, 424), Corner::BottomRight);
     }
 }

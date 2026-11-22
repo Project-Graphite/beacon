@@ -28,6 +28,12 @@
     "allow-set-login-start",
     "allow-preview-attention",
     "allow-open-logs-folder",
-    "allow-app-info"
+    "allow-app-info",
+    "allow-get-overlay",
+    "allow-set-style",
+    "allow-set-display",
+    "allow-set-display-avoided",
+    "allow-set-overlay-position",
+    "allow-quit-app"
   ]
 }

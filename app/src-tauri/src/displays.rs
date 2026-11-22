@@ -53,6 +53,30 @@ pub struct DisplayMenu {
     pub style: Vec<MenuEntry>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Position {
+    Edge(Edge),
+    Corner(Corner),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OverlayDisplay {
+    pub id: String,
+    pub name: String,
+    pub width: i32,
+    pub height: i32,
+    pub primary: bool,
+    pub target: bool,
+    pub avoided: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Overlay {
+    pub style: Style,
+    pub position: Option<&'static str>,
+    pub displays: Vec<OverlayDisplay>,
+}
+
 impl DisplayChoice {
     fn avoids(&self, monitor: &Monitor) -> bool {
         self.avoid_displays.contains(&monitor.id)
@@ -131,6 +155,47 @@ pub fn edge(key: &str) -> Option<Edge> {
 
 pub fn style(key: &str) -> Option<Style> {
     find_key(&STYLES, key)
+}
+
+pub fn position(key: &str) -> Option<Position> {
+    edge(key)
+        .map(Position::Edge)
+        .or_else(|| corner(key).map(Position::Corner))
+}
+
+fn key_of<T: PartialEq>(entries: &[(T, &'static str, &str)], value: T) -> &'static str {
+    entries
+        .iter()
+        .find(|(each, _, _)| *each == value)
+        .map_or("", |(_, key, _)| *key)
+}
+
+pub fn overlay(
+    monitors: &[Monitor],
+    choice: &DisplayChoice,
+    style: Style,
+    position: Option<Position>,
+) -> Overlay {
+    let target = target(monitors, choice);
+    Overlay {
+        style,
+        position: position.map(|position| match position {
+            Position::Edge(edge) => key_of(&EDGES, edge),
+            Position::Corner(corner) => key_of(&CORNERS, corner),
+        }),
+        displays: monitors
+            .iter()
+            .map(|monitor| OverlayDisplay {
+                id: monitor.id.clone(),
+                name: monitor.name.clone(),
+                width: monitor.bounds.width(),
+                height: monitor.bounds.height(),
+                primary: monitor.primary,
+                target: target.is_some_and(|target| target.id == monitor.id),
+                avoided: choice.avoids(monitor),
+            })
+            .collect(),
+    }
 }
 
 fn label(monitor: &Monitor) -> String {
@@ -387,6 +452,78 @@ mod tests {
         assert_eq!(edge("bottom"), Some(Edge::Bottom));
         assert_eq!(style("pill"), Some(Style::Pill));
         assert_eq!(style("square"), None);
+    }
+
+    #[test]
+    fn the_overlay_description_lists_every_display_with_its_target_and_avoided_flags() {
+        let described = overlay(
+            &desk(),
+            &choice(Some("bar"), &["philips"]),
+            Style::Tab,
+            Some(Position::Edge(Edge::Bottom)),
+        );
+        let display = |id: &str, width, height, primary, target, avoided| OverlayDisplay {
+            id: id.to_string(),
+            name: id.to_string(),
+            width,
+            height,
+            primary,
+            target,
+            avoided,
+        };
+        assert_eq!(
+            described,
+            Overlay {
+                style: Style::Tab,
+                position: Some("bottom"),
+                displays: vec![
+                    display("oled", 2560, 1440, true, false, false),
+                    display("philips", 1080, 1920, false, false, true),
+                    display("bar", 1920, 464, false, true, false),
+                ],
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&described).unwrap()["displays"][2],
+            serde_json::json!({"id": "bar", "name": "bar", "width": 1920, "height": 464, "primary": false, "target": true, "avoided": false})
+        );
+        let pill = overlay(
+            &desk(),
+            &choice(Some("philips"), &["philips"]),
+            Style::Pill,
+            Some(Position::Corner(Corner::BottomLeft)),
+        );
+        assert_eq!(
+            serde_json::to_value(&pill).unwrap()["style"],
+            serde_json::json!("pill")
+        );
+        assert_eq!(pill.position, Some("bottom-left"));
+        assert_eq!(
+            pill.displays
+                .iter()
+                .map(|display| (display.target, display.avoided))
+                .collect::<Vec<_>>(),
+            [(true, false), (false, true), (false, false)]
+        );
+        let nowhere = overlay(
+            &desk(),
+            &choice(None, &["oled", "philips", "bar"]),
+            Style::Tab,
+            None,
+        );
+        assert_eq!(nowhere.position, None);
+        assert!(
+            nowhere
+                .displays
+                .iter()
+                .all(|display| !display.target && display.avoided)
+        );
+        assert_eq!(
+            position("top-right"),
+            Some(Position::Corner(Corner::TopRight))
+        );
+        assert_eq!(position("left"), Some(Position::Edge(Edge::Left)));
+        assert_eq!(position("middle"), None);
     }
 
     #[test]

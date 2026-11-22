@@ -1,11 +1,11 @@
 use super::frames::{self, WM_FRAME};
 use super::layer::Layer;
 use super::{GdiText, cursor_position, monitor_info, monitors, reduced_motion, refresh_rate};
-use crate::displays::{dock, landing, target};
+use crate::displays::{Position, dock, landing, target};
 use crate::geometry::{
     Corner, Edge, Monitor, Rect, TabPlacement, corner_rect, default_placement, layout_signature,
-    monitor_for, peek_rect, pill_edge, pill_reveal_strip, resize_anchored, restored_pill_rect,
-    slide, snap, tab_rect,
+    monitor_for, nearest_corner, peek_rect, pill_edge, pill_reveal_strip, resize_anchored,
+    restored_pill_rect, slide, snap, tab_rect,
 };
 use crate::model::{Peek, PillModel, TabTone};
 use crate::motion::{
@@ -434,6 +434,17 @@ pub fn shown_tab() -> Option<(Rect, Edge)> {
         (pill.shown && pill.style == Style::Tab).then_some((pill.rect, pill.placement.edge))
     })
     .flatten()
+}
+
+pub fn position() -> Option<Position> {
+    with_pill(|pill| match pill.style {
+        Style::Tab => Position::Edge(pill.placement.edge),
+        Style::Pill => Position::Corner(nearest_corner(pill.rect, &pill.work)),
+    })
+}
+
+pub fn fullscreen_in_front() -> bool {
+    with_pill(|pill| pill.fullscreen).unwrap_or(false)
 }
 
 pub fn anchor_edge() -> Option<Edge> {
