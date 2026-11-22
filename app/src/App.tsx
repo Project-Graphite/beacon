@@ -103,7 +103,7 @@ export function App() {
   const content = useRef<HTMLDivElement>(null);
   const ghosts = useRef<HTMLDivElement>(null);
   const shown = useRef(false);
-  const pendingIds = useRef<number[]>(initialSnapshot?.pending.map((request) => request.id) ?? []);
+  const pendingIds = useRef<number[]>([]);
   const requestKeys = useRef(new Map<number, (key: string) => void>());
   const nextJumpNoticeId = useRef(-1);
   const opening = useRef<string | null>(null);
@@ -128,7 +128,7 @@ export function App() {
   useEffect(() => {
     const receive = (next: Snapshot | null) => {
       if (next) {
-        const fresh = resolutionNotices(pendingIds.current, next.pending, next.resolved);
+        const fresh = shown.current ? resolutionNotices(pendingIds.current, next.pending, next.resolved) : [];
         pendingIds.current = next.pending.map((request) => request.id);
         if (fresh.length > 0) showNotices(fresh);
       }
