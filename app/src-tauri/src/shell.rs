@@ -25,7 +25,7 @@ use std::io;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::{AppHandle, Emitter, WebviewWindow};
 use tauri_plugin_notification::NotificationExt;
 
 const HOVER_CLOSE: Duration = Duration::from_millis(400);
@@ -445,11 +445,10 @@ impl Shell {
         };
         let placed = panel
             .window
-            .set_size(PhysicalSize::new(rect.width() as u32, rect.height() as u32))
-            .and_then(|()| {
-                panel
-                    .window
-                    .set_position(PhysicalPosition::new(rect.left, rect.top))
+            .hwnd()
+            .map_err(|error| error.to_string())
+            .and_then(|hwnd| {
+                platform::place_window(hwnd.0, rect).map_err(|error| error.to_string())
             });
         if let Err(error) = placed {
             eprintln!("cannot place the panel: {error}");

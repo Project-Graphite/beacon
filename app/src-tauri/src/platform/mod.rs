@@ -8,6 +8,7 @@ pub use text::GdiText;
 
 use crate::geometry::{Monitor, Rect};
 use std::ffi::c_void;
+use std::io;
 use std::ptr::{null, null_mut};
 use windows_sys::Win32::Devices::Display::{
     DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
@@ -25,8 +26,8 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC, SND_NODEFAULT};
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, MONITORINFOF_PRIMARY, SM_CXSMICON, SPI_GETCLIENTAREAANIMATION,
-    SetForegroundWindow, SystemParametersInfoW,
+    GetCursorPos, MONITORINFOF_PRIMARY, SM_CXSMICON, SPI_GETCLIENTAREAANIMATION, SWP_NOACTIVATE,
+    SWP_NOZORDER, SetForegroundWindow, SetWindowPos, SystemParametersInfoW,
 };
 use windows_sys::core::BOOL;
 
@@ -248,6 +249,25 @@ pub fn tray_icon_size() -> usize {
 
 pub fn focus_window(hwnd: *mut c_void) {
     unsafe { SetForegroundWindow(hwnd) };
+}
+
+pub fn place_window(hwnd: *mut c_void, rect: Rect) -> io::Result<()> {
+    let placed = unsafe {
+        SetWindowPos(
+            hwnd,
+            null_mut(),
+            rect.left,
+            rect.top,
+            rect.width(),
+            rect.height(),
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    };
+    if placed == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 pub fn play_system_sound(alias: &str) {
