@@ -1,10 +1,12 @@
 use crate::status::{age, project_label, table};
-use beacon_core::{AccountUsage, Session, SessionUsage, Snapshot, UsageSource, UsageStatus};
+use beacon_core::{
+    AccountUsage, Session, SessionState, SessionUsage, Snapshot, UsageSource, UsageStatus,
+};
 use std::cmp::Reverse;
 
 const SESSION_ID_CHARS: usize = 8;
 
-pub fn render(snapshot: &Snapshot, now: u64) -> String {
+pub fn render(snapshot: &Snapshot, ended: &[Session], now: u64) -> String {
     let mut text = match &snapshot.account_usage {
         Some(account) => account_windows(account, now),
         None => "Account limits: unknown.\n".to_string(),
@@ -13,6 +15,8 @@ pub fn render(snapshot: &Snapshot, now: u64) -> String {
     let mut sessions: Vec<(&Session, &SessionUsage)> = snapshot
         .sessions
         .iter()
+        .filter(|session| session.state != SessionState::Ended)
+        .chain(ended)
         .filter_map(|session| Some((session, session.usage.as_ref()?)))
         .collect();
     sessions.sort_by_key(|(session, _)| Reverse(session.last_event_ms));
@@ -107,7 +111,6 @@ fn tokens(count: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use beacon_core::SessionState;
 
     const NOW: u64 = 1_795_100_000_000;
 
@@ -186,6 +189,7 @@ mod tests {
         assert_eq!(
             render(
                 &snapshot(vec![changed, without, fresh, busy], Some(account)),
+                &[],
                 NOW
             ),
             "\
@@ -205,8 +209,32 @@ SESSION   PROJECT  MODEL          CONTEXT  IN     OUT     CACHE-W  CACHE-R  SUBA
     #[test]
     fn an_empty_usage_report_says_so() {
         assert_eq!(
-            render(&snapshot(Vec::new(), None), NOW),
+            render(&snapshot(Vec::new(), None), &[], NOW),
             "Account limits: unknown.\n\nNo session usage yet.\n"
         );
+    }
+
+    #[test]
+    fn the_usage_report_lists_every_ended_session_once() {
+        let ended = |id: &str, last_event_ms: u64| Session {
+            state: SessionState::Ended,
+            ..with_usage(id, last_event_ms, usage(UsageStatus::NoData))
+        };
+        let live = with_usage("11111111", NOW - 1_000, usage(UsageStatus::NoData));
+        let report = render(
+            &snapshot(vec![live, ended("22222222", NOW - 2_000)], None),
+            &[
+                ended("22222222", NOW - 2_000),
+                ended("33333333", NOW - 3_000),
+            ],
+            NOW,
+        );
+        let rows: Vec<&str> = report
+            .lines()
+            .skip_while(|line| !line.starts_with("SESSION"))
+            .skip(1)
+            .map(|line| &line[..8])
+            .collect();
+        assert_eq!(rows, ["11111111", "22222222", "33333333"]);
     }
 }

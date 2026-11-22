@@ -78,7 +78,10 @@ fn run(command: Command) -> Result<ExitCode, String> {
             let snapshot = request(&home, &Request::Snapshot)?
                 .snapshot
                 .ok_or("the Beacon core sent no snapshot")?;
-            print!("{}", usage::render(&snapshot, now_ms()));
+            let ended = request(&home, &Request::Ended)?
+                .ended
+                .ok_or("the Beacon core sent no ended sessions")?;
+            print!("{}", usage::render(&snapshot, &ended, now_ms()));
             Ok(ExitCode::SUCCESS)
         }
         Command::Install { settings, yes } => {
