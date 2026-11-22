@@ -37,6 +37,7 @@ export const OPACITY_RANGE = { min: 0.2, max: 1, step: 0.05 };
 export const PEEK_RANGE = { min: 2, max: 10, step: 1 };
 const REPEAT_SECONDS = [0, 30, 60, 120, 300];
 const QUIT_MINUTES = [0, 5, 15, 60];
+const CLEAR_MINUTES = [0, 5, 10, 30, 60];
 
 export function spanLabel(seconds: number, none: string): string {
   if (seconds === 0) return none;
@@ -109,6 +110,11 @@ export const QUIT_CHOICES: Choice<number>[] = QUIT_MINUTES.map((value) => ({
   label: spanLabel(value * 60, 'Never'),
 }));
 
+export const CLEAR_CHOICES: Choice<number>[] = CLEAR_MINUTES.map((value) => ({
+  value,
+  label: spanLabel(value * 60, 'Never'),
+}));
+
 const oneOf = <T>(choices: Choice<T>[], value: unknown, fallback: T): T =>
   choices.find((choice) => choice.value === value)?.value ?? fallback;
 
@@ -167,6 +173,10 @@ export function behaviourSummary(ui: UiSettings, config: LiveConfig | null): str
   return [
     config && `Headless runs ${config.answer_unattended ? 'answered here' : 'pass through'}`,
     config && `stalled after ${config.stall_minutes} min`,
+    config &&
+      (config.clear_finished_minutes === 0
+        ? 'finished kept'
+        : `finished cleared after ${spanLabel(config.clear_finished_minutes * 60, '')}`),
     ui.hotkey,
   ]
     .filter(Boolean)

@@ -5,6 +5,7 @@ import {
   attentionSummary,
   avoidedLabel,
   behaviourSummary,
+  CLEAR_CHOICES,
   commandMissing,
   displayLabel,
   hooksButtons,
@@ -201,12 +202,12 @@ test('closed sections sum up their current values on one line', () => {
   assert.equal(startupSummary({ ...UI_DEFAULTS, quit_when_idle_minutes: 60 }), 'When Claude is used · closes after 1 hour');
   assert.equal(startupSummary({ ...UI_DEFAULTS, start_mode: 'login' }), 'When I sign in to Windows');
   assert.equal(
-    behaviourSummary(UI_DEFAULTS, { stall_minutes: 10, answer_unattended: false }),
-    'Headless runs pass through · stalled after 10 min · Ctrl+Alt+Space',
+    behaviourSummary(UI_DEFAULTS, { stall_minutes: 10, answer_unattended: false, clear_finished_minutes: 10 }),
+    'Headless runs pass through · stalled after 10 min · finished cleared after 10 min · Ctrl+Alt+Space',
   );
   assert.equal(
-    behaviourSummary({ ...UI_DEFAULTS, hotkey: 'Ctrl+Shift+B' }, { stall_minutes: 3, answer_unattended: true }),
-    'Headless runs answered here · stalled after 3 min · Ctrl+Shift+B',
+    behaviourSummary({ ...UI_DEFAULTS, hotkey: 'Ctrl+Shift+B' }, { stall_minutes: 3, answer_unattended: true, clear_finished_minutes: 0 }),
+    'Headless runs answered here · stalled after 3 min · finished kept · Ctrl+Shift+B',
   );
   assert.equal(behaviourSummary(UI_DEFAULTS, null), 'Ctrl+Alt+Space');
 });
@@ -231,4 +232,21 @@ test('stall minutes are whole numbers from 1 to 240', () => {
   assert.equal(stallMinutes('1'), 1);
   assert.equal(stallMinutes('240'), 240);
   for (const text of ['', '0', '241', '1.5', '-3', 'ten', '1e2']) assert.equal(stallMinutes(text), null, text);
+});
+
+test('finished sessions clear after never, 5, 10 or 30 minutes or an hour', () => {
+  assert.deepEqual(
+    CLEAR_CHOICES.map((choice) => [choice.value, choice.label]),
+    [
+      [0, 'Never'],
+      [5, '5 min'],
+      [10, '10 min'],
+      [30, '30 min'],
+      [60, '1 hour'],
+    ],
+  );
+  assert.equal(
+    behaviourSummary(UI_DEFAULTS, { stall_minutes: 10, answer_unattended: false, clear_finished_minutes: 60 }),
+    'Headless runs pass through · stalled after 10 min · finished cleared after 1 hour · Ctrl+Alt+Space',
+  );
 });

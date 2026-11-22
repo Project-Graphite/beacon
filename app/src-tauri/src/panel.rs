@@ -136,13 +136,14 @@ pub async fn set_config(
     feed: State<'_, Arc<Feed>>,
     stall_minutes: Option<u64>,
     answer_unattended: Option<bool>,
+    clear_finished_minutes: Option<u64>,
 ) -> Result<(), String> {
     ask(
         feed.home.clone(),
         Request::SetConfig {
             stall_minutes,
             answer_unattended,
-            clear_finished_minutes: None,
+            clear_finished_minutes,
         },
     )
     .await

@@ -24,6 +24,7 @@ import {
   attentionSummary,
   avoidedLabel,
   behaviourSummary,
+  CLEAR_CHOICES,
   displayLabel,
   labelOf,
   OPACITY_RANGE,
@@ -371,6 +372,18 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
               />
               <span className="text-secondary text-muted">min</span>
             </span>
+          )}
+        </SettingsRow>
+        <SettingsRow label="Clear finished after" help="A finished session is acknowledged by itself after this long." disabled={!config}>
+          {(field) => (
+            <Select
+              field={field}
+              choices={CLEAR_CHOICES}
+              text={config ? labelOf(CLEAR_CHOICES, config.clear_finished_minutes) : ''}
+              selected={(minutes) => minutes === config?.clear_finished_minutes}
+              disabled={!config}
+              onChoose={(clear_finished_minutes) => attempt('behaviour', setConfig({ clear_finished_minutes }))}
+            />
           )}
         </SettingsRow>
         <SettingsRow label="Shortcut" help="Opens and closes the panel from anywhere." disabled={!ui}>

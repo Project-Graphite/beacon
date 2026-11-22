@@ -174,6 +174,7 @@ export interface AccountUsage {
 export interface LiveConfig {
   stall_minutes: number;
   answer_unattended: boolean;
+  clear_finished_minutes: number;
 }
 
 export interface Snapshot {
@@ -320,8 +321,12 @@ export const queuePrompt = (sessionId: string, text: string) => invoke<void>('qu
 export const cancelPrompt = (id: number) => invoke<void>('cancel_prompt', { id });
 export const sendPromptToWindow = (sessionId: string, text: string) =>
   invoke<WindowPrompt>('send_prompt_to_window', { sessionId, text });
-export const setConfig = ({ stall_minutes, answer_unattended }: Partial<LiveConfig>) =>
-  invoke<void>('set_config', { stallMinutes: stall_minutes, answerUnattended: answer_unattended });
+export const setConfig = ({ stall_minutes, answer_unattended, clear_finished_minutes }: Partial<LiveConfig>) =>
+  invoke<void>('set_config', {
+    stallMinutes: stall_minutes,
+    answerUnattended: answer_unattended,
+    clearFinishedMinutes: clear_finished_minutes,
+  });
 let lastHooksStatus: HooksStatus | null = null;
 export const hooksStatus = () => invoke<HooksStatus>('hooks_status').then((status) => (lastHooksStatus = status));
 export const cachedHooksStatus = () => lastHooksStatus;
