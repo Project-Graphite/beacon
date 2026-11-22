@@ -12,8 +12,15 @@ pub const AUTOSTART_FILE: &str = "autostart";
 pub const LAUNCHING_FILE: &str = "launching";
 pub const BACKGROUND_ARG: &str = "--background";
 pub const DOCTOR_EVENT: &str = "BeaconDoctor";
+pub const STOP_WAITER_EVENT: &str = "StopWaiter";
 pub const DECISION_TIMEOUT_SECS: u64 = 3600;
-pub const WAITING_EVENTS: [&str; 4] = ["PermissionRequest", "Stop", "Elicitation", DOCTOR_EVENT];
+pub const WAITING_EVENTS: [&str; 5] = [
+    "PermissionRequest",
+    "Stop",
+    "Elicitation",
+    DOCTOR_EVENT,
+    STOP_WAITER_EVENT,
+];
 pub const FORWARDED_ENV: [&str; 18] = [
     "CLAUDE_PID",
     "CLAUDE_CODE_ENTRYPOINT",
@@ -37,6 +44,7 @@ pub const FORWARDED_ENV: [&str; 18] = [
 
 const REPLY_NO_DECISION: u8 = 0;
 const REPLY_STDOUT: u8 = 1;
+const REPLY_REWAKE: u8 = 2;
 
 pub fn is_waiting_event(event: &str) -> bool {
     WAITING_EVENTS.contains(&event)
@@ -174,6 +182,7 @@ impl HookRequest {
 pub enum HookReply {
     NoDecision,
     Stdout(Vec<u8>),
+    Rewake(Vec<u8>),
 }
 
 impl HookReply {
@@ -181,6 +190,7 @@ impl HookReply {
         let (kind, bytes): (u8, &[u8]) = match self {
             HookReply::NoDecision => (REPLY_NO_DECISION, &[]),
             HookReply::Stdout(bytes) => (REPLY_STDOUT, bytes),
+            HookReply::Rewake(bytes) => (REPLY_REWAKE, bytes),
         };
         let mut encoded = vec![kind];
         write_frame(&mut encoded, bytes)?;
@@ -194,6 +204,7 @@ impl HookReply {
         match kind[0] {
             REPLY_NO_DECISION => Ok(HookReply::NoDecision),
             REPLY_STDOUT => Ok(HookReply::Stdout(bytes)),
+            REPLY_REWAKE => Ok(HookReply::Rewake(bytes)),
             _ => Err(invalid("unknown reply kind")),
         }
     }
@@ -248,6 +259,7 @@ mod tests {
         for reply in [
             HookReply::NoDecision,
             HookReply::Stdout(br#"{"beacon":"ok"}"#.to_vec()),
+            HookReply::Rewake(b"The user sent this follow-up from Beacon: go on".to_vec()),
         ] {
             let encoded = reply.encode().unwrap();
             assert_eq!(
@@ -263,6 +275,10 @@ mod tests {
         assert_eq!(
             HookReply::Stdout(b"ab".to_vec()).encode().unwrap(),
             [1, 2, 0, 0, 0, b'a', b'b']
+        );
+        assert_eq!(
+            HookReply::Rewake(b"ab".to_vec()).encode().unwrap(),
+            [2, 2, 0, 0, 0, b'a', b'b']
         );
     }
 
@@ -351,7 +367,13 @@ mod tests {
 
     #[test]
     fn waiting_events_are_recognised() {
-        for event in ["PermissionRequest", "Stop", "Elicitation", "BeaconDoctor"] {
+        for event in [
+            "PermissionRequest",
+            "Stop",
+            "Elicitation",
+            "BeaconDoctor",
+            "StopWaiter",
+        ] {
             assert!(is_waiting_event(event));
         }
         assert!(!is_waiting_event("PreToolUse"));

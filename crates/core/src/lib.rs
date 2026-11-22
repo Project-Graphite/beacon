@@ -34,4 +34,4 @@ pub use redact::redact;
 pub use server::{Core, CoreHandle, CoreOptions};
 pub use session::Session;
 pub use state::{PermissionKind, SessionState};
-pub use usage::{SessionUsage, UsageStatus};
+pub use usage::{SessionUsage, UsageStatus, claude_projects_dir};

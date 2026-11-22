@@ -1,43 +1,55 @@
-use beacon_protocol::DECISION_TIMEOUT_SECS;
+use beacon_protocol::{DECISION_TIMEOUT_SECS, STOP_WAITER_EVENT};
 use serde::{Deserialize, Serialize};
 use serde_json::ser::{PrettyFormatter, Serializer};
 use serde_json::{Map, Value, json};
 
 pub const HELPER_FILE_NAME: &str = "beacon-hook.exe";
 const BOM: char = '\u{feff}';
+const STOP_WAITER_TIMEOUT_SECS: u64 = 86_400;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Shape {
     Async,
     Blocking(Option<u64>),
+    Rewake(u64),
 }
 
-pub const EVENTS: [(&str, Shape); 22] = [
-    ("SessionStart", Shape::Async),
-    ("UserPromptSubmit", Shape::Async),
-    ("PreToolUse", Shape::Async),
-    ("PostToolUse", Shape::Async),
-    ("PostToolUseFailure", Shape::Async),
-    ("PostToolBatch", Shape::Async),
-    ("PermissionDenied", Shape::Async),
-    ("Notification", Shape::Async),
-    ("SubagentStart", Shape::Async),
-    ("SubagentStop", Shape::Async),
-    ("TaskCreated", Shape::Async),
-    ("TaskCompleted", Shape::Async),
-    ("PreCompact", Shape::Async),
-    ("PostCompact", Shape::Async),
-    ("CwdChanged", Shape::Async),
-    ("PostModelSwitch", Shape::Async),
-    ("ElicitationResult", Shape::Async),
+pub const HANDLERS: [(&str, &str, Shape); 23] = [
+    ("SessionStart", "SessionStart", Shape::Async),
+    ("UserPromptSubmit", "UserPromptSubmit", Shape::Async),
+    ("PreToolUse", "PreToolUse", Shape::Async),
+    ("PostToolUse", "PostToolUse", Shape::Async),
+    ("PostToolUseFailure", "PostToolUseFailure", Shape::Async),
+    ("PostToolBatch", "PostToolBatch", Shape::Async),
+    ("PermissionDenied", "PermissionDenied", Shape::Async),
+    ("Notification", "Notification", Shape::Async),
+    ("SubagentStart", "SubagentStart", Shape::Async),
+    ("SubagentStop", "SubagentStop", Shape::Async),
+    ("TaskCreated", "TaskCreated", Shape::Async),
+    ("TaskCompleted", "TaskCompleted", Shape::Async),
+    ("PreCompact", "PreCompact", Shape::Async),
+    ("PostCompact", "PostCompact", Shape::Async),
+    ("CwdChanged", "CwdChanged", Shape::Async),
+    ("PostModelSwitch", "PostModelSwitch", Shape::Async),
+    ("ElicitationResult", "ElicitationResult", Shape::Async),
     (
+        "PermissionRequest",
         "PermissionRequest",
         Shape::Blocking(Some(DECISION_TIMEOUT_SECS)),
     ),
-    ("Elicitation", Shape::Blocking(Some(DECISION_TIMEOUT_SECS))),
-    ("Stop", Shape::Blocking(Some(10))),
-    ("SessionEnd", Shape::Blocking(None)),
-    ("StopFailure", Shape::Blocking(None)),
+    (
+        "Elicitation",
+        "Elicitation",
+        Shape::Blocking(Some(DECISION_TIMEOUT_SECS)),
+    ),
+    ("Stop", "Stop", Shape::Blocking(Some(10))),
+    (
+        "Stop",
+        STOP_WAITER_EVENT,
+        Shape::Rewake(STOP_WAITER_TIMEOUT_SECS),
+    ),
+    ("SessionEnd", "SessionEnd", Shape::Blocking(None)),
+    ("StopFailure", "StopFailure", Shape::Blocking(None)),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -122,14 +134,22 @@ impl Created {
     }
 }
 
-pub fn beacon_handler(event: &str, shape: Shape, helper: &str) -> Value {
-    let mut handler = json!({"type": "command", "command": helper, "args": [event]});
+pub fn beacon_handler(argument: &str, shape: Shape, helper: &str) -> Value {
+    let mut handler = json!({"type": "command", "command": helper, "args": [argument]});
     match shape {
         Shape::Async => handler["async"] = json!(true),
         Shape::Blocking(Some(timeout)) => handler["timeout"] = json!(timeout),
         Shape::Blocking(None) => {}
+        Shape::Rewake(timeout) => {
+            handler["asyncRewake"] = json!(true);
+            handler["timeout"] = json!(timeout);
+        }
     }
     handler
+}
+
+fn handler_argument(handler: &Value) -> Option<&str> {
+    handler.get("args")?.get(0)?.as_str()
 }
 
 pub fn is_beacon_handler(handler: &Value) -> bool {
@@ -201,7 +221,7 @@ pub fn add_beacon(settings: &mut Map<String, Value>, helper: &str) -> Result<Cre
     else {
         return Err("\"hooks\" is not a JSON object".to_string());
     };
-    for (event, shape) in EVENTS {
+    for (event, argument, shape) in HANDLERS {
         if !hooks.contains_key(event) {
             created.events.push(event.to_string());
         }
@@ -211,7 +231,7 @@ pub fn add_beacon(settings: &mut Map<String, Value>, helper: &str) -> Result<Cre
         else {
             return Err(format!("\"hooks\".\"{event}\" is not a JSON array"));
         };
-        groups.push(json!({"hooks": [beacon_handler(event, shape, helper)]}));
+        groups.push(json!({"hooks": [beacon_handler(argument, shape, helper)]}));
     }
     Ok(created)
 }
@@ -219,25 +239,37 @@ pub fn add_beacon(settings: &mut Map<String, Value>, helper: &str) -> Result<Cre
 pub fn registration_problems(settings: &Map<String, Value>, helper: &str) -> Vec<String> {
     let hooks = settings.get("hooks").and_then(Value::as_object);
     let mut problems = Vec::new();
-    for (event, shape) in EVENTS {
+    for (event, argument, shape) in HANDLERS {
         let found: Vec<&Value> = hooks
             .and_then(|hooks| hooks.get(event))
             .into_iter()
             .flat_map(beacon_handlers)
+            .filter(|handler| handler_argument(handler) == Some(argument))
             .collect();
         match found.as_slice() {
-            [] => problems.push(format!("{event} is not registered")),
-            [handler] if **handler == beacon_handler(event, shape, helper) => {}
-            [_] => problems.push(format!("{event} has the wrong helper path or shape")),
-            several => problems.push(format!("{event} is registered {} times", several.len())),
+            [] => problems.push(format!("{argument} is not registered")),
+            [handler] if **handler == beacon_handler(argument, shape, helper) => {}
+            [_] => problems.push(format!("{argument} has the wrong helper path or shape")),
+            several => problems.push(format!("{argument} is registered {} times", several.len())),
         }
     }
     for (event, groups) in hooks.into_iter().flatten() {
-        let known = EVENTS.iter().any(|(beacon_event, _)| beacon_event == event);
-        if !known && beacon_handlers(groups).next().is_some() {
-            problems.push(format!(
+        let arguments: Vec<&str> = HANDLERS
+            .iter()
+            .filter(|(beacon_event, ..)| beacon_event == event)
+            .map(|(_, argument, _)| *argument)
+            .collect();
+        let stray = beacon_handlers(groups).any(|handler| {
+            !handler_argument(handler).is_some_and(|argument| arguments.contains(&argument))
+        });
+        match (stray, arguments.is_empty()) {
+            (true, true) => problems.push(format!(
                 "{event} has a Beacon handler but is not a Beacon event"
-            ));
+            )),
+            (true, false) => problems.push(format!(
+                "{event} has a Beacon handler that Beacon does not register"
+            )),
+            (false, _) => {}
         }
     }
     problems
@@ -322,7 +354,11 @@ mod tests {
             beacon_handler("SessionEnd", Shape::Blocking(None), "h").to_string(),
             r#"{"type":"command","command":"h","args":["SessionEnd"]}"#
         );
-        let registered: Vec<&str> = EVENTS.iter().map(|(event, _)| *event).collect();
+        assert_eq!(
+            beacon_handler("StopWaiter", Shape::Rewake(86_400), "h").to_string(),
+            r#"{"type":"command","command":"h","args":["StopWaiter"],"asyncRewake":true,"timeout":86400}"#
+        );
+        let registered: Vec<&str> = HANDLERS.iter().map(|(event, ..)| *event).collect();
         for never in [
             "WorktreeCreate",
             "WorktreeRemove",
@@ -357,8 +393,21 @@ mod tests {
             [
                 "PreToolUse is registered 2 times",
                 "Stop is not registered",
+                "StopWaiter is not registered",
                 "SessionEnd has the wrong helper path or shape",
                 "WorktreeCreate has a Beacon handler but is not a Beacon event"
+            ]
+        );
+        let mut settings = Map::new();
+        add_beacon(&mut settings, HELPER).unwrap();
+        let stop = settings["hooks"]["Stop"].as_array_mut().unwrap();
+        assert_eq!(stop.len(), 2);
+        stop[1]["hooks"][0]["args"] = json!(["StopWaiting"]);
+        assert_eq!(
+            registration_problems(&settings, HELPER),
+            [
+                "StopWaiter is not registered",
+                "Stop has a Beacon handler that Beacon does not register"
             ]
         );
         assert_eq!(

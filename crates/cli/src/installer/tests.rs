@@ -190,7 +190,7 @@ fn the_plan_changes_nothing_and_shows_the_diff_and_warnings() {
     assert_eq!(case.settings(), case.input);
     assert!(!case.paths.home.exists());
     assert!(plan.contains(
-        "@@ -36,5 +36,313 @@\n   },\n   \"autoUpdatesChannel\": \"stable\",\n   \"autoMemoryEnabled\": false,\n-  \"switchModelsOnFlag\": true\n+  \"switchModelsOnFlag\": true,\n+  \"hooks\": {\n"
+        "@@ -36,5 +36,326 @@\n   },\n   \"autoUpdatesChannel\": \"stable\",\n   \"autoMemoryEnabled\": false,\n-  \"switchModelsOnFlag\": true\n+  \"switchModelsOnFlag\": true,\n+  \"hooks\": {\n"
     ));
     assert!(plan.ends_with(&format!(
         "Warning: {REGISTRY_NOTICE}\nNothing was changed. Run again with --yes to install.\n"

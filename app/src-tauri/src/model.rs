@@ -1,5 +1,6 @@
 use crate::positions::Visibility;
 use crate::toasts::verb;
+use beacon_core::session::display_title;
 use beacon_core::{Session, SessionState, Snapshot};
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -289,15 +290,7 @@ impl Unused {
 }
 
 fn peek_name(session: &Session) -> String {
-    let name = [&session.title, &session.listed_name, &session.project]
-        .into_iter()
-        .flatten()
-        .map(|name| name.trim())
-        .find(|name| !name.is_empty())
-        .map_or_else(
-            || session.session_id.chars().take(8).collect(),
-            str::to_string,
-        );
+    let name = display_title(session);
     if name.chars().count() > PEEK_NAME_CHARS {
         format!(
             "{}…",

@@ -24,12 +24,15 @@ pub struct Config {
     pub reconcile_seconds: u64,
     pub answer_unattended: bool,
     pub log_level: LogLevel,
+    pub clear_finished_minutes: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LiveConfig {
     pub stall_minutes: u64,
     pub answer_unattended: bool,
+    #[serde(default)]
+    pub clear_finished_minutes: u64,
 }
 
 impl Default for Config {
@@ -39,6 +42,7 @@ impl Default for Config {
             reconcile_seconds: 60,
             answer_unattended: false,
             log_level: LogLevel::Info,
+            clear_finished_minutes: 10,
         }
     }
 }
@@ -62,6 +66,7 @@ impl Config {
         LiveConfig {
             stall_minutes: self.stall_minutes,
             answer_unattended: self.answer_unattended,
+            clear_finished_minutes: self.clear_finished_minutes,
         }
     }
 
@@ -70,6 +75,7 @@ impl Config {
         home: &Path,
         stall_minutes: Option<u64>,
         answer_unattended: Option<bool>,
+        clear_finished_minutes: Option<u64>,
     ) -> Result<(), String> {
         if let Some(minutes) = stall_minutes.filter(|minutes| !STALL_MINUTES.contains(minutes)) {
             return Err(format!(
@@ -91,12 +97,16 @@ impl Config {
         if let Some(answer) = answer_unattended {
             stored.insert("answer_unattended".to_string(), answer.into());
         }
+        if let Some(minutes) = clear_finished_minutes {
+            stored.insert("clear_finished_minutes".to_string(), minutes.into());
+        }
         serde_json::to_vec_pretty(&stored)
             .map_err(io::Error::from)
             .and_then(|bytes| write_atomic(&path, &bytes))
             .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
         self.stall_minutes = stall_minutes.unwrap_or(self.stall_minutes);
         self.answer_unattended = answer_unattended.unwrap_or(self.answer_unattended);
+        self.clear_finished_minutes = clear_finished_minutes.unwrap_or(self.clear_finished_minutes);
         Ok(())
     }
 }
@@ -131,23 +141,25 @@ mod tests {
         let mut config = Config::load(&home).unwrap();
         for minutes in [0, 241] {
             assert_eq!(
-                config.change(&home, Some(minutes), Some(true)),
+                config.change(&home, Some(minutes), Some(true), None),
                 Err(format!("stall_minutes must be 1 to 240, not {minutes}"))
             );
         }
         assert_eq!(config.live(), Config::default().live());
-        config.change(&home, Some(240), None).unwrap();
-        config.change(&home, None, Some(true)).unwrap();
+        config.change(&home, Some(240), None, None).unwrap();
+        config.change(&home, None, Some(true), None).unwrap();
+        config.change(&home, None, None, Some(0)).unwrap();
         assert_eq!(
             config.live(),
             LiveConfig {
                 stall_minutes: 240,
-                answer_unattended: true
+                answer_unattended: true,
+                clear_finished_minutes: 0
             }
         );
         assert_eq!(
             serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap(),
-            serde_json::json!({"log_level": "debug", "custom": [1, 2], "stall_minutes": 240, "answer_unattended": true})
+            serde_json::json!({"log_level": "debug", "custom": [1, 2], "stall_minutes": 240, "answer_unattended": true, "clear_finished_minutes": 0})
         );
         assert_eq!(Config::load(&home).unwrap(), config);
         std::fs::remove_dir_all(&home).unwrap();

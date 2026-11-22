@@ -2,6 +2,7 @@ use crate::account::AccountUsage;
 use crate::config::LiveConfig;
 use crate::platform;
 use crate::progress::{Step, Task};
+use crate::prompts::PromptPath;
 use crate::session::Session;
 use crate::state::PermissionKind;
 use beacon_protocol::{Channel, Endpoint, encode_preamble};
@@ -50,6 +51,8 @@ pub enum Request {
         stall_minutes: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         answer_unattended: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clear_finished_minutes: Option<u64>,
     },
     Shutdown,
 }
@@ -86,6 +89,8 @@ pub struct Reply {
     pub snapshot: Option<Snapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<SessionDetail>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_path: Option<PromptPath>,
 }
 
 impl Reply {
@@ -95,6 +100,7 @@ impl Reply {
             error: None,
             snapshot: None,
             detail: None,
+            prompt_path: None,
         }
     }
 
@@ -329,6 +335,7 @@ mod tests {
                 Request::SetConfig {
                     stall_minutes: Some(15),
                     answer_unattended: None,
+                    clear_finished_minutes: None,
                 },
                 r#"{"op":"set_config","stall_minutes":15}"#,
             ),
@@ -336,8 +343,17 @@ mod tests {
                 Request::SetConfig {
                     stall_minutes: None,
                     answer_unattended: Some(true),
+                    clear_finished_minutes: None,
                 },
                 r#"{"op":"set_config","answer_unattended":true}"#,
+            ),
+            (
+                Request::SetConfig {
+                    stall_minutes: None,
+                    answer_unattended: None,
+                    clear_finished_minutes: Some(0),
+                },
+                r#"{"op":"set_config","clear_finished_minutes":0}"#,
             ),
             (
                 Request::QueuePrompt {

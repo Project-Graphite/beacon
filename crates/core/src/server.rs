@@ -5,7 +5,7 @@ use crate::engine::{Engine, HookOutcome, ProcessExit};
 use crate::lister::SessionLister;
 use crate::log::{Logger, now_ms};
 use crate::platform::{self, InstanceLock, PIPE_PREFIX, PipeSecurity};
-use crate::usage::{TranscriptReader, find_plan};
+use crate::usage::{TranscriptReader, find_plan, find_transcript};
 use beacon_protocol::{
     Channel, ENDPOINT_FILE, Endpoint, HookReply, MAX_FRAME_LEN, TOKEN_LEN, channel_for, frame_len,
     tokens_match,
@@ -20,7 +20,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::{JoinSet, spawn_blocking};
 use tokio::time::{Instant, sleep, sleep_until, timeout};
 
@@ -157,6 +157,7 @@ fn run(
         tasks.spawn_local(expire_snoozes(shared.clone()));
         tasks.spawn_local(read_usage(shared.clone()));
         tasks.spawn_local(read_plans(shared.clone()));
+        tasks.spawn_local(find_transcripts(shared.clone(), account.projects_dir));
         tasks.spawn_local(persist(shared.clone(), options.home.clone()));
         let mut shutdown_requested = shutdown.subscribe();
         tokio::select! {
@@ -331,20 +332,33 @@ async fn serve_hook(shared: &Shared, mut pipe: NamedPipeServer) -> io::Result<()
         HookOutcome::Done => Ok(()),
         HookOutcome::Reply(reply) => send_reply(&mut pipe, reply).await,
         HookOutcome::Wait(id, decided) => {
-            let mut probe = [0u8; 1];
-            let waited = tokio::select! {
-                reply = decided => Some(reply),
-                _ = pipe.read(&mut probe) => None,
-            };
-            match waited {
-                Some(Ok(reply)) => send_reply(&mut pipe, reply).await,
-                Some(Err(_)) => Ok(()),
-                None => {
-                    shared.engine.borrow_mut().helper_gone(id);
-                    Ok(())
-                }
+            if !reply_when_ready(&mut pipe, decided).await? {
+                shared.engine.borrow_mut().helper_gone(id);
             }
+            Ok(())
         }
+        HookOutcome::Waiter(id, woken) => {
+            if !reply_when_ready(&mut pipe, woken).await? {
+                shared.engine.borrow_mut().waiter_gone(id);
+            }
+            Ok(())
+        }
+    }
+}
+
+async fn reply_when_ready(
+    pipe: &mut NamedPipeServer,
+    ready: oneshot::Receiver<HookReply>,
+) -> io::Result<bool> {
+    let mut probe = [0u8; 1];
+    let waited = tokio::select! {
+        reply = ready => Some(reply),
+        _ = pipe.read(&mut probe) => None,
+    };
+    match waited {
+        Some(Ok(reply)) => send_reply(pipe, reply).await.map(|()| true),
+        Some(Err(_)) => Ok(true),
+        None => Ok(false),
     }
 }
 
@@ -375,10 +389,16 @@ async fn serve_control(shared: &Shared, pipe: NamedPipeServer) -> io::Result<()>
             Ok(Request::SetConfig {
                 stall_minutes,
                 answer_unattended,
+                clear_finished_minutes,
             }) => shared
                 .engine
                 .borrow_mut()
-                .set_config(&shared.home, stall_minutes, answer_unattended)
+                .set_config(
+                    &shared.home,
+                    stall_minutes,
+                    answer_unattended,
+                    clear_finished_minutes,
+                )
                 .map_or_else(Reply::failed, |()| Reply::ok()),
             Ok(request) => shared.engine.borrow_mut().control(request),
             Err(error) => Reply::failed(format!("bad request: {error}")),
@@ -588,7 +608,7 @@ async fn read_usage(shared: Rc<Shared>) -> io::Result<()> {
                         .filter(|reader| reader.transcript() == Path::new(&transcript))
                         .unwrap_or_else(|| TranscriptReader::new(&session_id, Path::new(&transcript)));
                     let (reader, read) = spawn_blocking(move || {
-                        let read = reader.read(now_ms());
+                        let read = reader.read(now_ms()).map(|usage| (usage, reader.take_titles()));
                         (reader, read)
                     })
                     .await
@@ -596,7 +616,10 @@ async fn read_usage(shared: Rc<Shared>) -> io::Result<()> {
                     readers.insert(session_id.clone(), reader);
                     let mut engine = shared.engine.borrow_mut();
                     match read {
-                        Ok(usage) => engine.set_usage(&session_id, usage),
+                        Ok((usage, titles)) => {
+                            engine.set_usage(&session_id, usage);
+                            engine.set_titles(&session_id, titles);
+                        }
                         Err(error) => engine.log.warn(format_args!(
                             "usage of session {session_id} gave no information: {error}"
                         )),
@@ -619,6 +642,33 @@ async fn read_plans(shared: Rc<Shared>) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+async fn find_transcripts(shared: Rc<Shared>, projects: Option<PathBuf>) -> io::Result<()> {
+    let mut changes = shared.engine.borrow().watch_changes();
+    loop {
+        let wanted = shared.engine.borrow_mut().take_transcripts_wanted();
+        if let Some(projects) = projects.clone().filter(|_| !wanted.is_empty()) {
+            let found = spawn_blocking(move || {
+                wanted
+                    .into_iter()
+                    .filter_map(|session_id| {
+                        let transcript = find_transcript(&projects, &session_id)?;
+                        Some((session_id, transcript.to_string_lossy().into_owned()))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .map_err(io::Error::other)?;
+            let mut engine = shared.engine.borrow_mut();
+            for (session_id, transcript) in found {
+                engine.adopt_transcript(&session_id, transcript);
+            }
+        }
+        if changes.changed().await.is_err() {
+            return Ok(());
+        }
+    }
 }
 
 async fn fetch_plan(shared: Rc<Shared>, id: u64) {

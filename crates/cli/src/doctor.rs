@@ -1,5 +1,5 @@
 use crate::installer::{Paths, REGISTRY_NOTICE, managed_policy_findings};
-use crate::settings::{self, EVENTS};
+use crate::settings::{self, HANDLERS};
 use crate::surface_label;
 use beacon_core::{ControlClient, Endpoint, Request, Snapshot};
 use beacon_protocol::{DOCTOR_EVENT, HOME_ENV};
@@ -144,8 +144,8 @@ fn settings_checks(settings: &Map<String, Value>, path: &Path, helper: &Path) ->
             (
                 Level::Ok,
                 format!(
-                    "hooks: all {} events registered in {}",
-                    EVENTS.len(),
+                    "hooks: all {} handlers registered in {}",
+                    HANDLERS.len(),
                     path.display()
                 ),
             )

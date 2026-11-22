@@ -11,12 +11,16 @@ use crate::log::{Logger, now_ms};
 use crate::platform::{ProcessWatch, process_alive, process_image_path};
 use crate::preview::input_preview;
 use crate::progress::{LABEL_CHARS, StepKind, step_kind};
-use crate::prompts::stop_output;
+use crate::prompts::{PromptPath, followup, stop_output};
 use crate::redact::redact;
-use crate::session::{McpRequest, Session, activity_line, surface_from_image};
+use crate::session::{
+    McpRequest, Session, activity_line, display_title, surface_from_image, title_line,
+};
 use crate::state::{AgentStatus, Input, PermissionKind, SessionState, StartSource, ToolEvent};
-use crate::usage::{SessionUsage, UsageStatus};
-use beacon_protocol::{DECISION_TIMEOUT_SECS, DOCTOR_EVENT, HookReply, is_waiting_event};
+use crate::usage::{SessionUsage, TranscriptTitles, UsageStatus};
+use beacon_protocol::{
+    DECISION_TIMEOUT_SECS, DOCTOR_EVENT, HookReply, STOP_WAITER_EVENT, is_waiting_event,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -39,11 +43,23 @@ pub enum HookOutcome {
     Done,
     Reply(HookReply),
     Wait(u64, oneshot::Receiver<HookReply>),
+    Waiter(u64, oneshot::Receiver<HookReply>),
 }
 
 struct Pending {
     view: PendingDecision,
     reply: oneshot::Sender<HookReply>,
+}
+
+struct StopWaiter {
+    id: u64,
+    reply: oneshot::Sender<HookReply>,
+}
+
+impl StopWaiter {
+    fn release(self) {
+        let _ = self.reply.send(HookReply::NoDecision);
+    }
 }
 
 struct RecentToolUse {
@@ -63,6 +79,8 @@ struct Runtime {
     timeline: VecDeque<TimelineEntry>,
     last_message: Option<String>,
     image_read: bool,
+    titled_by_hook: bool,
+    transcript_sought: bool,
 }
 
 enum Followup {
@@ -100,6 +118,9 @@ pub struct Engine {
     account_usage: Option<AccountUsage>,
     usage_wanted: BTreeMap<String, String>,
     plans_wanted: Vec<u64>,
+    transcripts_wanted: Vec<String>,
+    waiters: HashMap<String, StopWaiter>,
+    next_waiter_id: u64,
 }
 
 impl Engine {
@@ -133,9 +154,13 @@ impl Engine {
             account_usage: None,
             usage_wanted: BTreeMap::new(),
             plans_wanted: Vec::new(),
+            transcripts_wanted: Vec::new(),
+            waiters: HashMap::new(),
+            next_waiter_id: 1,
         };
         engine.prune_ended(now_ms());
         engine.settle_snoozes(now_ms());
+        engine.settle_sessions();
         engine.usage_wanted = engine
             .sessions
             .values()
@@ -207,8 +232,14 @@ impl Engine {
         home: &Path,
         stall_minutes: Option<u64>,
         answer_unattended: Option<bool>,
+        clear_finished_minutes: Option<u64>,
     ) -> Result<(), String> {
-        self.config.change(home, stall_minutes, answer_unattended)?;
+        self.config.change(
+            home,
+            stall_minutes,
+            answer_unattended,
+            clear_finished_minutes,
+        )?;
         self.log.info(format_args!(
             "configuration changed: {:?}",
             self.config.live()
@@ -243,7 +274,13 @@ impl Engine {
             ),
             Request::Unsnooze { session_id } => self.snooze(session_id.as_deref(), None),
             Request::QueuePrompt { session_id, text } => {
-                self.queue_prompt(&session_id, &text, now_ms())
+                return self.queue_prompt(&session_id, &text, now_ms()).map_or_else(
+                    Reply::failed,
+                    |path| Reply {
+                        prompt_path: Some(path),
+                        ..Reply::ok()
+                    },
+                );
             }
             Request::CancelPrompt { id } => self.cancel_prompt(id),
             Request::RefreshUsage | Request::SetConfig { .. } | Request::Shutdown => Ok(()),
@@ -269,18 +306,31 @@ impl Engine {
         Ok(())
     }
 
-    fn queue_prompt(&mut self, session_id: &str, text: &str, now: u64) -> Result<(), String> {
-        self.sessions
+    fn queue_prompt(
+        &mut self,
+        session_id: &str,
+        text: &str,
+        now: u64,
+    ) -> Result<PromptPath, String> {
+        let path = self
+            .sessions
             .get_mut(session_id)
             .ok_or_else(|| format!("no session {session_id}"))?
             .queue_prompt(self.next_prompt_id, text, now)?;
+        if path == PromptPath::Wake
+            && let Some(waiter) = self.waiters.remove(session_id)
+        {
+            let _ = waiter
+                .reply
+                .send(HookReply::Rewake(followup(text).into_bytes()));
+        }
         self.log.info(format_args!(
-            "prompt {} queued for session {session_id}",
+            "prompt {} for session {session_id}: {path:?}",
             self.next_prompt_id
         ));
         self.next_prompt_id += 1;
         self.changed();
-        Ok(())
+        Ok(path)
     }
 
     fn cancel_prompt(&mut self, id: u64) -> Result<(), String> {
@@ -351,6 +401,94 @@ impl Engine {
         std::mem::take(&mut self.plans_wanted)
     }
 
+    pub fn take_transcripts_wanted(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.transcripts_wanted)
+    }
+
+    pub fn adopt_transcript(&mut self, session_id: &str, transcript: String) {
+        let Some(session) = self
+            .sessions
+            .get_mut(session_id)
+            .filter(|session| session.transcript_path.is_none())
+        else {
+            return;
+        };
+        session.transcript_path = Some(transcript.clone());
+        self.usage_wanted.insert(session_id.to_string(), transcript);
+        self.changed();
+    }
+
+    pub fn set_titles(&mut self, session_id: &str, titles: TranscriptTitles) {
+        let titled_by_hook = self
+            .runtime
+            .get(session_id)
+            .is_some_and(|runtime| runtime.titled_by_hook);
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return;
+        };
+        if let Some(ai_title) = titles.ai_title {
+            session.ai_title = Some(title_line(&ai_title));
+        }
+        if let Some(last_prompt) = titles.last_prompt {
+            session.last_prompt = Some(title_line(&last_prompt));
+        }
+        if let Some(custom_title) = titles.custom_title.filter(|_| !titled_by_hook) {
+            session.title = Some(title_line(&custom_title));
+        }
+        self.changed();
+    }
+
+    pub fn waiter_gone(&mut self, id: u64) {
+        self.waiters.retain(|_, waiter| waiter.id != id);
+        self.changed();
+    }
+
+    fn register_waiter(&mut self, session_id: String) -> HookOutcome {
+        let (reply, receiver) = oneshot::channel();
+        let id = self.next_waiter_id;
+        self.next_waiter_id += 1;
+        if let Some(older) = self
+            .waiters
+            .insert(session_id.clone(), StopWaiter { id, reply })
+        {
+            older.release();
+        }
+        self.changed();
+        self.log_event(STOP_WAITER_EVENT, &session_id);
+        HookOutcome::Waiter(id, receiver)
+    }
+
+    fn settle_sessions(&mut self) {
+        let sessions = &self.sessions;
+        for (_, waiter) in self.waiters.extract_if(|session_id, _| {
+            sessions
+                .get(session_id)
+                .is_some_and(|session| session.state == SessionState::Ended)
+        }) {
+            waiter.release();
+        }
+        for session in self.sessions.values_mut() {
+            session.can_wake = self.waiters.contains_key(&session.session_id)
+                && matches!(
+                    session.state,
+                    SessionState::Idle | SessionState::Done | SessionState::Error
+                );
+            session.display_title = display_title(session);
+        }
+    }
+
+    fn log_event(&self, event: &str, session_id: &str) {
+        let session = self.sessions.get(session_id);
+        self.log.info(format_args!(
+            "{event} {} entrypoint {} state {}",
+            session_id.chars().take(8).collect::<String>(),
+            session
+                .and_then(|session| session.entrypoint.as_deref())
+                .unwrap_or("-"),
+            session.map_or_else(|| "-".to_string(), |session| format!("{:?}", session.state))
+        ));
+    }
+
     pub fn plan_source(&self, id: u64) -> Option<(String, Option<String>)> {
         let view = &self.pending.get(&id)?.view;
         if view.plan.is_some() {
@@ -412,13 +550,18 @@ impl Engine {
             return HookOutcome::Reply(HookReply::Stdout(DOCTOR_REPLY.to_vec()));
         }
         let outcome = match events::parse(payload) {
+            Ok(_) if meta.event == STOP_WAITER_EVENT && meta.unattended() => {
+                Some(HookOutcome::Reply(HookReply::NoDecision))
+            }
+            Ok(parsed) if meta.event == STOP_WAITER_EVENT => {
+                Some(self.register_waiter(parsed.common.session_id))
+            }
             Ok(parsed) => {
-                self.log.debug(format_args!(
-                    "{} for session {}",
-                    parsed.common.hook_event_name, parsed.common.session_id
-                ));
+                let event_name = parsed.common.hook_event_name.clone();
+                let session_id = parsed.common.session_id.clone();
                 let outcome = self.apply_event(&meta, parsed.common, parsed.event);
                 self.changed();
+                self.log_event(&event_name, &session_id);
                 outcome
             }
             Err(rejected) => {
@@ -498,6 +641,21 @@ impl Engine {
             event,
             Event::PreToolUse(_) | Event::PostToolUse(_) | Event::PostToolUseFailure(_)
         );
+        if matches!(
+            event,
+            Event::SessionStart {
+                session_title: Some(_),
+                ..
+            } | Event::UserPromptSubmit {
+                session_title: Some(_),
+                ..
+            }
+        ) {
+            self.runtime
+                .entry(session_id.clone())
+                .or_default()
+                .titled_by_hook = true;
+        }
         let (input, followup) = match event {
             Event::SessionStart {
                 source,
@@ -515,7 +673,16 @@ impl Engine {
                     Followup::Nothing,
                 )
             }
-            Event::UserPromptSubmit { session_title } => {
+            Event::UserPromptSubmit {
+                session_title,
+                prompt,
+            } => {
+                if let Some(waiter) = self.waiters.remove(&session_id) {
+                    waiter.release();
+                }
+                if let Some(prompt) = prompt {
+                    session.last_prompt = Some(title_line(&prompt));
+                }
                 session.title = session_title.or(session.title.take());
                 session.turn_started_ms = Some(now);
                 session.dismissed = false;
@@ -1000,6 +1167,20 @@ impl Engine {
                 }
             }
             session.listed_name = entry.name;
+            match &session.transcript_path {
+                None => {
+                    let runtime = self.runtime.entry(entry.session_id.clone()).or_default();
+                    if !runtime.transcript_sought {
+                        runtime.transcript_sought = true;
+                        self.transcripts_wanted.push(entry.session_id.clone());
+                    }
+                }
+                Some(transcript) if session.limited => {
+                    self.usage_wanted
+                        .insert(entry.session_id.clone(), transcript.clone());
+                }
+                Some(_) => {}
+            }
             if let Some(status) = agent_status(entry.status.as_deref()) {
                 session.apply(Input::Reconciled(status), now);
             }
@@ -1060,7 +1241,26 @@ impl Engine {
             self.log.info(format_args!("session {session_id} stalled"));
             self.apply(session_id, Input::StallTimeout);
         }
-        if self.prune_ended(now) || !stalled.is_empty() {
+        let clear_ms = self.config.clear_finished_minutes.saturating_mul(60_000);
+        let finished: Vec<String> = self
+            .sessions
+            .values()
+            .filter(|session| {
+                clear_ms > 0
+                    && session.state == SessionState::Done
+                    && now.saturating_sub(session.turn_ended_ms.unwrap_or(session.last_event_ms))
+                        >= clear_ms
+            })
+            .map(|session| session.session_id.clone())
+            .collect();
+        for session_id in &finished {
+            self.log.info(format_args!(
+                "session {session_id} acknowledged after being finished for {} minutes",
+                self.config.clear_finished_minutes
+            ));
+            self.apply(session_id, Input::Acknowledged);
+        }
+        if self.prune_ended(now) || !stalled.is_empty() || !finished.is_empty() {
             self.changed();
         }
     }
@@ -1133,6 +1333,7 @@ impl Engine {
 
     fn changed_at(&mut self, now: u64) {
         self.settle_snoozes(now);
+        self.settle_sessions();
         self.changes.send_modify(|version| *version += 1);
     }
 }

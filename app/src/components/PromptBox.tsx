@@ -26,7 +26,7 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
     setSending(true);
     setFailure(null);
     const sent =
-      path.path === 'at_turn_end'
+      path.path === 'at_turn_end' || path.path === 'wake'
         ? queuePrompt(session.session_id, text).then(() => true)
         : sendPromptToWindow(session.session_id, text).then((result) => {
             const report = jumpReport(result.outcome, result.path === 'prefill');

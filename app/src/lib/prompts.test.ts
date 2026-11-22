@@ -26,11 +26,26 @@ test('a running turn queues, an idle VS Code session prefills, any other idle se
   assert.deepEqual(paths('claude-desktop').slice(7), ['copy_and_jump', 'copy_and_jump', 'copy_and_jump', null]);
 });
 
+test('an idle, finished or failed session with a stop waiter is woken, whatever its surface', () => {
+  const wakeable = (state: SessionState, entrypoint: string | null) =>
+    promptPath({ ...session(state, entrypoint), can_wake: true })?.path ?? null;
+  for (const entrypoint of ['claude-vscode', 'cli', null]) {
+    assert.deepEqual(
+      (['working', 'idle', 'done', 'error', 'ended'] as const).map((state) => wakeable(state, entrypoint)),
+      ['at_turn_end', 'wake', 'wake', 'wake', null],
+    );
+  }
+});
+
 test('each path states what will happen', () => {
   assert.equal(promptPath(session('working'))?.label, 'Sends when the current turn finishes.');
   assert.equal(
+    promptPath({ ...session('idle', 'claude-vscode'), can_wake: true })?.label,
+    'Sends now. Claude sees it as a follow-up from Beacon, not as a typed message.',
+  );
+  assert.equal(
     promptPath(session('idle', 'claude-vscode'))?.label,
-    'Opens the session in VS Code with this text in its prompt box. Press Enter there to send it.',
+    'Opens the session in VS Code with the text in its prompt box. VS Code will ask you to send it.',
   );
   assert.equal(promptPath(session('done'))?.label, "Copies the text and jumps to the session's window. Paste it there.");
 });

@@ -151,6 +151,13 @@ test('a row is titled by its title, else its listed name, else its project, else
   assert.equal(sessionTitle(session({ session_id: 'abcdef123456' })), 'abcdef12');
 });
 
+test("a row uses the core's display title when the snapshot carries one", () => {
+  assert.equal(
+    sessionTitle(session({ session_id: 'abcdef123456', display_title: 'Fix the login flow', title: 'Fix', listed_name: 'n', project: 'p' })),
+    'Fix the login flow',
+  );
+});
+
 test('task progress is the done fraction, and zero without tasks', () => {
   assert.equal(taskProgress(session({})), 0);
   assert.equal(taskProgress(session({ tasks_created: 4, tasks_completed: 1 })), 0.25);

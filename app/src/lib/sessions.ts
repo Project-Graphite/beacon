@@ -83,7 +83,9 @@ export function crossedOff(sessions: Session[]): Session[] {
 }
 
 export function sessionTitle(session: Session): string {
-  return session.title ?? session.listed_name ?? session.project ?? session.session_id.slice(0, 8);
+  return (
+    session.display_title ?? session.title ?? session.listed_name ?? session.project ?? session.session_id.slice(0, 8)
+  );
 }
 
 export function taskProgress(session: Session): number {

@@ -82,6 +82,10 @@ export interface Session {
   step_current: CurrentStep | null;
   command_current: string | null;
   dismissed: boolean;
+  ai_title?: string | null;
+  last_prompt?: string | null;
+  display_title?: string;
+  can_wake?: boolean;
 }
 
 export type PromptStatus = 'queued' | 'delivered' | 'acknowledged' | 'failed';
@@ -94,7 +98,7 @@ export interface Prompt {
   reason: string | null;
 }
 
-export type PromptPath = 'at_turn_end' | 'prefill' | 'copy_and_jump';
+export type PromptPath = 'at_turn_end' | 'wake' | 'prefill' | 'copy_and_jump';
 
 export interface WindowPrompt {
   path: PromptPath;

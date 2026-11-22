@@ -55,7 +55,7 @@ pub async fn send_prompt_to_window(
                 path,
                 clipboard::set_text(&text).and_then(|()| focus::jump(&session)),
             ),
-            Some(PromptPath::AtTurnEnd) | None => {
+            Some(PromptPath::AtTurnEnd | PromptPath::Wake) | None => {
                 return Err(format!(
                     "session {} takes no prompt through its window now",
                     session.session_id

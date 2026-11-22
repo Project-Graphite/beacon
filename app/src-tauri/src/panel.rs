@@ -140,6 +140,7 @@ pub async fn set_config(
         Request::SetConfig {
             stall_minutes,
             answer_unattended,
+            clear_finished_minutes: None,
         },
     )
     .await

@@ -57,6 +57,7 @@ impl UsageProber for ClaudeUsageProber {
 pub struct AccountSources {
     pub claude_json: Option<PathBuf>,
     pub prober: Option<Box<dyn UsageProber>>,
+    pub projects_dir: Option<PathBuf>,
 }
 
 pub fn claude_json_path() -> Option<PathBuf> {
