@@ -37,6 +37,7 @@ const ENDED_IN_SNAPSHOT: usize = 5;
 const TIMELINE_KEPT: usize = 60;
 const LAST_MESSAGE_BYTES: usize = 64 * 1024;
 const USAGE_EVENTS: [&str; 4] = ["Stop", "SubagentStop", "PostToolBatch", "SessionEnd"];
+const LOCATION_EVENTS: [&str; 3] = ["SessionStart", "UserPromptSubmit", "Stop"];
 const FOLLOWUP_DELIVERED: &str = "Follow-up delivered from Beacon";
 
 pub type ProcessExit = (String, u32);
@@ -649,7 +650,10 @@ impl Engine {
         session.last_event_ms = now;
         session.event_count += 1;
         session.acknowledge_prompts();
-        if let Some(cwd) = &common.cwd {
+        if let Some(cwd) = &common.cwd
+            && (session.cwd.as_ref() != Some(cwd)
+                || LOCATION_EVENTS.contains(&common.hook_event_name.as_str()))
+        {
             session.set_location(cwd, meta.env("CLAUDE_PROJECT_DIR"));
         }
         let transcript_changed =

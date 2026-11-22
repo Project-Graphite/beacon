@@ -27,8 +27,8 @@ use tokio::time::{Instant, sleep, sleep_until, timeout};
 const LISTENERS: usize = 2;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
-const PERSIST_DEBOUNCE: Duration = Duration::from_millis(500);
-const SUBSCRIBE_INTERVAL: Duration = Duration::from_millis(100);
+const PERSIST_DEBOUNCE: Duration = Duration::from_secs(2);
+const SUBSCRIBE_INTERVAL: Duration = Duration::from_millis(250);
 const STALL_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 const USAGE_READ_INTERVAL: Duration = Duration::from_secs(2);
 const CACHE_CHECK_INTERVAL: Duration = Duration::from_secs(60);
@@ -452,7 +452,7 @@ async fn stream_snapshots<W: AsyncWrite + Unpin>(
             return Ok(());
         }
         loop {
-            if !shared.engine.borrow().needs_user().is_subset(&sent_needs) {
+            if shared.engine.borrow().needs_user() != sent_needs {
                 break;
             }
             tokio::select! {

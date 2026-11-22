@@ -694,7 +694,7 @@ impl Shell {
             && let Some(sound) = sound_for(
                 self.snapshot.as_ref(),
                 current,
-                positions::ui_settings(&self.feed.home).sounds_enabled,
+                self.settings.sounds_enabled,
             )
         {
             platform::play_system_sound(sound.system_alias());
