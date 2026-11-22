@@ -23,9 +23,14 @@ export interface MetaItem {
 }
 
 export interface SummaryPart {
-  kind: 'alerting' | 'working';
+  kind: 'alerting' | 'working' | 'request';
   count: number;
   text: string;
+}
+
+export interface QueuePlace {
+  position: number;
+  total: number;
 }
 
 export type RowLine =
@@ -97,17 +102,18 @@ export function stepTab(tabs: Session[], currentId: string, step: 1 | -1): strin
   return tabs[(index + step + tabs.length) % tabs.length].session_id;
 }
 
-export function summaryParts(sessions: Session[]): SummaryPart[] {
+export function summaryParts(sessions: Session[], queue: QueuePlace | null = null): SummaryPart[] {
   const alerting = sessions.filter((session) => session.alerting).length;
   const working = sessions.filter((session) => session.state === 'working').length;
   return [
     { kind: 'alerting' as const, count: alerting, text: alerting === 1 ? 'needs you' : 'need you' },
     { kind: 'working' as const, count: working, text: 'working' },
+    { kind: 'request' as const, count: queue && queue.total > 1 ? queue.position : 0, text: `of ${queue?.total} requests` },
   ].filter((part) => part.count > 0);
 }
 
-export function summary(sessions: Session[]): string {
-  return summaryParts(sessions).map(({ count, text }) => `${count} ${text}`).join(' · ') || 'All quiet';
+export function summary(sessions: Session[], queue: QueuePlace | null = null): string {
+  return summaryParts(sessions, queue).map(({ count, text }) => `${count} ${text}`).join(' · ') || 'All quiet';
 }
 
 export function rowLine(session: Session): RowLine {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { refreshUsage, type AccountUsage } from '../beacon';
+import { errorText } from '../lib/format.ts';
 import { usageLabel, usageTitle } from '../lib/account.ts';
 
 const FAILURE_SHOWN_MS = 5000;
@@ -22,7 +23,7 @@ export function UsageButton({ usage }: { usage: AccountUsage }) {
     setBusy(true);
     setFailure(null);
     refreshUsage()
-      .catch((error) => setFailure(String(error)))
+      .catch((error) => setFailure(errorText(error)))
       .finally(() => setBusy(false));
   };
 

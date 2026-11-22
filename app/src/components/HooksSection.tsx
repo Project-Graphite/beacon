@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { hooksApply, hooksPlan, hooksStatus, type HooksAction, type HooksStatus } from '../beacon';
+import { cachedHooksStatus, hooksApply, hooksPlan, hooksStatus, type HooksAction, type HooksStatus } from '../beacon';
+import { errorText } from '../lib/format.ts';
 import { HOOKS_STATES, hooksButtons, splitPlan } from '../lib/settings.ts';
 import { DiffBlock } from './DiffBlock';
 import { FilledButton } from './FilledButton';
@@ -7,7 +8,7 @@ import { OutlineButton } from './OutlineButton';
 import { SettingsSection } from './SettingsSection';
 
 export function HooksSection() {
-  const [status, setStatus] = useState<HooksStatus | null>(null);
+  const [status, setStatus] = useState<HooksStatus | null>(cachedHooksStatus);
   const [plan, setPlan] = useState<{ action: HooksAction; text: string } | null>(null);
   const [applied, setApplied] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -16,7 +17,7 @@ export function HooksSection() {
   const attempt = <T,>(work: Promise<T>, done: (value: T) => void) => {
     setBusy(true);
     setError(null);
-    work.then(done, (failure) => setError(String(failure))).finally(() => setBusy(false));
+    work.then(done, (failure) => setError(errorText(failure))).finally(() => setBusy(false));
   };
 
   useEffect(() => {
@@ -99,7 +100,7 @@ export function HooksSection() {
           )}
           {applied && (
             <p className="mt-1.5 text-secondary text-muted">
-              Restart running Claude sessions is not needed: they pick up hook changes automatically.
+              Running Claude sessions pick up the change by themselves
             </p>
           )}
         </>

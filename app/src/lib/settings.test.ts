@@ -1,6 +1,99 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { hooksButtons, splitPlan, stallMinutes } from './settings.ts';
+import {
+  commandMissing,
+  hooksButtons,
+  percent,
+  QUIT_CHOICES,
+  REPEAT_CHOICES,
+  spanLabel,
+  splitPlan,
+  stallMinutes,
+  UI_DEFAULTS,
+  uiSettings,
+} from './settings.ts';
+
+const OLD_SHELL = { hotkey: 'Ctrl+Shift+B', toasts_enabled: false, toast_on_finished: true, sounds_enabled: true };
+
+test('settings the shell does not send yet read as their defaults', () => {
+  assert.deepEqual(uiSettings(OLD_SHELL), {
+    ...OLD_SHELL,
+    visibility: 'active',
+    reveal_on_hover: true,
+    size: 'medium',
+    idle_opacity: 0.6,
+    attention_style: 'pulse_peek',
+    attention_repeat_seconds: 60,
+    peek_seconds: 4,
+    start_mode: 'claude',
+    quit_when_idle_minutes: 15,
+  });
+  assert.deepEqual(uiSettings({}), UI_DEFAULTS);
+});
+
+test('settings the shell sends are kept, clamped to their ranges and limited to their choices', () => {
+  const sent = {
+    ...OLD_SHELL,
+    visibility: 'never',
+    reveal_on_hover: false,
+    size: 'large',
+    idle_opacity: 0.35,
+    attention_style: 'colour',
+    attention_repeat_seconds: 300,
+    peek_seconds: 7,
+    start_mode: 'manual',
+    quit_when_idle_minutes: 0,
+  } as const;
+  assert.deepEqual(uiSettings(sent), sent);
+  const odd = uiSettings({
+    idle_opacity: 0.05,
+    peek_seconds: 30,
+    attention_repeat_seconds: 45,
+    quit_when_idle_minutes: 10,
+    visibility: 'sometimes' as never,
+  });
+  assert.equal(odd.idle_opacity, 0.2);
+  assert.equal(odd.peek_seconds, 10);
+  assert.equal(odd.attention_repeat_seconds, 60);
+  assert.equal(odd.quit_when_idle_minutes, 15);
+  assert.equal(odd.visibility, 'active');
+  assert.equal(uiSettings({ idle_opacity: 1.4 }).idle_opacity, 1);
+  assert.equal(uiSettings({ idle_opacity: 0.333 }).idle_opacity, 0.35);
+  assert.equal(uiSettings({ peek_seconds: 1 }).peek_seconds, 2);
+  assert.equal(uiSettings({ peek_seconds: 4.4 }).peek_seconds, 4);
+  assert.equal(uiSettings({ idle_opacity: Number.NaN }).idle_opacity, 0.6);
+});
+
+test('the segmented values read as short spans', () => {
+  assert.deepEqual(
+    REPEAT_CHOICES.map((choice) => [choice.value, choice.label]),
+    [
+      [0, 'Off'],
+      [30, '30 s'],
+      [60, '1 min'],
+      [120, '2 min'],
+      [300, '5 min'],
+    ],
+  );
+  assert.deepEqual(
+    QUIT_CHOICES.map((choice) => [choice.value, choice.label]),
+    [
+      [0, 'Never'],
+      [5, '5 min'],
+      [15, '15 min'],
+      [60, '1 hour'],
+    ],
+  );
+  assert.equal(spanLabel(7200, 'Never'), '2 hours');
+  assert.equal(percent(0.6), '60%');
+  assert.equal(percent(0.35), '35%');
+});
+
+test('only a missing command counts as missing', () => {
+  assert.equal(commandMissing('Command preview_attention not found'), true);
+  assert.equal(commandMissing('cannot play the preview'), false);
+  assert.equal(commandMissing(new Error('Command preview_attention not found')), false);
+});
 
 const INSTALL_PLAN = `Settings: C:\\t\\claude\\settings.json
 Helper:   C:\\b\\beacon-hook.exe

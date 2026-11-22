@@ -109,6 +109,18 @@ test('summary parts keep their kind so each count can roll on its own', () => {
   assert.deepEqual(summaryParts([session({})]), []);
 });
 
+test('the summary adds the place in the request queue once there is more than one request', () => {
+  const alerting = session({ state: 'needs_permission', attention: true, alerting: true });
+  assert.equal(summary([alerting, alerting, alerting], { position: 2, total: 3 }), '3 need you · 2 of 3 requests');
+  assert.deepEqual(summaryParts([alerting], { position: 1, total: 3 }).at(-1), {
+    kind: 'request',
+    count: 1,
+    text: 'of 3 requests',
+  });
+  assert.equal(summary([alerting], { position: 1, total: 1 }), '1 needs you');
+  assert.equal(summary([alerting], null), '1 needs you');
+});
+
 test('a row line shows tasks, else the running step, else the state, and always the state when input is needed', () => {
   const row = (fields: Partial<Session>) => rowLine(session(fields));
   const step = { kind: 'run' as const, label: 'Running npm test' };

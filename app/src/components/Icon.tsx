@@ -13,8 +13,7 @@ export type IconName =
   | 'cross'
   | 'box'
   | 'dash'
-  | 'sound-on'
-  | 'sound-off';
+  | 'bell';
 
 const QUESTION = (
   <>
@@ -22,8 +21,6 @@ const QUESTION = (
     <path d="M6.5 6.5a1.5 1.5 0 1 1 2.1 1.38c-.4.17-.6.5-.6.9v.22M8 10.9v.1" />
   </>
 );
-
-const SPEAKER = 'M2.5 6.25h2.25L8 3.5v9L4.75 9.75H2.5Z';
 
 const PATHS: Record<IconName, ReactNode> = {
   terminal: (
@@ -45,6 +42,7 @@ const PATHS: Record<IconName, ReactNode> = {
   'bell-off': (
     <path d="M4.5 10.5V7a3.5 3.5 0 0 1 5.6-2.8M11.5 7v3.5l1 1.25h-9M6.75 13.5a1.4 1.4 0 0 0 2.5 0M2.5 2.5l11 11" />
   ),
+  bell: <path d="M4.5 10.5V7a3.5 3.5 0 0 1 7 0v3.5l1 1.25h-9ZM6.75 13.5a1.4 1.4 0 0 0 2.5 0" />,
   chevron: <path d="m6 4 4 4-4 4" />,
   check: <path d="m3.5 8.5 3 3 6-7" />,
   cross: <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />,
@@ -57,8 +55,6 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   'arrow-out': <path d="M9.25 2.75h4v4M13.25 2.75 7.5 8.5M11.25 9.75v2a1.5 1.5 0 0 1-1.5 1.5h-5.5a1.5 1.5 0 0 1-1.5-1.5v-5.5a1.5 1.5 0 0 1 1.5-1.5h2" />,
-  'sound-on': <path d={`${SPEAKER}M10.75 6a2.75 2.75 0 0 1 0 4M12.5 4.25a5.25 5.25 0 0 1 0 7.5`} />,
-  'sound-off': <path d={`${SPEAKER}M10.5 6l3 4M13.5 6l-3 4`} />,
   prompt: <path d="M2.75 3.25h10.5v7.5H7.5l-3 2.5v-2.5H2.75Z" />,
   read: (
     <>

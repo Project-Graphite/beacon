@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { decide, type Decision, type PendingDecision } from '../beacon';
+import { errorText } from '../lib/format.ts';
 import { useArmed } from '../hooks/useArmed.ts';
 import { destructiveReason } from '../lib/destructive.ts';
 import { requestId } from '../lib/queue.ts';
 import { redact } from '../lib/redact.ts';
-import { decisionMark } from '../lib/requests.ts';
+import { decisionMark, requestLine } from '../lib/requests.ts';
 import { DecisionMark } from './DecisionMark';
 import { FilledButton } from './FilledButton';
 import { OutlineButton } from './OutlineButton';
@@ -14,7 +15,7 @@ interface RequestRowProps {
   marked: boolean;
   currentId: number | null;
   keys: Map<number, (key: string) => void> | null;
-  onOpen: () => void;
+  onOpen: () => Promise<void>;
 }
 
 export function RequestRow({ request, marked, currentId, keys, onOpen }: RequestRowProps) {
@@ -22,13 +23,13 @@ export function RequestRow({ request, marked, currentId, keys, onOpen }: Request
   const [failure, setFailure] = useState<string | null>(null);
   const [armed, setArmed] = useArmed(currentId);
   const destructive = request.kind === 'tool' ? destructiveReason(request.tool_name, request.tool_input, request.cwd) : null;
-  const line = failure ?? redact(request.preview);
+  const line = failure ?? redact(requestLine(request));
   const send = (decision: Decision) => {
     setOutcome(decisionMark(decision));
     setFailure(null);
     decide(request.id, decision).catch((error) => {
       setOutcome(null);
-      setFailure(String(error));
+      setFailure(errorText(error));
     });
   };
   const allow = () => {
@@ -42,10 +43,7 @@ export function RequestRow({ request, marked, currentId, keys, onOpen }: Request
       if (outcome) return;
       if (request.kind === 'tool' && key === 'a') allow();
       else if (request.kind === 'tool' && key === 'd') send({ type: 'deny' });
-      else {
-        onOpen();
-        window.setTimeout(() => keys.get(request.id)?.(key));
-      }
+      else void onOpen().then(() => window.setTimeout(() => keys.get(request.id)?.(key)));
     });
     return () => void keys.delete(request.id);
   });
@@ -62,7 +60,7 @@ export function RequestRow({ request, marked, currentId, keys, onOpen }: Request
       )}
       <span
         title={line}
-        className={`min-w-0 flex-1 truncate font-mono text-secondary ${failure ? 'text-danger' : 'text-ink'}`}
+        className={`min-w-0 flex-1 truncate text-secondary ${request.kind === 'tool' && !failure ? 'font-mono' : ''} ${failure ? 'text-danger' : 'text-ink'}`}
       >
         {line}
       </span>

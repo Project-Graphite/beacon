@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { cancelPrompt, queuePrompt, sendPromptToWindow, type Session } from '../beacon';
+import { errorText } from '../lib/format.ts';
 import { jumpReport, type JumpReport } from '../lib/jump.ts';
 import { promptBoxId, promptPath, promptStatus, recentPrompts } from '../lib/prompts.ts';
 import { FilledButton } from './FilledButton';
@@ -39,7 +40,7 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
           setSentText({ id: Date.now(), text });
           setText('');
         },
-        (error) => setFailure(String(error)),
+        (error) => setFailure(errorText(error)),
       )
       .finally(() => setSending(false));
   };
@@ -96,7 +97,7 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
                   {promptStatus(prompt)}
                 </span>
                 {prompt.status === 'queued' && (
-                  <TextButton onClick={() => cancelPrompt(prompt.id).catch((error) => setFailure(String(error)))}>
+                  <TextButton onClick={() => cancelPrompt(prompt.id).catch((error) => setFailure(errorText(error)))}>
                     Cancel
                   </TextButton>
                 )}

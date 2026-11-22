@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { PendingDecision } from '../beacon';
-import { argumentEntries, decisionMark, mcpTool, requestMeta, splitUrl } from './requests.ts';
+import { argumentEntries, decisionMark, mcpTool, requestLine, requestMeta, splitUrl } from './requests.ts';
 
 test('allowing or answering shows a check, any deny shows a cross', () => {
   assert.equal(decisionMark({ type: 'allow' }), 'check');
@@ -31,6 +31,16 @@ const request = (fields: Partial<PendingDecision>): PendingDecision => ({
   expires_ms: NOW - 12_000 + 3_600_000,
   plan: null,
   ...fields,
+});
+
+test('a compact request line reads as the command, the first question or the plan', () => {
+  assert.equal(requestLine(request({ preview: 'npm test' })), 'npm test');
+  const ask = (questions: unknown[]) =>
+    requestLine(request({ kind: 'question', tool_name: 'AskUserQuestion', tool_input: { questions }, preview: '{"questions":[]}' }));
+  assert.equal(ask([{ question: 'Which database?' }]), 'Which database?');
+  assert.equal(ask([{ question: 'Which database?' }, { question: 'Which checks?' }]), 'Which database? (+1 more)');
+  assert.equal(ask([]), 'Question');
+  assert.equal(requestLine(request({ kind: 'plan', tool_name: 'ExitPlanMode', preview: '{"plan":"# Plan"}' })), 'Plan ready for review');
 });
 
 test('the meta line names the folder, mode, subagent, age and a close expiry', () => {

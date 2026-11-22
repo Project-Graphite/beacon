@@ -1,22 +1,29 @@
 import { useEffect, useState } from 'react';
+import { appInfo, cachedAppInfo, openLogsFolder, previewAttention, setConfig, type AppInfo, type LiveConfig, type UiSettings } from '../beacon';
+import { errorText } from '../lib/format.ts';
 import {
-  appInfo,
-  getLoginStart,
-  openLogsFolder,
-  setConfig,
-  setLoginStart,
-  type AppInfo,
-  type LiveConfig,
-  type UiSettings,
-} from '../beacon';
-import { stallMinutes } from '../lib/settings.ts';
+  ATTENTION_CHOICES,
+  OPACITY_RANGE,
+  PEEK_RANGE,
+  percent,
+  QUIT_CHOICES,
+  REPEAT_CHOICES,
+  SIZE_CHOICES,
+  stallMinutes,
+  START_CHOICES,
+  UI_DEFAULTS,
+  VISIBILITY_CHOICES,
+} from '../lib/settings.ts';
 import { CheckboxField } from './CheckboxField';
 import { HooksSection } from './HooksSection';
 import { OutlineButton } from './OutlineButton';
+import { RadioList } from './RadioList';
+import { SegmentedControl } from './SegmentedControl';
 import { SettingsSection } from './SettingsSection';
+import { Slider } from './Slider';
 import { TextButton } from './TextButton';
 
-type Section = 'behaviour' | 'notifications' | 'shortcut' | 'windows' | 'about';
+type Section = 'overlay' | 'attention' | 'startup' | 'behaviour' | 'shortcut' | 'about';
 
 const FIELD =
   'h-6 rounded-field border border-line bg-paper px-2 font-mono text-secondary text-ink placeholder:text-faint focus:border-muted focus:outline-none';
@@ -29,8 +36,7 @@ interface SettingsViewProps {
 
 export function SettingsView({ config, ui, onChangeUi }: SettingsViewProps) {
   const [editedHotkey, setEditedHotkey] = useState<string | null>(null);
-  const [loginStart, setLoginStartShown] = useState<boolean | null>(null);
-  const [info, setInfo] = useState<AppInfo | null>(null);
+  const [info, setInfo] = useState<AppInfo | null>(cachedAppInfo);
   const [stallText, setStallText] = useState<string | null>(null);
   const [errors, setErrors] = useState<Partial<Record<Section, string | null>>>({});
 
@@ -40,13 +46,14 @@ export function SettingsView({ config, ui, onChangeUi }: SettingsViewProps) {
         setErrors((current) => ({ ...current, [section]: null }));
         done?.(value);
       },
-      (error) => setErrors((current) => ({ ...current, [section]: String(error) })),
+      (error) => setErrors((current) => ({ ...current, [section]: errorText(error) })),
     );
 
+  const change = (section: Section, update: Partial<UiSettings>) => attempt(section, onChangeUi(update));
+  const shown = ui ?? UI_DEFAULTS;
   const hotkey = editedHotkey ?? ui?.hotkey ?? '';
 
   useEffect(() => {
-    attempt('windows', getLoginStart(), setLoginStartShown);
     attempt('about', appInfo(), setInfo);
   }, []);
 
@@ -54,7 +61,7 @@ export function SettingsView({ config, ui, onChangeUi }: SettingsViewProps) {
     if (stallText === null) return;
     const minutes = stallMinutes(stallText);
     if (minutes === null) {
-      setErrors((current) => ({ ...current, behaviour: 'Enter a whole number of minutes from 1 to 240.' }));
+      setErrors((current) => ({ ...current, behaviour: 'Enter a whole number of minutes from 1 to 240' }));
       return;
     }
     attempt('behaviour', setConfig({ stall_minutes: minutes }), () => setStallText(null));
@@ -65,6 +72,99 @@ export function SettingsView({ config, ui, onChangeUi }: SettingsViewProps) {
   return (
     <div>
       <HooksSection />
+      <SettingsSection label="Overlay" error={errors.overlay}>
+        <RadioList
+          label="Show it"
+          choices={VISIBILITY_CHOICES}
+          value={shown.visibility}
+          disabled={!ui}
+          onChange={(visibility) => change('overlay', { visibility })}
+        />
+        <CheckboxField
+          label="Reveal when I hover its screen edge"
+          checked={shown.reveal_on_hover}
+          disabled={!ui || shown.visibility === 'never'}
+          onChange={(reveal_on_hover) => change('overlay', { reveal_on_hover })}
+        />
+        <SegmentedControl
+          label="Size"
+          choices={SIZE_CHOICES}
+          value={shown.size}
+          disabled={!ui}
+          onChange={(size) => change('overlay', { size })}
+        />
+        <Slider
+          label="Opacity when nothing needs you"
+          value={shown.idle_opacity}
+          range={OPACITY_RANGE}
+          format={percent}
+          disabled={!ui}
+          onCommit={(idle_opacity) => change('overlay', { idle_opacity })}
+        />
+      </SettingsSection>
+      <SettingsSection label="Attention" error={errors.attention}>
+        <RadioList
+          label="When a session needs you"
+          choices={ATTENTION_CHOICES}
+          value={shown.attention_style}
+          disabled={!ui}
+          onChange={(attention_style) => change('attention', { attention_style })}
+        />
+        <SegmentedControl
+          label="Remind me"
+          choices={REPEAT_CHOICES}
+          value={shown.attention_repeat_seconds}
+          disabled={!ui}
+          onChange={(attention_repeat_seconds) => change('attention', { attention_repeat_seconds })}
+        />
+        <Slider
+          label="Label stays for"
+          value={shown.peek_seconds}
+          range={PEEK_RANGE}
+          format={(seconds) => `${seconds} s`}
+          disabled={!ui || shown.attention_style !== 'pulse_peek'}
+          onCommit={(peek_seconds) => change('attention', { peek_seconds })}
+        />
+        <CheckboxField
+          label="Show notifications"
+          checked={shown.toasts_enabled}
+          disabled={!ui}
+          onChange={(toasts_enabled) => change('attention', { toasts_enabled })}
+        />
+        <CheckboxField
+          label="Also when a session finishes"
+          checked={shown.toast_on_finished}
+          disabled={!ui?.toasts_enabled}
+          onChange={(toast_on_finished) => change('attention', { toast_on_finished })}
+        />
+        <CheckboxField
+          label="Play a sound when a session needs you or finishes"
+          checked={shown.sounds_enabled}
+          disabled={!ui}
+          onChange={(sounds_enabled) => change('attention', { sounds_enabled })}
+        />
+        <div className="mt-1">
+          <OutlineButton disabled={!ui} onClick={() => attempt('attention', previewAttention())}>
+            Preview
+          </OutlineButton>
+        </div>
+      </SettingsSection>
+      <SettingsSection label="Startup" error={errors.startup}>
+        <RadioList
+          label="Start Beacon"
+          choices={START_CHOICES}
+          value={shown.start_mode}
+          disabled={!ui}
+          onChange={(start_mode) => change('startup', { start_mode })}
+        />
+        <SegmentedControl
+          label="Close it after Claude has been unused for"
+          choices={QUIT_CHOICES}
+          value={shown.quit_when_idle_minutes}
+          disabled={!ui || shown.start_mode !== 'claude'}
+          onChange={(quit_when_idle_minutes) => change('startup', { quit_when_idle_minutes })}
+        />
+      </SettingsSection>
       <SettingsSection label="Behaviour" error={errors.behaviour}>
         <CheckboxField
           label="Answer headless runs from Beacon"
@@ -89,26 +189,6 @@ export function SettingsView({ config, ui, onChangeUi }: SettingsViewProps) {
           <span className="text-secondary text-muted">minutes</span>
         </label>
       </SettingsSection>
-      <SettingsSection label="Notifications" error={errors.notifications}>
-        <CheckboxField
-          label="Show notifications"
-          checked={ui?.toasts_enabled ?? true}
-          disabled={!ui}
-          onChange={(checked) => attempt('notifications', onChangeUi({ toasts_enabled: checked }))}
-        />
-        <CheckboxField
-          label="Also when a session finishes"
-          checked={ui?.toast_on_finished ?? true}
-          disabled={!ui?.toasts_enabled}
-          onChange={(checked) => attempt('notifications', onChangeUi({ toast_on_finished: checked }))}
-        />
-        <CheckboxField
-          label="Play a sound when a session needs you or finishes"
-          checked={ui?.sounds_enabled ?? false}
-          disabled={!ui}
-          onChange={(checked) => attempt('notifications', onChangeUi({ sounds_enabled: checked }))}
-        />
-      </SettingsSection>
       <SettingsSection label="Shortcut" error={errors.shortcut}>
         <div className="flex items-center gap-1.5">
           <input
@@ -126,14 +206,6 @@ export function SettingsView({ config, ui, onChangeUi }: SettingsViewProps) {
             Apply
           </OutlineButton>
         </div>
-      </SettingsSection>
-      <SettingsSection label="Windows" error={errors.windows}>
-        <CheckboxField
-          label="Start Beacon when I sign in"
-          checked={loginStart ?? false}
-          disabled={loginStart === null}
-          onChange={(checked) => attempt('windows', setLoginStart(checked), () => setLoginStartShown(checked))}
-        />
       </SettingsSection>
       <SettingsSection label="About" error={errors.about}>
         <p className="text-ink">

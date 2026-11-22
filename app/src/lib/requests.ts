@@ -1,4 +1,5 @@
 import type { Decision, PendingDecision } from '../beacon';
+import { readQuestions } from './answers.ts';
 import { formatDuration } from './format.ts';
 import { shortenPath } from './paths.ts';
 
@@ -18,6 +19,16 @@ export function requestMeta(request: PendingDecision, now: number): string[] {
   if (request.cwd === null) return rest;
   const used = rest.reduce((total, item) => total + item.length + 3, 0);
   return [shortenPath(request.cwd, Math.max(MIN_PATH_CHARS, META_CHARS - used)), ...rest];
+}
+
+export function requestLine(request: PendingDecision): string {
+  if (request.kind === 'plan') return 'Plan ready for review';
+  if (request.kind === 'question') {
+    const questions = readQuestions(request.tool_input);
+    if (questions.length > 1) return `${questions[0].question} (+${questions.length - 1} more)`;
+    return questions[0]?.question ?? 'Question';
+  }
+  return request.preview;
 }
 
 export function decisionMark(decision: Decision): 'check' | 'cross' {
