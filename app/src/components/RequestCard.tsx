@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { decide, type Decision, type PendingDecision } from '../beacon';
+import { useNow } from '../hooks/useNow.ts';
 import { errorText } from '../lib/format.ts';
 import { destructiveReason } from '../lib/destructive.ts';
 import { requestId } from '../lib/queue.ts';
@@ -14,7 +15,6 @@ import { ToolRequestBody } from './ToolRequestBody';
 
 interface RequestCardProps {
   request: PendingDecision;
-  now: number;
   marked: boolean;
   currentId: number | null;
   keys: Map<number, (key: string) => void> | null;
@@ -23,7 +23,8 @@ interface RequestCardProps {
 
 const unchanged = (text: string) => text;
 
-export function RequestCard({ request, now, marked, currentId, keys, onJump }: RequestCardProps) {
+export function RequestCard({ request, marked, currentId, keys, onJump }: RequestCardProps) {
+  const now = useNow(true);
   const [outcome, setOutcome] = useState<'check' | 'cross' | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [unmasked, setUnmasked] = useState(false);

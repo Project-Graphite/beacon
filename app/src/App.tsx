@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { flushSync } from 'react-dom';
 import {
   acknowledge,
@@ -51,6 +51,7 @@ import {
   stepRequest,
   type ResolutionNotice,
 } from './lib/queue.ts';
+import { reuseEqual } from './lib/reuse.ts';
 import {
   canAcknowledge,
   canSnooze,
@@ -59,7 +60,6 @@ import {
   groupSessions,
   sessionTabs,
   stepTab,
-  turnRunning,
 } from './lib/sessions.ts';
 import { flashRow } from './motion.ts';
 
@@ -67,6 +67,7 @@ const NOTICE_MS = 4000;
 const SCROLL_IDLE_MS = 800;
 const PRELOAD_WAIT_MS = 150;
 const DETAIL_PREFIX = 'detail:';
+const NO_SESSIONS: Session[] = [];
 
 const whenLoaded = (loading: Promise<unknown>) =>
   Promise.race([loading.catch(() => null), new Promise((ready) => window.setTimeout(ready, PRELOAD_WAIT_MS))]);
@@ -80,7 +81,6 @@ export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(initialSnapshot);
   const [opened, setOpened] = useState<Opened | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  const [now, setNow] = useState(Date.now);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [endedOpen, setEndedOpen] = useState(false);
@@ -131,8 +131,15 @@ export function App() {
         pendingIds.current = next.pending.map((request) => request.id);
         if (fresh.length > 0) showNotices(fresh);
       }
-      setSnapshot(next);
-      setNow(Date.now());
+      setSnapshot((previous) =>
+        previous && next
+          ? {
+              ...next,
+              sessions: reuseEqual(previous.sessions, next.sessions, (session) => session.session_id),
+              pending: reuseEqual(previous.pending, next.pending, (request) => request.id),
+            }
+          : next,
+      );
     };
     const open = ({ opened: next, snapshot: latest, ui: settings }: OpenedEvent) => {
       receive(latest);
@@ -186,11 +193,12 @@ export function App() {
     };
   }, []);
 
-  const sessions = snapshot?.sessions ?? [];
-  const { groups, ended: recentlyEnded } = groupSessions(sessions);
-  const ended = (endedList ?? []).filter((session) => !session.dismissed);
+  const sessions = snapshot?.sessions ?? NO_SESSIONS;
+  const { groups, ended: recentlyEnded } = useMemo(() => groupSessions(sessions), [sessions]);
+  const ended = useMemo(() => (endedList ?? NO_SESSIONS).filter((session) => !session.dismissed), [endedList]);
+  const listed = useMemo(() => sessions.filter((session) => !session.dismissed), [sessions]);
   const endedKey = `${snapshot?.ended_count ?? 0}:${recentlyEnded.map((session) => session.session_id)}`;
-  const crossed = crossedOff(sessions);
+  const crossed = useMemo(() => crossedOff(sessions), [sessions]);
   const listOrder = [...groups.flatMap((group) => group.sessions), ...ended];
   const visible = [...groups.flatMap((group) => group.sessions), ...(endedOpen ? ended : [])];
   const findSession = (sessionId: string | null) =>
@@ -198,7 +206,6 @@ export function App() {
   const openSession = findSession(openId);
   const queue = requestQueue(snapshot?.pending ?? []);
   const current = currentRequest(queue, chosenRequestId);
-  const ticking = queue.length > 0 || sessions.some((session) => session.state !== 'ended' && turnRunning(session));
   const pendingOf = (sessionId: string) => queue.filter((request) => request.session_id === sessionId);
   const view = settingsOpen
     ? { key: 'settings', depth: 2 }
@@ -233,12 +240,6 @@ export function App() {
   useEffect(() => {
     if (endedOpen) getEnded().then(setEndedList, fail);
   }, [endedOpen, endedKey, fail]);
-
-  useEffect(() => {
-    if (!ticking) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [ticking]);
 
   const firstVisibleId = visible[0]?.session_id ?? null;
   useEffect(() => {
@@ -306,6 +307,14 @@ export function App() {
     flashRow(sessionId);
     run(jump(sessionId).then((outcome) => reportJump(sessionId, jumpReport(outcome))));
   };
+
+  const rowActions = useRef({ openDetail, jumpTo, crossOff });
+  useLayoutEffect(() => {
+    rowActions.current = { openDetail, jumpTo, crossOff };
+  });
+  const openRow = useCallback((sessionId: string) => rowActions.current.openDetail(sessionId), []);
+  const jumpRow = useCallback((sessionId: string) => rowActions.current.jumpTo(sessionId), []);
+  const crossOffRow = useCallback((sessionId: string) => rowActions.current.crossOff(sessionId), []);
 
   const changeUi = (change: Partial<UiSettings>) =>
     setUiSettings(change).then((saved) => {
@@ -427,7 +436,6 @@ export function App() {
             currentId={current?.id ?? null}
             queueSize={queue.length}
             keys={keys}
-            now={now}
             globalSnoozedUntil={snapshot?.snoozed_until_ms ?? null}
             moreOpen={moreOpen.includes(session.session_id)}
             onToggleMore={() => setMoreOpen((open) => toggleOpen(open, session.session_id))}
@@ -450,12 +458,11 @@ export function App() {
         currentId={current?.id ?? null}
         queueSize={queue.length}
         keys={crossedOffRow ? null : keys}
-        now={now}
         selected={session.session_id === selectedId}
         crossedOff={crossedOffRow}
-        onOpen={() => openDetail(session.session_id)}
-        onJump={() => jumpTo(session.session_id)}
-        onCrossOff={() => crossOff(session.session_id)}
+        onOpen={openRow}
+        onJump={jumpRow}
+        onCrossOff={crossOffRow}
       />
     );
     return (
@@ -490,7 +497,7 @@ export function App() {
         className={`flex h-screen flex-col overflow-hidden rounded-panel border border-line bg-paper font-sans text-body text-ink ${opened === null ? 'opacity-0' : closing ? 'animate-panel-out' : 'animate-panel-in'}`}
       >
         <Header
-          sessions={sessions.filter((session) => !session.dismissed)}
+          sessions={listed}
           accountUsage={snapshot?.account_usage ?? null}
           snoozedUntil={snapshot?.snoozed_until_ms ?? null}
           queue={current && queue.length > 1 ? { position: queue.indexOf(current) + 1, total: queue.length } : null}

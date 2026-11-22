@@ -34,7 +34,6 @@ interface SessionViewProps {
   currentId: number | null;
   queueSize: number;
   keys: Map<number, (key: string) => void> | null;
-  now: number;
   globalSnoozedUntil: number | null;
   moreOpen: boolean;
   onToggleMore: () => void;
@@ -54,7 +53,6 @@ export function SessionView({
   currentId,
   queueSize,
   keys,
-  now,
   globalSnoozedUntil,
   moreOpen,
   onToggleMore,
@@ -158,7 +156,6 @@ export function SessionView({
           <RequestCard
             key={request.id}
             request={request}
-            now={now}
             marked={queueSize > 1 && request.id === currentId}
             currentId={currentId}
             keys={keys}

@@ -1,12 +1,14 @@
-import type { MouseEvent } from 'react';
+import { memo, type MouseEvent } from 'react';
 import type { PendingDecision, Session } from '../beacon';
 import type { ResolutionNotice } from '../lib/queue.ts';
-import { cardId, needsInput, rowLine, sessionTitle, taskProgress, TONE_CLASSES, turnTime } from '../lib/sessions.ts';
+import { sameProps } from '../lib/reuse.ts';
+import { cardId, needsInput, rowLine, sessionTitle, taskProgress, TONE_CLASSES } from '../lib/sessions.ts';
 import { Avatar } from './Avatar';
 import { ProgressBar } from './ProgressBar';
 import { RequestRow } from './RequestRow';
 import { SessionActions } from './SessionActions';
 import { StepLabel } from './StepLabel';
+import { TurnTime } from './TurnTime';
 
 interface SessionRowProps {
   session: Session;
@@ -15,22 +17,20 @@ interface SessionRowProps {
   currentId: number | null;
   queueSize: number;
   keys: Map<number, (key: string) => void> | null;
-  now: number;
   selected: boolean;
   crossedOff: boolean;
-  onOpen: () => Promise<void>;
-  onJump: () => void;
-  onCrossOff: () => void;
+  onOpen: (sessionId: string) => Promise<void>;
+  onJump: (sessionId: string) => void;
+  onCrossOff: (sessionId: string) => void;
 }
 
-export function SessionRow({
+export const SessionRow = memo(function SessionRow({
   session,
   pending,
   notices,
   currentId,
   queueSize,
   keys,
-  now,
   selected,
   crossedOff,
   onOpen,
@@ -38,10 +38,10 @@ export function SessionRow({
   onCrossOff,
 }: SessionRowProps) {
   const line = rowLine(session);
-  const time = turnTime(session, now);
   const alert = needsInput(session);
+  const openThis = () => onOpen(session.session_id);
   const open = (event: MouseEvent) => {
-    if (!crossedOff && !(event.target instanceof Element && event.target.closest('button'))) onOpen();
+    if (!crossedOff && !(event.target instanceof Element && event.target.closest('button'))) void openThis();
   };
 
   return (
@@ -61,7 +61,7 @@ export function SessionRow({
           <div className="min-w-0 flex-1">
             <p className="flex items-baseline gap-2">
               <span className="min-w-0 flex-1 truncate font-semibold text-ink">{sessionTitle(session)}</span>
-              {time && <span className="shrink-0 font-mono text-micro text-faint tabular-nums">{time}</span>}
+              <TurnTime session={session} />
             </p>
             <p className={`truncate text-micro ${line.kind === 'state' ? TONE_CLASSES[line.tone] : 'text-muted'}`}>
               {line.kind === 'tasks' ? (
@@ -76,7 +76,11 @@ export function SessionRow({
             </p>
           </div>
           {!crossedOff && (
-            <SessionActions requestPending={pending.length > 0} onJump={onJump} onCrossOff={onCrossOff} />
+            <SessionActions
+              requestPending={pending.length > 0}
+              onJump={() => onJump(session.session_id)}
+              onCrossOff={() => onCrossOff(session.session_id)}
+            />
           )}
           {session.tasks_created > 0 && (
             <ProgressBar fraction={taskProgress(session)} alert={alert} className="absolute inset-x-0 bottom-0 h-0.5" />
@@ -89,7 +93,7 @@ export function SessionRow({
             marked={queueSize > 1 && request.id === currentId}
             currentId={currentId}
             keys={keys}
-            onOpen={onOpen}
+            onOpen={openThis}
           />
         ))}
         {notices.map((notice) => (
@@ -100,4 +104,4 @@ export function SessionRow({
       </div>
     </li>
   );
-}
+}, sameProps);
