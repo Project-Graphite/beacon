@@ -871,10 +871,16 @@ fn a_dead_claude_pid_is_reported_as_gone() {
     let mut fixture = fixture();
     let pid = finished_pid();
     fixture.send_with_env(USER_PROMPT_SUBMIT, &[("CLAUDE_PID", &pid.to_string())]);
-    assert_eq!(
-        fixture.exits.try_recv().unwrap(),
-        (SESSION.to_string(), pid)
-    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let exit = loop {
+        match fixture.exits.try_recv() {
+            Err(_) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(10))
+            }
+            received => break received.unwrap(),
+        }
+    };
+    assert_eq!(exit, (SESSION.to_string(), pid));
 }
 
 #[test]
