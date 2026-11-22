@@ -2,6 +2,7 @@ use beacon_protocol::{DECISION_TIMEOUT_SECS, STOP_WAITER_EVENT};
 use serde::{Deserialize, Serialize};
 use serde_json::ser::{PrettyFormatter, Serializer};
 use serde_json::{Map, Value, json};
+use std::collections::BTreeMap;
 
 pub const HELPER_FILE_NAME: &str = "beacon-hook.exe";
 const BOM: char = '\u{feff}';
@@ -168,6 +169,34 @@ fn beacon_handlers(groups: &Value) -> impl Iterator<Item = &Value> {
         .filter_map(|group| group.get("hooks")?.as_array())
         .flatten()
         .filter(|handler| is_beacon_handler(handler))
+}
+
+pub fn beacon_groups(settings: &Map<String, Value>) -> BTreeMap<&str, Vec<&Value>> {
+    settings
+        .get("hooks")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .map(|(event, groups)| {
+            (
+                event.as_str(),
+                groups
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|group| {
+                        group
+                            .get("hooks")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .any(is_beacon_handler)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .filter(|(_, groups)| !groups.is_empty())
+        .collect()
 }
 
 pub fn has_beacon(settings: &Map<String, Value>) -> bool {

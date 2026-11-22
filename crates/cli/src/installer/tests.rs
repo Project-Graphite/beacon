@@ -165,6 +165,40 @@ fn uninstall_after_a_user_edit_keeps_the_edit_and_removes_only_beacon() {
 }
 
 #[test]
+fn a_hook_appended_after_beacon_leaves_install_idle_and_survives_uninstall() {
+    let case = case("foreign-after-beacon");
+    case.install();
+    let appended = case.golden("foreign-after-beacon");
+    std::fs::write(&case.paths.settings, &appended).unwrap();
+    let modified = || {
+        std::fs::metadata(&case.paths.settings)
+            .unwrap()
+            .modified()
+            .unwrap()
+    };
+    let before = modified();
+    assert!(
+        install(&case.paths, false)
+            .unwrap()
+            .contains("No change to the settings file.")
+    );
+    case.install();
+    assert_eq!(case.settings(), Some(appended));
+    assert_eq!(modified(), before);
+    case.uninstall();
+    let (settings, _) = settings::parse(&case.settings().unwrap()).unwrap();
+    assert_eq!(
+        Value::Object(settings),
+        serde_json::json!({"hooks": {"SessionStart": [{"hooks": [{
+            "type": "command",
+            "command": "pwsh.exe",
+            "args": ["-NoProfile", "-File", "C:\\Users\\example\\scripts\\Sync-Accounts.ps1"],
+            "async": true
+        }]}]}})
+    );
+}
+
+#[test]
 fn invalid_json_and_non_objects_are_refused_and_left_untouched() {
     for name in ["invalid", "array"] {
         let case = case(name);

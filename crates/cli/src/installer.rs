@@ -85,10 +85,16 @@ pub fn install(paths: &Paths, apply: bool) -> Result<String, String> {
         )
     })?;
     let hooks_disabled = settings.get("disableAllHooks") == Some(&Value::Bool(true));
+    let original = settings.clone();
     settings::strip_beacon(&mut settings, |_| true);
     let created =
         settings::add_beacon(&mut settings, helper_text).context(paths.settings.display())?;
-    let installed = format.write(&settings);
+    let installed = match &current {
+        Some(bytes) if settings::beacon_groups(&original) == settings::beacon_groups(&settings) => {
+            bytes.clone()
+        }
+        _ => format.write(&settings),
+    };
     let mut report = String::new();
     let _ = writeln!(
         report,
@@ -119,10 +125,8 @@ pub fn install(paths: &Paths, apply: bool) -> Result<String, String> {
         return Ok(report);
     }
     let stamp = backup_stamp();
-    let previous = read_record(paths)?.filter(|record| {
-        same_path(&record.settings_path, &paths.settings)
-            && std::fs::read(&record.installed_copy_path).ok() == current
-    });
+    let previous =
+        read_record(paths)?.filter(|record| same_path(&record.settings_path, &paths.settings));
     std::fs::create_dir_all(paths.bin()).context("cannot create the helper directory")?;
     remove_retired_helpers(&paths.bin());
     std::fs::create_dir_all(paths.backups()).context("cannot create the backups directory")?;
@@ -137,12 +141,13 @@ pub fn install(paths: &Paths, apply: bool) -> Result<String, String> {
             .context(format_args!("cannot replace {}", helper.display()))?;
     }
     let (existed_before, backup_path, created) = match previous {
-        Some(previous) => (
+        Some(previous) if std::fs::read(&previous.installed_copy_path).ok() == current => (
             previous.existed_before,
             previous.backup_path,
             previous.created,
         ),
-        None => {
+        Some(_) if settings::has_beacon(&original) => (true, None, created),
+        _ => {
             let backup_path = match &current {
                 Some(bytes) => {
                     let path = paths.backups().join(format!("settings-{stamp}.json"));
@@ -154,7 +159,9 @@ pub fn install(paths: &Paths, apply: bool) -> Result<String, String> {
             (current.is_some(), backup_path, created)
         }
     };
-    write_atomic(&paths.settings, &installed)?;
+    if current.as_ref() != Some(&installed) {
+        write_atomic(&paths.settings, &installed)?;
+    }
     let installed_copy_path = paths
         .backups()
         .join(format!("settings-{stamp}.installed.json"));
