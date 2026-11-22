@@ -31,7 +31,8 @@ the development server instead of the bundled front end.
 
 Start `beacon-app.exe`. It hosts the core itself; if a `beacon daemon` is already running for the
 same Beacon home, it connects to that one instead. `--open-panel` opens the panel at start and
-`--tray-only` starts without the edge tab or pill.
+`--tray-only` starts without the edge tab or pill. A second launch opens the running instance's
+panel, unless it carries `--background`, which the hook passes when it starts Beacon.
 
 ## Install the hooks
 
@@ -53,9 +54,8 @@ Running sessions pick up hook changes without a restart.
 ### The edge tab
 
 The edge tab is the default native form: a strip 4 px thick and 72 px long, flush against a screen
-edge and coloured by the overall state. When a session starts needing you or finishes, the tab
-pulses in bursts until the panel is next opened. Hovering the tab opens the panel against that edge
-and a click keeps it open. A display's default edge is the first one that touches no other display.
+edge and coloured by the overall state. Hovering the tab opens the panel against that edge and a
+click keeps it open. A display's default edge is the first one that touches no other display.
 
 ### The pill
 
@@ -75,6 +75,23 @@ need you. Each state has its own shape as well as colour:
 The pill hides while a fullscreen window is in front on its monitor, snaps to edges and corners,
 and remembers its position per monitor layout.
 
+### Visibility and attention
+
+The edge tab and the pill are the overlay. `Show it` under `Overlay` in the settings view chooses
+when it is on screen: `Always`, `While Claude is working or needs you` (the default), `Only when
+Claude needs you` or `Never (tray icon only)`. It fades out 5 s after its condition stops holding.
+While it is hidden, hovering its screen edge reveals it (`Reveal when I hover its screen edge`, on
+by default). `Size` (`Small`, `Medium` or `Large`) and `Opacity when nothing needs you` (20% to
+100%, 60% by default) set how it looks.
+
+When a session starts needing you, the overlay pops, pulses once and slides out a short peek label
+naming the session and what it needs. The label stays for `Label stays for` (2 to 10 s, 4 s by
+default), never takes focus, and opens the panel when clicked. The session whose window is in front
+gets no peek. Until the panel is opened, a reminder pulse repeats at the `Remind me` interval:
+`Off`, 30 s, 1, 2 or 5 minutes (1 minute by default). `When a session needs you` picks the style:
+`Change colour only`, `Pulse` or `Pulse and show a short label` (the default). `Preview` plays the
+current choice.
+
 ### The panel
 
 The panel has two modes:
@@ -85,7 +102,7 @@ The panel has two modes:
 The panel never opens by itself and never stays open. It closes on a press outside it, when the
 cursor leaves it (hover), on Escape in the list, or when a sticky panel loses focus.
 
-The panel is compact: each session is a 40 px row, with a second row carrying `Allow` and `Deny`
+The panel is compact: each session is a 36 px row, with a second row carrying `Allow` and `Deny`
 when it is waiting. A row starts with the session's avatar, whose colour is fixed per session and
 whose face follows its state, with the state mark as a badge. Next come the session's title, or the
 project name when it has none, and a second line with task progress such as `3/7` and the current
@@ -95,8 +112,9 @@ Sessions are grouped by state.
 
 Opening a row, with a click or Enter, replaces the list with the session's detail view: avatar tabs
 for the other sessions, the header, any pending request, a `Terminal` block with the command running
-now, the `Plan` checklist, the `Activity` steps with their status and duration, and then the prompt
-box, the last message and usage.
+now, the `Plan` checklist, the `Activity` steps with their status and duration (the most recent 6,
+with `Show earlier (N)` for the rest), the prompt box, and then the last message and usage under
+`More`.
 
 In the list, arrow keys select a session and Enter opens it; `a` acknowledges it, `s` snoozes it for
 5 minutes, `j` jumps to its window, `x` crosses it off and `/` opens its prompt box. In the detail
@@ -149,13 +167,14 @@ The prompt box in a session's detail view sends text by one of three paths:
 | Idle elsewhere | The text goes to the clipboard and the window is raised |
 
 A queued prompt shows `queued`, `delivered`, `acknowledged` or `failed`, and survives a restart.
+A prompt delivered at turn end also appears in the session as a `Beacon follow-up: ...` line.
 
 ### Snooze and acknowledge
 
 Snooze silences one session, or all of them from the bell in the header or the tray, for 5 or 15
-minutes: no pulse on the tab, no count on the pill and no notification. Acknowledge clears a `done`,
-`error` or `stalled` session. Bringing a finished session's window to the front acknowledges it
-when that window holds exactly one session.
+minutes: no pulse or peek on the overlay, no count on the pill and no notification. Acknowledge
+clears a `done`, `error` or `stalled` session. Bringing a finished session's window to the front
+acknowledges it when that window holds exactly one session.
 
 ### Notifications
 
@@ -163,16 +182,22 @@ Windows notifications announce sessions that start needing you or finish. Sessio
 within 2 seconds of each other share one notification, and the session whose window is in front
 gets none. Both kinds can be turned off in the settings view.
 
-Sounds are off by default. The speaker button in the panel header, or `Play a sound when a session
-needs you or finishes` under `Notifications` in the settings view, turns them on; they are Windows'
-own notification sounds, played when a session starts needing you or finishes.
+Sounds are off by default. `Sounds` in the bell menu in the panel header, or `Play a sound when a
+session needs you or finishes` under `Attention` in the settings view, turns them on; they are
+Windows' own notification sounds, played when a session starts needing you or finishes.
 
 ### Settings
 
 The gear icon in the panel header opens the settings view; Escape returns to the sessions. It holds
-the hooks status with install, repair and uninstall; whether headless runs are answered from
-Beacon; the stall time; notifications and sounds; the panel shortcut; start at sign-in; and the
-version, the Beacon home and its logs folder.
+the hooks status with install, repair and uninstall; the overlay and attention choices, with
+notifications and sounds; when Beacon starts; whether headless runs are answered from Beacon; the
+stall time; the panel shortcut; and the version, the Beacon home and its logs folder.
+
+`Start Beacon` is `When Claude is used` (the default), `When I sign in to Windows` or `Only when I
+open it`. When Claude is used, the hook starts Beacon in the background when an attended session
+starts or sends a prompt and Beacon is not running; headless `claude -p` runs never start it. In
+that mode `Close it after Claude has been unused for` quits Beacon after 5 minutes, 15 minutes (the
+default) or 1 hour without Claude in use, or never.
 
 ### Tray menu
 
@@ -245,6 +270,9 @@ built but unverified.
 - Several sessions in one editor window cannot be told apart, so "no notification for the focused
   session" and "focus acknowledges a finished session" apply only when one session maps to the
   window in front.
+- The panel is an owned popup of the overlay window, so it has no taskbar button. A program on the
+  development machine re-centres new unowned windows on the primary display and moved the panel
+  there; owned popups are left alone. That program was not identified.
 
 ## Security and privacy
 
@@ -265,15 +293,15 @@ What is stored where:
 
 | Place | Contents |
 |---|---|
-| `%LOCALAPPDATA%\Beacon` (or `BEACON_HOME`) | `endpoint` (pipe name and token, removed on a clean stop), `state.json` (sessions, snoozes, queued prompts), `config.json`, `ui.json` (style, tab placement, pill positions, displays, shortcut, notification and sound choices), `install.json`, `bin\beacon-hook.exe`, `backups\` (copies of the settings file), `logs\core.log`, `icon.png` |
+| `%LOCALAPPDATA%\Beacon` (or `BEACON_HOME`) | `endpoint` (pipe name and token, removed on a clean stop), `state.json` (sessions, snoozes, queued prompts), `config.json`, `ui.json` (style, tab placement, pill positions, displays, shortcut, notification and sound choices, overlay visibility, reveal, size and opacity, attention style, reminder interval and label time, start mode and idle close time), `autostart` (the app's path, only while `Start Beacon` is `When Claude is used`), `launching` (written when the hook starts the app, so it starts it at most once every 20 s), `install.json`, `bin\beacon-hook.exe`, `backups\` (copies of the settings file), `logs\core.log`, `icon.png` |
 | Claude Code `settings.json` | The Beacon hook handlers |
-| `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `Beacon` | Only while `Start Beacon when I sign in` is on |
+| `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `Beacon` | Only while `Start Beacon` is `When I sign in to Windows` |
 | `HKCU\Software\Classes\AppUserModelId\com.project-graphite.beacon` | The name and icon Windows shows on Beacon's notifications |
 
 ## Uninstall
 
 1. In the settings view choose `Uninstall` and then `Apply`, or run `beacon uninstall --yes`.
-2. Turn off `Start Beacon when I sign in`, then choose `Quit` in the tray menu.
+2. Set `Start Beacon` to `Only when I open it`, then choose `Quit` in the tray menu.
 3. Delete the Beacon home folder and the binaries.
 4. Optionally remove the notification identity:
    `reg delete HKCU\Software\Classes\AppUserModelId\com.project-graphite.beacon /f`.

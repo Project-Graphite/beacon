@@ -3,6 +3,34 @@
 Decisions taken while building Beacon, newest phase first. Evidence for the phase 0 entries is in
 [SPIKES.md](SPIKES.md). An entry marked **needs Amr** is a proposal until he answers.
 
+## Overlay options, peek and starting with Claude (2026-11-22)
+
+Changed on Amr's feedback: the overlay being on screen all the time was annoying, attention should
+be noticeable without being sticky, and Beacon should start with Claude rather than with Windows.
+
+- **The overlay is not always on screen.** `visibility` is `always`, `active` (a session is working
+  or needs the user; the default), `attention` or `never`. It fades out 5 s after its condition
+  stops holding. While hidden, a 2 px strip on its screen edge reveals it on hover, so it stays
+  within reach.
+- **Attention is a short label, not a held-open panel.** When a session starts needing the user the
+  overlay pops, bursts once and slides out a "peek" label naming the session and what it needs, for
+  a few seconds. A reminder burst repeats at a chosen interval until the panel is opened. Style,
+  interval, label time, size and idle opacity are settings, with a preview. This replaces the burst
+  schedule in the section below.
+- **Beacon starts when Claude is used.** With `start_mode: claude` the app leaves a marker file, and
+  the hook starts the app when an attended session starts or sends a prompt and the core is not
+  reachable. Headless runs never start it. The app quits after Claude has been unused for a chosen
+  time. The check costs nothing while the core is running: the hook measured 28 ms after against
+  31 ms before.
+- **The panel is an owned popup.** Some program on this machine re-centres new unowned application
+  windows on the primary display: the panel was created in place and moved by a cross-thread
+  `SetWindowPos` from outside Beacon about 190 ms later. Owned popups are left alone, so the panel
+  is now owned by the overlay window. Which program does it was not identified.
+- **A prompt delivered at turn end is also shown in the session** through the hook's
+  `systemMessage`, as "Beacon follow-up: ...". A hook cannot add a real user message.
+- Streamlining: one bell menu for snooze and sounds, 36 px rows, the last message and usage under a
+  "More" disclosure, and a view's data is loaded before the view slides in so nothing pops in.
+
 ## Edge tab, compact panel and motion (2026-11-20)
 
 Changed on Amr's feedback after using v1.
