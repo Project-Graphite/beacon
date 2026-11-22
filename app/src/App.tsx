@@ -57,6 +57,7 @@ import {
   canSnooze,
   cardId,
   crossedOff,
+  findSession,
   groupSessions,
   sessionTabs,
   stepTab,
@@ -201,9 +202,7 @@ export function App() {
   const crossed = useMemo(() => crossedOff(sessions), [sessions]);
   const listOrder = [...groups.flatMap((group) => group.sessions), ...ended];
   const visible = [...groups.flatMap((group) => group.sessions), ...(endedOpen ? ended : [])];
-  const findSession = (sessionId: string | null) =>
-    ended.find((session) => session.session_id === sessionId) ?? sessions.find((session) => session.session_id === sessionId);
-  const openSession = findSession(openId);
+  const openSession = findSession(sessions, ended, openId);
   const queue = requestQueue(snapshot?.pending ?? []);
   const current = currentRequest(queue, chosenRequestId);
   const pendingOf = (sessionId: string) => queue.filter((request) => request.session_id === sessionId);
@@ -425,7 +424,7 @@ export function App() {
         />
       );
     if (key.startsWith(DETAIL_PREFIX)) {
-      const session = findSession(key.slice(DETAIL_PREFIX.length));
+      const session = findSession(sessions, ended, key.slice(DETAIL_PREFIX.length));
       return (
         session && (
           <SessionView

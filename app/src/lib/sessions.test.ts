@@ -5,6 +5,7 @@ import {
   canAcknowledge,
   canSnooze,
   crossedOff,
+  findSession,
   groupSessions,
   metaItems,
   needsInput,
@@ -200,6 +201,18 @@ test('tabs keep list order, skip ended and crossed off sessions but keep the ope
   assert.equal(stepTab(tabs, 'b', -1), 'a');
   assert.equal(stepTab([listOrder[1]], 'b', 1), 'b');
   assert.equal(stepTab([], 'b', 1), null);
+});
+
+test('a session is found live first, then in the ended list, then as the snapshot ended copy', () => {
+  const resumed = session({ session_id: 'a', state: 'working', last_event_ms: 9 });
+  const fetchedEnded = session({ session_id: 'a', state: 'ended', last_event_ms: 4 });
+  const snapshotEnded = session({ session_id: 'b', state: 'ended', last_event_ms: 3 });
+  const listedEnded = session({ session_id: 'b', state: 'ended', last_event_ms: 3, display_title: 'listed' });
+  assert.equal(findSession([resumed], [fetchedEnded], 'a'), resumed);
+  assert.equal(findSession([snapshotEnded], [listedEnded], 'b'), listedEnded);
+  assert.equal(findSession([snapshotEnded], [], 'b'), snapshotEnded);
+  assert.equal(findSession([resumed], [fetchedEnded], 'c'), undefined);
+  assert.equal(findSession([resumed], [], null), undefined);
 });
 
 test('surfaces map entrypoints to labels and icons', () => {

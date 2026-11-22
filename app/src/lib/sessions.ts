@@ -131,6 +131,13 @@ export function taskProgress(session: Session): number {
   return session.tasks_created === 0 ? 0 : session.tasks_completed / session.tasks_created;
 }
 
+export function findSession(sessions: Session[], ended: Session[], sessionId: string | null): Session | undefined {
+  const matches = (session: Session) => session.session_id === sessionId;
+  return (
+    sessions.find((session) => matches(session) && session.state !== 'ended') ?? ended.find(matches) ?? sessions.find(matches)
+  );
+}
+
 export function sessionTabs(listOrder: Session[], currentId: string): Session[] {
   return listOrder.filter(
     (session) => session.session_id === currentId || (session.state !== 'ended' && !session.dismissed),
