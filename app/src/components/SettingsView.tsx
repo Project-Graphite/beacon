@@ -39,7 +39,6 @@ import {
   START_CHOICES,
   startupSummary,
   STYLE_CHOICES,
-  UI_DEFAULTS,
   VISIBILITY_CHOICES,
 } from '../lib/settings.ts';
 import { HooksSection } from './HooksSection';
@@ -59,7 +58,7 @@ const FIELD =
 
 interface SettingsViewProps {
   config: LiveConfig | null;
-  ui: UiSettings | null;
+  ui: UiSettings;
   openParts: SettingsPart[];
   onToggle: (part: SettingsPart) => void;
   onChangeUi: (change: Partial<UiSettings>) => Promise<UiSettings>;
@@ -83,8 +82,7 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
 
   const change = (part: SettingsPart, update: Partial<UiSettings>) => attempt(part, onChangeUi(update));
   const changeOverlay = (work: Promise<void>) => attempt('overlay', work.then(getOverlay), setOverlay);
-  const shown = ui ?? UI_DEFAULTS;
-  const hotkey = editedHotkey ?? ui?.hotkey ?? '';
+  const hotkey = editedHotkey ?? ui.hotkey;
   const section = (part: SettingsPart) => ({ open: openParts.includes(part), onToggle: () => onToggle(part), error: errors[part] });
 
   useEffect(() => {
@@ -110,7 +108,7 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
 
   return (
     <div>
-      <SettingsSection label="Overlay" summary={overlaySummary(shown, overlay)} {...section('overlay')}>
+      <SettingsSection label="Overlay" summary={overlaySummary(ui, overlay)} {...section('overlay')}>
         <SettingsRow label="Style" help="The edge tab is a thin strip on a screen edge; the pill floats near a corner." disabled={!overlay}>
           {(field) => (
             <SegmentedControl
@@ -161,14 +159,13 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
             />
           )}
         </SettingsRow>
-        <SettingsRow label="Show it" help="When the overlay is on screen." disabled={!ui}>
+        <SettingsRow label="Show it" help="When the overlay is on screen.">
           {(field) => (
             <Select
               field={field}
               choices={VISIBILITY_CHOICES}
-              text={labelOf(VISIBILITY_CHOICES, shown.visibility)}
-              selected={(visibility) => visibility === shown.visibility}
-              disabled={!ui}
+              text={labelOf(VISIBILITY_CHOICES, ui.visibility)}
+              selected={(visibility) => visibility === ui.visibility}
               onChoose={(visibility) => change('overlay', { visibility })}
             />
           )}
@@ -176,36 +173,34 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
         <SettingsRow
           label="Reveal on edge hover"
           help="While the overlay is hidden, hovering its screen edge brings it back."
-          disabled={!ui || shown.visibility === 'never'}
+          disabled={ui.visibility === 'never'}
         >
           {(field) => (
             <Switch
               field={field}
-              checked={shown.reveal_on_hover}
-              disabled={!ui || shown.visibility === 'never'}
+              checked={ui.reveal_on_hover}
+              disabled={ui.visibility === 'never'}
               onChange={(reveal_on_hover) => change('overlay', { reveal_on_hover })}
             />
           )}
         </SettingsRow>
-        <SettingsRow label="Size" help="Size of the edge tab or the pill." disabled={!ui}>
+        <SettingsRow label="Size" help="Size of the edge tab or the pill.">
           {(field) => (
             <SegmentedControl
               field={field}
               choices={SIZE_CHOICES}
-              value={shown.size}
-              disabled={!ui}
+              value={ui.size}
               onChange={(size) => change('overlay', { size })}
             />
           )}
         </SettingsRow>
-        <SettingsRow label="Idle opacity" help="Opacity of the overlay while nothing needs you." disabled={!ui}>
+        <SettingsRow label="Idle opacity" help="Opacity of the overlay while nothing needs you.">
           {(field) => (
             <Slider
               field={field}
-              value={shown.idle_opacity}
+              value={ui.idle_opacity}
               range={OPACITY_RANGE}
               format={percent}
-              disabled={!ui}
               onCommit={(idle_opacity) => change('overlay', { idle_opacity })}
             />
           )}
@@ -213,38 +208,34 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
         <SettingsRow
           label="Pin while Claude is active"
           help="While Claude is working or needs you, the panel opens by itself without taking focus and stays open until 5 s after Claude is done."
-          disabled={!ui}
         >
           {(field) => (
             <Switch
               field={field}
-              checked={shown.pin_while_active}
-              disabled={!ui}
+              checked={ui.pin_while_active}
               onChange={(pin_while_active) => change('overlay', { pin_while_active })}
             />
           )}
         </SettingsRow>
       </SettingsSection>
-      <SettingsSection label="Attention" summary={attentionSummary(shown)} {...section('attention')}>
-        <SettingsRow label="Style" help="How the overlay shows that a session needs you." disabled={!ui}>
+      <SettingsSection label="Attention" summary={attentionSummary(ui)} {...section('attention')}>
+        <SettingsRow label="Style" help="How the overlay shows that a session needs you.">
           {(field) => (
             <SegmentedControl
               field={field}
               choices={ATTENTION_CHOICES}
-              value={shown.attention_style}
-              disabled={!ui}
+              value={ui.attention_style}
               onChange={(attention_style) => change('attention', { attention_style })}
             />
           )}
         </SettingsRow>
-        <SettingsRow label="Remind me" help="How often the pulse repeats until you open the panel." disabled={!ui}>
+        <SettingsRow label="Remind me" help="How often the pulse repeats until you open the panel.">
           {(field) => (
             <Select
               field={field}
               choices={REPEAT_CHOICES}
-              text={labelOf(REPEAT_CHOICES, shown.attention_repeat_seconds)}
-              selected={(seconds) => seconds === shown.attention_repeat_seconds}
-              disabled={!ui}
+              text={labelOf(REPEAT_CHOICES, ui.attention_repeat_seconds)}
+              selected={(seconds) => seconds === ui.attention_repeat_seconds}
               onChoose={(attention_repeat_seconds) => change('attention', { attention_repeat_seconds })}
             />
           )}
@@ -252,56 +243,53 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
         <SettingsRow
           label="Label stays for"
           help="How long the label naming the session stays out."
-          disabled={!ui || shown.attention_style !== 'pulse_peek'}
+          disabled={ui.attention_style !== 'pulse_peek'}
         >
           {(field) => (
             <Slider
               field={field}
-              value={shown.peek_seconds}
+              value={ui.peek_seconds}
               range={PEEK_RANGE}
               format={(seconds) => `${seconds} s`}
-              disabled={!ui || shown.attention_style !== 'pulse_peek'}
+              disabled={ui.attention_style !== 'pulse_peek'}
               onCommit={(peek_seconds) => change('attention', { peek_seconds })}
             />
           )}
         </SettingsRow>
-        <SettingsRow label="Notifications" help="A Windows notification when a session needs you." disabled={!ui}>
+        <SettingsRow label="Notifications" help="A Windows notification when a session needs you.">
           {(field) => (
             <Switch
               field={field}
-              checked={shown.toasts_enabled}
-              disabled={!ui}
+              checked={ui.toasts_enabled}
               onChange={(toasts_enabled) => change('attention', { toasts_enabled })}
             />
           )}
         </SettingsRow>
-        <SettingsRow label="Also when finished" help="Also notify when a session finishes." disabled={!ui?.toasts_enabled}>
+        <SettingsRow label="Also when finished" help="Also notify when a session finishes." disabled={!ui.toasts_enabled}>
           {(field) => (
             <Switch
               field={field}
-              checked={shown.toast_on_finished}
-              disabled={!ui?.toasts_enabled}
+              checked={ui.toast_on_finished}
+              disabled={!ui.toasts_enabled}
               onChange={(toast_on_finished) => change('attention', { toast_on_finished })}
             />
           )}
         </SettingsRow>
-        <SettingsRow label="Sounds" help="Play a sound when a session needs you or finishes." disabled={!ui}>
+        <SettingsRow label="Sounds" help="Play a sound when a session needs you or finishes.">
           {(field) => (
             <Switch
               field={field}
-              checked={shown.sounds_enabled}
-              disabled={!ui}
+              checked={ui.sounds_enabled}
               onChange={(sounds_enabled) => change('attention', { sounds_enabled })}
             />
           )}
         </SettingsRow>
-        <SettingsRow label="Preview" help="Shows the attention style on the overlay once." disabled={!ui}>
+        <SettingsRow label="Preview" help="Shows the attention style on the overlay once.">
           {(field) => (
             <OutlineButton
               compact
               id={field.id}
               aria-describedby={field.helpId}
-              disabled={!ui}
               onClick={() => attempt('attention', previewAttention())}
             >
               Show
@@ -309,15 +297,14 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
           )}
         </SettingsRow>
       </SettingsSection>
-      <SettingsSection label="Startup" summary={startupSummary(shown)} {...section('startup')}>
-        <SettingsRow label="Start Beacon" help="When Beacon starts by itself." disabled={!ui}>
+      <SettingsSection label="Startup" summary={startupSummary(ui)} {...section('startup')}>
+        <SettingsRow label="Start Beacon" help="When Beacon starts by itself.">
           {(field) => (
             <Select
               field={field}
               choices={START_CHOICES}
-              text={labelOf(START_CHOICES, shown.start_mode)}
-              selected={(mode) => mode === shown.start_mode}
-              disabled={!ui}
+              text={labelOf(START_CHOICES, ui.start_mode)}
+              selected={(mode) => mode === ui.start_mode}
               onChoose={(start_mode) => change('startup', { start_mode })}
             />
           )}
@@ -325,21 +312,21 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
         <SettingsRow
           label="Close when unused for"
           help="Beacon quits after Claude has been unused this long. Only when it starts with Claude."
-          disabled={!ui || shown.start_mode !== 'claude'}
+          disabled={ui.start_mode !== 'claude'}
         >
           {(field) => (
             <Select
               field={field}
               choices={QUIT_CHOICES}
-              text={labelOf(QUIT_CHOICES, shown.quit_when_idle_minutes)}
-              selected={(minutes) => minutes === shown.quit_when_idle_minutes}
-              disabled={!ui || shown.start_mode !== 'claude'}
+              text={labelOf(QUIT_CHOICES, ui.quit_when_idle_minutes)}
+              selected={(minutes) => minutes === ui.quit_when_idle_minutes}
+              disabled={ui.start_mode !== 'claude'}
               onChoose={(quit_when_idle_minutes) => change('startup', { quit_when_idle_minutes })}
             />
           )}
         </SettingsRow>
       </SettingsSection>
-      <SettingsSection label="Behaviour" summary={behaviourSummary(shown, config)} {...section('behaviour')}>
+      <SettingsSection label="Behaviour" summary={behaviourSummary(ui, config)} {...section('behaviour')}>
         <SettingsRow
           label="Answer headless runs"
           help="Off: a claude -p run with nobody attached is passed straight through, so it never waits on you."
@@ -386,7 +373,7 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
             />
           )}
         </SettingsRow>
-        <SettingsRow label="Shortcut" help="Opens and closes the panel from anywhere." disabled={!ui}>
+        <SettingsRow label="Shortcut" help="Opens and closes the panel from anywhere.">
           {(field) => (
             <span className="flex min-w-0 items-center gap-1.5">
               <input
@@ -394,14 +381,13 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
                 aria-describedby={field.helpId}
                 placeholder="Ctrl+Alt+B"
                 value={hotkey}
-                disabled={!ui}
                 onChange={(event) => setEditedHotkey(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && hotkey.trim()) applyHotkey();
                 }}
                 className={`${FIELD} w-40 min-w-0`}
               />
-              <OutlineButton compact disabled={!ui || !hotkey.trim() || hotkey.trim() === ui.hotkey} onClick={applyHotkey}>
+              <OutlineButton compact disabled={!hotkey.trim() || hotkey.trim() === ui.hotkey} onClick={applyHotkey}>
                 Apply
               </OutlineButton>
             </span>

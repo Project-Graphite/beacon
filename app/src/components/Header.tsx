@@ -11,7 +11,7 @@ interface HeaderProps {
   accountUsage: AccountUsage | null;
   snoozedUntil: number | null;
   queue: QueuePlace | null;
-  soundsEnabled: boolean | null;
+  soundsEnabled: boolean;
   settingsOpen: boolean;
   pinned: boolean;
   onUnpin: () => void;

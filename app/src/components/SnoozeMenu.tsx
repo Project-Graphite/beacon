@@ -8,7 +8,7 @@ const ITEM = 'flex h-7 w-full items-center rounded-[6px] px-2 text-left text-ink
 
 interface SnoozeMenuProps {
   snoozedUntil: number | null;
-  soundsEnabled: boolean | null;
+  soundsEnabled: boolean;
   onToggleSounds: () => void;
   run: (action: Promise<unknown>) => void;
 }
@@ -75,10 +75,9 @@ export function SnoozeMenu({ snoozedUntil, soundsEnabled, onToggleSounds, run }:
             <button
               type="button"
               role="menuitemcheckbox"
-              aria-checked={soundsEnabled ?? false}
-              disabled={soundsEnabled === null}
+              aria-checked={soundsEnabled}
               onClick={onToggleSounds}
-              className={`${ITEM} justify-between disabled:opacity-50`}
+              className={`${ITEM} justify-between`}
             >
               Sounds
               {soundsEnabled && <Icon name="check" className="size-3.5 text-ink" />}
