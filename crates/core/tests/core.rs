@@ -394,6 +394,63 @@ fn transcript_usage_is_read_for_sessions_loaded_at_start() {
 }
 
 #[test]
+fn a_limited_session_adopts_its_transcript_and_takes_its_title() {
+    let home = TempHome::new();
+    let projects = home.0.join("projects");
+    std::fs::create_dir_all(projects.join("C--STUFF-other")).unwrap();
+    std::fs::create_dir_all(projects.join("C--STUFF-somewhere")).unwrap();
+    let transcript = projects
+        .join("C--STUFF-somewhere")
+        .join("vscode-session.jsonl");
+    std::fs::write(
+        &transcript,
+        [
+            json!({"type": "ai-title", "aiTitle": "Fix the login API_KEY=abc123 flow", "sessionId": "vscode-session"}),
+            json!({"type": "last-prompt", "lastPrompt": "first prompt", "sessionId": "vscode-session"}),
+        ]
+        .map(|line| line.to_string() + "\n")
+        .concat(),
+    )
+    .unwrap();
+    let core = start_with(
+        &home,
+        vec![
+            ListedSession {
+                name: Some("somewhere-1a".to_string()),
+                ..listed("vscode-session", "idle")
+            },
+            ListedSession {
+                name: Some("Somewhere-0f".to_string()),
+                ..listed("no-transcript", "idle")
+            },
+        ],
+        Config::default(),
+        AccountSources {
+            projects_dir: Some(projects),
+            ..AccountSources::default()
+        },
+    );
+    let snapshot = wait_for(&home, |snapshot| {
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.ai_title.is_some())
+    });
+    let adopted = &snapshot.sessions[1];
+    assert_eq!(adopted.session_id, "vscode-session");
+    assert!(adopted.limited);
+    assert_eq!(
+        adopted.transcript_path.as_deref(),
+        Some(transcript.to_string_lossy().as_ref())
+    );
+    assert_eq!(adopted.display_title, "Fix the login API_KEY=*** flow");
+    assert_eq!(adopted.last_prompt.as_deref(), Some("first prompt"));
+    assert_eq!(snapshot.sessions[0].transcript_path, None);
+    assert_eq!(snapshot.sessions[0].display_title, "somewhere");
+    core.shutdown().unwrap();
+}
+
+#[test]
 fn the_account_cache_is_read_at_start_and_again_when_it_changes() {
     let home = TempHome::new();
     std::fs::create_dir_all(&home.0).unwrap();
@@ -428,6 +485,7 @@ fn the_account_cache_is_read_at_start_and_again_when_it_changes() {
         AccountSources {
             claude_json: Some(claude_json.clone()),
             prober: None,
+            projects_dir: None,
         },
     );
     let first = wait_for(&home, |snapshot| snapshot.account_usage.is_some())
@@ -477,6 +535,7 @@ fn a_refresh_reads_the_probe_and_a_failed_one_keeps_the_last_value() {
                 Ok(br#"{"type":"result"}"#.to_vec()),
                 Err(io::Error::other("claude -p timed out")),
             ]))))),
+            projects_dir: None,
         },
     );
     let mut client = ControlClient::connect(&home.0).unwrap();

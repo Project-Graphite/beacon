@@ -12,7 +12,8 @@ const TURN_STATES: SessionState[] = [
 
 const PATH_LABELS: Record<PromptPath, string> = {
   at_turn_end: 'Sends when the current turn finishes.',
-  prefill: 'Opens the session in VS Code with this text in its prompt box. Press Enter there to send it.',
+  wake: 'Sends now. Claude sees it as a follow-up from Beacon, not as a typed message.',
+  prefill: 'Opens the session in VS Code with the text in its prompt box. VS Code will ask you to send it.',
   copy_and_jump: "Copies the text and jumps to the session's window. Paste it there.",
 };
 
@@ -22,9 +23,11 @@ export function promptPath(session: Session): { path: PromptPath; label: string 
   if (session.state === 'ended') return null;
   const path: PromptPath = TURN_STATES.includes(session.state)
     ? 'at_turn_end'
-    : session.entrypoint === 'claude-vscode'
-      ? 'prefill'
-      : 'copy_and_jump';
+    : session.can_wake
+      ? 'wake'
+      : session.entrypoint === 'claude-vscode'
+        ? 'prefill'
+        : 'copy_and_jump';
   return { path, label: PATH_LABELS[path] };
 }
 

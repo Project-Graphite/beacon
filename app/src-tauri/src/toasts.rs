@@ -1,4 +1,5 @@
 use crate::platform::registry;
+use beacon_core::session::display_title;
 use beacon_core::{SessionState, Snapshot};
 use std::collections::HashMap;
 use std::io;
@@ -75,10 +76,7 @@ impl Toaster {
                     .retain(|candidate| candidate.session_id != session.session_id);
                 self.batch.push(Candidate {
                     session_id: session.session_id.clone(),
-                    name: session
-                        .project
-                        .clone()
-                        .unwrap_or_else(|| session.session_id.chars().take(8).collect()),
+                    name: display_title(session),
                     state: session.state,
                     activity: session.activity.clone(),
                 });

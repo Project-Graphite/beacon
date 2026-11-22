@@ -284,6 +284,19 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{HELPER}",
+            "args": [
+              "StopWaiter"
+            ],
+            "asyncRewake": true,
+            "timeout": 86400
+          }
+        ]
       }
     ],
     "SessionEnd": [

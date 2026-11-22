@@ -1,3 +1,4 @@
+use beacon_core::prompts::PromptPath;
 use beacon_core::{
     Config, ControlClient, Core, CoreHandle, CoreOptions, Decision, ListFuture, Request,
     Resolution, SessionLister, SessionState, Snapshot,
@@ -340,6 +341,85 @@ fn doctor_round_trip() {
     );
     assert!(snapshot(&home).sessions.is_empty());
     core.shutdown().unwrap();
+}
+
+fn idle_with_a_stop_waiter(home: &TempHome) -> Child {
+    for (event, payload) in [("UserPromptSubmit", USER_PROMPT_SUBMIT), ("Stop", STOP)] {
+        assert!(run_helper(home, event, payload).stdout.is_empty());
+    }
+    let mut waiter = spawn_helper(home, "StopWaiter", STOP);
+    wait_for(home, |snapshot| {
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.session_id == SESSION && session.can_wake)
+    });
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(waiter.try_wait().unwrap().is_none(), "the waiter exited");
+    waiter
+}
+
+#[test]
+fn a_prompt_to_an_idle_session_makes_its_stop_waiter_exit_two_with_the_text_on_stderr() {
+    let home = TempHome::new();
+    let core = start_core(&home);
+    let waiter = idle_with_a_stop_waiter(&home);
+    let reply = ControlClient::connect(&home.0)
+        .unwrap()
+        .request(&Request::QueuePrompt {
+            session_id: SESSION.to_string(),
+            text: "Reply with \"MANGO\".\nThen stop.".to_string(),
+        })
+        .unwrap();
+    assert_eq!(reply.prompt_path, Some(PromptPath::Wake), "{reply:?}");
+    let output = waiter.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "The user sent this follow-up from Beacon: Reply with \"MANGO\".\nThen stop."
+    );
+    assert!(output.stdout.is_empty());
+    assert!(!snapshot(&home).sessions[0].can_wake);
+    core.shutdown().unwrap();
+}
+
+#[test]
+fn a_new_turn_releases_the_stop_waiter_silently() {
+    let home = TempHome::new();
+    let core = start_core(&home);
+    let waiter = idle_with_a_stop_waiter(&home);
+    assert!(
+        run_helper(&home, "UserPromptSubmit", USER_PROMPT_SUBMIT)
+            .stdout
+            .is_empty()
+    );
+    assert!(finished(waiter).stdout.is_empty());
+    core.shutdown().unwrap();
+}
+
+#[test]
+fn a_core_shutdown_releases_the_stop_waiter_silently() {
+    let home = TempHome::new();
+    let core = start_core(&home);
+    let waiter = idle_with_a_stop_waiter(&home);
+    core.shutdown().unwrap();
+    assert!(finished(waiter).stdout.is_empty());
+}
+
+#[test]
+fn without_a_core_a_stop_waiter_exits_at_once() {
+    let home = TempHome::new();
+    assert!(seconds_until_exit(&home, "StopWaiter", STOP) < 1.0);
+    std::fs::write(
+        home.0.join("endpoint"),
+        beacon_protocol::Endpoint {
+            pipe_name: r"\\.\pipe\beacon-0000000000000000".to_string(),
+            token: "ab".repeat(32),
+        }
+        .to_file_text(),
+    )
+    .unwrap();
+    assert!(seconds_until_exit(&home, "StopWaiter", STOP) < 1.0);
 }
 
 fn silent_pipe_server(home: &TempHome) -> (tokio::runtime::Runtime, NamedPipeServer) {

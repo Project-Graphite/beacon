@@ -33,10 +33,11 @@ pub struct Prompt {
     pub text: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PromptPath {
     AtTurnEnd,
+    Wake,
     Prefill,
     CopyAndJump,
 }
@@ -45,6 +46,7 @@ pub fn prompt_path(session: &Session) -> Option<PromptPath> {
     match session.state {
         SessionState::Ended => None,
         state if state.turn_running() => Some(PromptPath::AtTurnEnd),
+        _ if session.can_wake => Some(PromptPath::Wake),
         _ if session.entrypoint.as_deref() == Some(VSCODE_ENTRYPOINT) => Some(PromptPath::Prefill),
         _ => Some(PromptPath::CopyAndJump),
     }
@@ -76,11 +78,15 @@ fn shown_in_chat(text: &str) -> String {
     }
 }
 
+pub fn followup(text: &str) -> String {
+    format!("The user sent this follow-up from Beacon: {text}")
+}
+
 pub fn stop_output(text: &str) -> Vec<u8> {
     json!({
         "hookSpecificOutput": {
             "hookEventName": "Stop",
-            "additionalContext": format!("The user sent this follow-up from Beacon: {text}"),
+            "additionalContext": followup(text),
         },
         "systemMessage": format!("Beacon follow-up: {}", shown_in_chat(text)),
     })
@@ -89,10 +95,10 @@ pub fn stop_output(text: &str) -> Vec<u8> {
 }
 
 impl Session {
-    pub fn queue_prompt(&mut self, id: u64, text: &str, now_ms: u64) -> Result<(), String> {
+    pub fn queue_prompt(&mut self, id: u64, text: &str, now_ms: u64) -> Result<PromptPath, String> {
         let session_id = &self.session_id;
-        match prompt_path(self) {
-            Some(PromptPath::AtTurnEnd) => {}
+        let path = match prompt_path(self) {
+            Some(path @ (PromptPath::AtTurnEnd | PromptPath::Wake)) => path,
             None => {
                 return Err(format!(
                     "session {session_id} has ended and takes no prompt"
@@ -108,15 +114,20 @@ impl Session {
                     "session {session_id} is not running a turn, so there is no turn end to wait for; run `beacon jump {session_id}` and type the prompt there, or send it from the Beacon panel, which copies it and jumps to the window"
                 ));
             }
-        }
+        };
         check_text(text)?;
+        let wakes = path == PromptPath::Wake;
         self.prompts.push(Prompt {
             id,
             preview: one_line(&redact(text), PREVIEW_CHARS),
             created_ms: now_ms,
-            status: PromptStatus::Queued,
+            status: if wakes {
+                PromptStatus::Delivered
+            } else {
+                PromptStatus::Queued
+            },
             reason: None,
-            text: Some(text.to_string()),
+            text: (!wakes).then(|| text.to_string()),
         });
         while self.prompts.len() > PROMPTS_KEPT {
             let Some(oldest_finished) = self
@@ -128,7 +139,7 @@ impl Session {
             };
             self.prompts.remove(oldest_finished);
         }
-        Ok(())
+        Ok(path)
     }
 
     pub fn cancel_prompt(&mut self, id: u64) -> Option<Result<(), String>> {

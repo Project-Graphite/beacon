@@ -1317,21 +1317,22 @@ fn set_config_applies_to_the_running_engine_and_its_snapshot() {
     let mut fixture = fixture();
     let home = fixture.home.0.clone();
     assert_eq!(
-        fixture.engine.set_config(&home, Some(0), None),
+        fixture.engine.set_config(&home, Some(0), None, None),
         Err("stall_minutes must be 1 to 240, not 0".to_string())
     );
     assert!(!home.join("config.json").exists());
     let version = *fixture.engine.watch_changes().borrow();
     fixture
         .engine
-        .set_config(&home, Some(1), Some(true))
+        .set_config(&home, Some(1), Some(true), None)
         .unwrap();
     assert!(*fixture.engine.watch_changes().borrow() > version);
     assert_eq!(
         fixture.engine.snapshot().config,
         crate::config::LiveConfig {
             stall_minutes: 1,
-            answer_unattended: true
+            answer_unattended: true,
+            clear_finished_minutes: 10
         }
     );
     assert_eq!(
@@ -2157,4 +2158,307 @@ fn dismissal_survives_a_restart() {
     let session = restored.session();
     assert!(session.dismissed);
     assert!(!session.alerting);
+}
+
+impl Fixture {
+    fn wait(&mut self) -> (u64, oneshot::Receiver<HookReply>) {
+        match self.engine.handle_hook(&meta("StopWaiter", &[]), STOP) {
+            HookOutcome::Waiter(id, receiver) => (id, receiver),
+            _ => panic!("expected a stop waiter"),
+        }
+    }
+
+    fn can_wake(&self) -> bool {
+        self.engine.snapshot().sessions[0].can_wake
+    }
+}
+
+const RELEASED: Result<HookReply, oneshot::error::TryRecvError> = Ok(HookReply::NoDecision);
+
+#[test]
+fn a_stop_waiter_is_not_an_event_and_is_replaced_by_the_next_one() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    let (_, mut first) = fixture.wait();
+    assert_eq!(fixture.session().event_count, 1);
+    assert_eq!(fixture.state(), SessionState::Working);
+    assert!(!fixture.can_wake());
+    fixture.send(STOP);
+    assert!(fixture.can_wake());
+    assert_eq!(first.try_recv(), Err(oneshot::error::TryRecvError::Empty));
+    let (_, mut second) = fixture.wait();
+    assert_eq!(first.try_recv(), RELEASED);
+    assert!(fixture.can_wake());
+    fixture.send(USER_PROMPT_SUBMIT);
+    assert_eq!(second.try_recv(), RELEASED);
+    assert!(!fixture.can_wake());
+    fixture.send(STOP);
+    assert!(matches!(
+        fixture.engine.handle_hook(
+            &meta("StopWaiter", &[("CLAUDE_CODE_SESSION_ATTENDED", "0")]),
+            STOP
+        ),
+        HookOutcome::Reply(HookReply::NoDecision)
+    ));
+    assert!(!fixture.can_wake());
+}
+
+#[test]
+fn a_stop_waiter_is_released_when_its_session_ends() {
+    let mut fixture = fixture();
+    fixture.send_with_env(USER_PROMPT_SUBMIT, &[("CLAUDE_PID", "4242")]);
+    fixture.send(STOP);
+    let (_, mut ended) = fixture.wait();
+    fixture.send(SESSION_END);
+    assert_eq!(ended.try_recv(), RELEASED);
+    let (_, mut late) = fixture.wait();
+    assert_eq!(late.try_recv(), RELEASED);
+    assert!(!fixture.can_wake());
+    fixture.send_with_env(SESSION_START, &[("CLAUDE_PID", "4343")]);
+    fixture.send(STOP);
+    let (_, mut gone) = fixture.wait();
+    fixture.engine.process_exited(SESSION, 4343);
+    assert_eq!(gone.try_recv(), RELEASED);
+}
+
+#[test]
+fn a_dropped_stop_waiter_is_forgotten_but_a_newer_one_is_kept() {
+    let mut fixture = fixture();
+    fixture.send(STOP);
+    let (first, _first_receiver) = fixture.wait();
+    let (second, _second_receiver) = fixture.wait();
+    fixture.engine.waiter_gone(first);
+    assert!(fixture.can_wake());
+    fixture.engine.waiter_gone(second);
+    assert!(!fixture.can_wake());
+    assert!(
+        fixture
+            .queue("go on")
+            .error
+            .unwrap()
+            .contains("is not running a turn")
+    );
+}
+
+#[test]
+fn only_idle_finished_and_failed_sessions_can_be_woken() {
+    let mut fixture = fixture();
+    let _waiter = fixture.wait();
+    let cases: [(&[u8], SessionState, bool); 4] = [
+        (SESSION_START, SessionState::Starting, false),
+        (STOP, SessionState::Done, true),
+        (
+            &custom("StopFailure", json!({"error": "rate_limit"})),
+            SessionState::Error,
+            true,
+        ),
+        (PERMISSION_REQUEST, SessionState::NeedsPermission, false),
+    ];
+    for (payload, state, can_wake) in cases {
+        let _ = fixture.send(payload);
+        assert_eq!(fixture.state(), state);
+        assert_eq!(fixture.can_wake(), can_wake, "{state:?}");
+    }
+    fixture.send(&custom("SessionStart", json!({"source": "clear"})));
+    assert_eq!(fixture.state(), SessionState::Idle);
+    assert!(fixture.can_wake());
+}
+
+#[test]
+fn a_prompt_to_a_wakeable_session_is_delivered_through_its_waiter() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    let (_, mut early) = fixture.wait();
+    assert_eq!(
+        fixture.queue("while running").prompt_path,
+        Some(PromptPath::AtTurnEnd)
+    );
+    assert_eq!(early.try_recv(), Err(oneshot::error::TryRecvError::Empty));
+    assert!(stdout(fixture.send(STOP)).contains("from Beacon: while running"));
+    fixture.send(STOP);
+    let (_, mut waiter) = fixture.wait();
+    assert_eq!(early.try_recv(), RELEASED);
+    assert_eq!(
+        fixture.queue("API_KEY=abc123 \"go on\"").prompt_path,
+        Some(PromptPath::Wake)
+    );
+    assert_eq!(
+        waiter.try_recv(),
+        Ok(HookReply::Rewake(
+            b"The user sent this follow-up from Beacon: API_KEY=abc123 \"go on\"".to_vec()
+        ))
+    );
+    let prompt = fixture.session().prompts.last().unwrap().clone();
+    assert_eq!(prompt.status, PromptStatus::Delivered);
+    assert_eq!(prompt.preview, "API_KEY=*** \"go on\"");
+    assert_eq!(prompt.text, None);
+    assert!(!fixture.can_wake());
+    assert!(
+        fixture
+            .queue("again")
+            .error
+            .unwrap()
+            .contains("is not running a turn")
+    );
+    fixture.send(USER_PROMPT_SUBMIT);
+    assert_eq!(
+        fixture.prompt_statuses().last().unwrap().0,
+        PromptStatus::Acknowledged
+    );
+}
+
+#[test]
+fn titles_come_from_the_prompt_and_the_transcript_and_a_hook_title_wins() {
+    let mut fixture = fixture();
+    fixture.send(&custom(
+        "UserPromptSubmit",
+        json!({"prompt": "first line\nAPI_KEY=abc123 then more"}),
+    ));
+    assert_eq!(
+        fixture.session().last_prompt.as_deref(),
+        Some("first line API_KEY=*** then more")
+    );
+    assert_eq!(
+        fixture.engine.snapshot().sessions[0].display_title,
+        "first line API_KEY=*** then more"
+    );
+    fixture.engine.set_titles(
+        SESSION,
+        TranscriptTitles {
+            ai_title: Some("x".repeat(200)),
+            custom_title: Some("Named in VS Code".to_string()),
+            last_prompt: None,
+        },
+    );
+    let session = fixture.session();
+    assert_eq!(session.ai_title.unwrap().chars().count(), 80);
+    assert_eq!(session.title.as_deref(), Some("Named in VS Code"));
+    assert_eq!(
+        session.last_prompt.as_deref(),
+        Some("first line API_KEY=*** then more")
+    );
+    assert_eq!(
+        fixture.engine.snapshot().sessions[0].display_title,
+        "Named in VS Code"
+    );
+    fixture.send(&custom(
+        "UserPromptSubmit",
+        json!({"session_title": "From the hook"}),
+    ));
+    fixture.engine.set_titles(
+        SESSION,
+        TranscriptTitles {
+            custom_title: Some("Renamed".to_string()),
+            last_prompt: Some("later prompt".to_string()),
+            ..TranscriptTitles::default()
+        },
+    );
+    assert_eq!(fixture.session().title.as_deref(), Some("From the hook"));
+    assert_eq!(
+        fixture.session().last_prompt.as_deref(),
+        Some("later prompt")
+    );
+}
+
+#[test]
+fn a_session_without_a_transcript_is_looked_up_once_and_adopts_what_is_found() {
+    let mut fixture = fixture();
+    fixture.engine.reconcile(vec![
+        listed("limited", None, "idle"),
+        listed("other", None, "idle"),
+    ]);
+    assert_eq!(
+        fixture.engine.take_transcripts_wanted(),
+        ["limited", "other"]
+    );
+    fixture
+        .engine
+        .reconcile(vec![listed("limited", None, "idle")]);
+    assert!(fixture.engine.take_transcripts_wanted().is_empty());
+    fixture
+        .engine
+        .adopt_transcript("limited", r"C:\p\limited.jsonl".to_string());
+    assert_eq!(
+        fixture.engine.sessions["limited"]
+            .transcript_path
+            .as_deref(),
+        Some(r"C:\p\limited.jsonl")
+    );
+    assert_eq!(
+        fixture.engine.take_usage_wanted(),
+        BTreeMap::from([("limited".to_string(), r"C:\p\limited.jsonl".to_string())])
+    );
+    fixture
+        .engine
+        .reconcile(vec![listed("limited", None, "idle")]);
+    assert_eq!(fixture.engine.take_usage_wanted().len(), 1);
+    fixture
+        .engine
+        .adopt_transcript("limited", r"C:\elsewhere.jsonl".to_string());
+    assert_eq!(
+        fixture.engine.sessions["limited"]
+            .transcript_path
+            .as_deref(),
+        Some(r"C:\p\limited.jsonl")
+    );
+}
+
+#[test]
+fn a_finished_session_is_acknowledged_after_the_configured_minutes() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    fixture.send(STOP);
+    let ended = fixture.session().turn_ended_ms.unwrap();
+    fixture.engine.check_stalls(ended + 10 * 60_000 - 1);
+    assert_eq!(fixture.state(), SessionState::Done);
+    fixture.send(&custom(
+        "Notification",
+        json!({"notification_type": "idle_prompt"}),
+    ));
+    fixture.engine.check_stalls(ended + 10 * 60_000);
+    assert_eq!(fixture.state(), SessionState::Idle);
+    assert!(!fixture.session().attention);
+    let mut never = fixture_with(
+        Config {
+            clear_finished_minutes: 0,
+            ..Config::default()
+        },
+        Vec::new(),
+    );
+    never.send(USER_PROMPT_SUBMIT);
+    never.send(STOP);
+    never.engine.check_stalls(u64::MAX);
+    assert_eq!(never.state(), SessionState::Done);
+    let home = never.home.0.clone();
+    never.engine.set_config(&home, None, None, Some(1)).unwrap();
+    assert_eq!(never.engine.snapshot().config.clear_finished_minutes, 1);
+    let ended = never.session().turn_ended_ms.unwrap();
+    never.engine.check_stalls(ended + 60_000);
+    assert_eq!(never.state(), SessionState::Idle);
+}
+
+#[test]
+fn each_hook_event_is_logged_on_one_line_without_its_content() {
+    let mut fixture = fixture();
+    fixture.send_with_env(
+        &custom(
+            "UserPromptSubmit",
+            json!({"prompt": "PROMPT-TEXT-NEVER-LOGGED"}),
+        ),
+        &[("CLAUDE_CODE_ENTRYPOINT", "claude-vscode")],
+    );
+    let _waiter = fixture.wait();
+    let log = std::fs::read_to_string(fixture.home.0.join("core.log")).unwrap();
+    let info: Vec<&str> = log
+        .lines()
+        .filter_map(|line| line.split_once(" INFO ").map(|(_, rest)| rest))
+        .collect();
+    assert_eq!(
+        info,
+        [
+            "UserPromptSubmit 4c2c3535 entrypoint claude-vscode state Working",
+            "StopWaiter 4c2c3535 entrypoint claude-vscode state Working",
+        ]
+    );
+    assert!(!log.contains("NEVER-LOGGED"));
 }

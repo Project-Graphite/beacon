@@ -30,6 +30,31 @@ pub struct SessionUsage {
     pub status: UsageStatus,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TranscriptTitles {
+    pub ai_title: Option<String>,
+    pub custom_title: Option<String>,
+    pub last_prompt: Option<String>,
+}
+
+pub fn claude_projects_dir() -> Option<PathBuf> {
+    std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("USERPROFILE").map(|profile| PathBuf::from(profile).join(".claude"))
+        })
+        .map(|dir| dir.join("projects"))
+}
+
+pub fn find_transcript(projects: &Path, session_id: &str) -> Option<PathBuf> {
+    let file_name = format!("{session_id}.jsonl");
+    std::fs::read_dir(projects)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path().join(&file_name))
+        .find(|candidate| candidate.is_file())
+}
+
 pub struct TranscriptReader {
     transcript: PathBuf,
     subagents_dir: PathBuf,
@@ -53,6 +78,10 @@ impl TranscriptReader {
 
     pub fn transcript(&self) -> &Path {
         &self.transcript
+    }
+
+    pub fn take_titles(&mut self) -> TranscriptTitles {
+        std::mem::take(&mut self.main.titles)
     }
 
     pub fn read(&mut self, now_ms: u64) -> io::Result<SessionUsage> {
@@ -173,6 +202,7 @@ struct FileTally {
     reported_cost_usd: Option<f64>,
     assistant_lines: u64,
     usage_lines: u64,
+    titles: TranscriptTitles,
 }
 
 #[derive(Deserialize)]
@@ -182,6 +212,12 @@ struct Line {
     message: Option<Message>,
     #[serde(rename = "totalCostUSD")]
     total_cost_usd: Option<f64>,
+    #[serde(rename = "aiTitle")]
+    ai_title: Option<String>,
+    #[serde(rename = "customTitle")]
+    custom_title: Option<String>,
+    #[serde(rename = "lastPrompt")]
+    last_prompt: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -260,6 +296,13 @@ impl FileTally {
             }
             Some("cost-state") if parsed.total_cost_usd.is_some() => {
                 self.reported_cost_usd = parsed.total_cost_usd;
+            }
+            Some("ai-title") if parsed.ai_title.is_some() => self.titles.ai_title = parsed.ai_title,
+            Some("custom-title") if parsed.custom_title.is_some() => {
+                self.titles.custom_title = parsed.custom_title;
+            }
+            Some("last-prompt") if parsed.last_prompt.is_some() => {
+                self.titles.last_prompt = parsed.last_prompt;
             }
             _ => {}
         }
@@ -568,6 +611,67 @@ mod tests {
                 .as_deref(),
             Some("# Late plan")
         );
+    }
+
+    fn line(value: serde_json::Value) -> String {
+        value.to_string() + "\n"
+    }
+
+    #[test]
+    fn the_latest_titles_and_last_prompt_are_handed_over_once() {
+        let dir = TempDir::new();
+        let transcript = dir.0.join("t1.jsonl");
+        append(
+            &transcript,
+            &[
+                line(json!({"type": "ai-title", "aiTitle": "First title", "sessionId": "t1"})),
+                user(),
+                line(json!({"type": "ai-title", "aiTitle": "Second title", "sessionId": "t1"})),
+                line(json!({"type": "custom-title", "customTitle": "Named", "sessionId": "t1"})),
+                line(
+                    json!({"type": "last-prompt", "lastPrompt": "do the thing", "leafUuid": "u", "sessionId": "t1"}),
+                ),
+                line(json!({"type": "ai-title", "sessionId": "t1"})),
+                assistant("msg_a", "m", [1, 1, 1, 1]),
+            ]
+            .concat(),
+        );
+        let mut reader = TranscriptReader::new("t1", &transcript);
+        assert_eq!(reader.read(0).unwrap().input_tokens, 1);
+        assert_eq!(
+            reader.take_titles(),
+            TranscriptTitles {
+                ai_title: Some("Second title".to_string()),
+                custom_title: Some("Named".to_string()),
+                last_prompt: Some("do the thing".to_string()),
+            }
+        );
+        assert_eq!(reader.take_titles(), TranscriptTitles::default());
+        append(
+            &transcript,
+            &line(json!({"type": "last-prompt", "lastPrompt": "next", "sessionId": "t1"})),
+        );
+        reader.read(0).unwrap();
+        assert_eq!(
+            reader.take_titles(),
+            TranscriptTitles {
+                last_prompt: Some("next".to_string()),
+                ..TranscriptTitles::default()
+            }
+        );
+    }
+
+    #[test]
+    fn a_transcript_is_found_by_its_session_id_in_any_project_folder() {
+        let dir = TempDir::new();
+        for project in ["C--work-a", "C--work-b"] {
+            std::fs::create_dir_all(dir.0.join(project)).unwrap();
+        }
+        let transcript = dir.0.join("C--work-b").join("s9.jsonl");
+        append(&transcript, &user());
+        assert_eq!(find_transcript(&dir.0, "s9"), Some(transcript));
+        assert_eq!(find_transcript(&dir.0, "s8"), None);
+        assert_eq!(find_transcript(&dir.0.join("missing"), "s9"), None);
     }
 
     #[test]

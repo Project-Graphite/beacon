@@ -8,9 +8,10 @@ use args::Command;
 use beacon_cli::Context;
 use beacon_cli::doctor;
 use beacon_cli::installer::{self, Paths};
+use beacon_core::prompts::PromptPath;
 use beacon_core::{
     AccountSources, ClaudeAgentsLister, ClaudeUsageProber, Config, ControlClient, Core,
-    CoreOptions, Reply, Request, claude_json_path, home_dir, now_ms,
+    CoreOptions, Reply, Request, claude_json_path, claude_projects_dir, home_dir, now_ms,
 };
 use std::io;
 use std::path::{Path, PathBuf};
@@ -179,14 +180,22 @@ fn dismiss(home: &Path, prefix: &str) -> Result<ExitCode, String> {
 
 fn queue_prompt(home: &Path, prefix: &str, text: String) -> Result<ExitCode, String> {
     let session_id = resolve_session(home, prefix)?;
-    request(
+    let reply = request(
         home,
         &Request::QueuePrompt {
             session_id: session_id.clone(),
             text,
         },
     )?;
-    println!("Prompt queued for session {session_id}; it is sent when the current turn finishes.");
+    if reply.prompt_path == Some(PromptPath::Wake) {
+        println!(
+            "Prompt sent to idle session {session_id} now; Claude sees it as a follow-up from Beacon, not as a typed message."
+        );
+    } else {
+        println!(
+            "Prompt queued for session {session_id}; it is sent when the current turn finishes."
+        );
+    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -240,6 +249,7 @@ fn daemon() -> Result<ExitCode, String> {
         AccountSources {
             claude_json: claude_json_path(),
             prober: Some(Box::new(ClaudeUsageProber)),
+            projects_dir: claude_projects_dir(),
         },
     ) {
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Err(error.to_string()),

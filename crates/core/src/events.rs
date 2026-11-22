@@ -90,6 +90,7 @@ pub enum Event {
     },
     UserPromptSubmit {
         session_title: Option<String>,
+        prompt: Option<String>,
     },
     PreToolUse(ToolUse),
     PostToolUse(ToolUse),

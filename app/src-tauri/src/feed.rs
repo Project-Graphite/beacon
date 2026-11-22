@@ -1,6 +1,6 @@
 use beacon_core::{
     AccountSources, ClaudeAgentsLister, ClaudeUsageProber, Config, ControlClient, Core, CoreHandle,
-    CoreOptions, Reply, Request, Snapshot, claude_json_path,
+    CoreOptions, Reply, Request, Snapshot, claude_json_path, claude_projects_dir,
 };
 use std::io;
 use std::path::{Path, PathBuf};
@@ -98,6 +98,7 @@ impl Feed {
                 AccountSources {
                     claude_json: claude_json_path(),
                     prober: Some(Box::new(ClaudeUsageProber)),
+                    projects_dir: claude_projects_dir(),
                 },
             )
         });

@@ -11,6 +11,8 @@ use std::time::Duration;
 const REDRAW_INTERVAL: Duration = Duration::from_secs(1);
 const SESSION_ID_CHARS: usize = 8;
 const ACTIVITY_CHARS: usize = 60;
+const SESSION_NAME_CHARS: usize = 32;
+const PROJECT_CHARS: usize = 20;
 const EXPIRY_SHOWN_MS: u64 = 15 * 60 * 1000;
 
 pub fn run(home: &Path, watch: bool, json: bool, all: bool) -> Result<ExitCode, String> {
@@ -94,7 +96,14 @@ pub fn render(snapshot: &Snapshot, now: u64) -> String {
     } else {
         table(
             &[
-                "SESSION", "STATE", "PROJECT", "SURFACE", "ACTIVITY", "TURN", "FLAGS",
+                "SESSION",
+                "STATE",
+                "SESSION NAME",
+                "PROJECT",
+                "SURFACE",
+                "ACTIVITY",
+                "TURN",
+                "FLAGS",
             ],
             sessions
                 .iter()
@@ -102,7 +111,8 @@ pub fn render(snapshot: &Snapshot, now: u64) -> String {
                     vec![
                         session.session_id.chars().take(SESSION_ID_CHARS).collect(),
                         state_label(session),
-                        project_label(session),
+                        one_line(&session.display_title, SESSION_NAME_CHARS),
+                        one_line(&project_label(session), PROJECT_CHARS),
                         surface_label(session.entrypoint.as_deref()).to_string(),
                         session.activity.as_deref().map_or_else(
                             || "-".to_string(),
@@ -234,6 +244,7 @@ mod tests {
         Session {
             state,
             attention: state.needs_attention(),
+            display_title: id.chars().take(8).collect(),
             ..Session::new(id, last_event_ms)
         }
     }
@@ -265,6 +276,7 @@ mod tests {
             SessionState::Working,
             NOW - 1_000,
         );
+        working.display_title = "Fix the login flow".to_string();
         working.project = Some("beacon".to_string());
         working.branch = Some("main".to_string());
         working.entrypoint = Some("cli".to_string());
@@ -277,6 +289,7 @@ mod tests {
             SessionState::NeedsPermission,
             NOW - 60_000,
         );
+        asking.display_title = "Refactor the authentication middleware and its tests".to_string();
         asking.project = Some("site".to_string());
         asking.entrypoint = Some("claude-vscode".to_string());
         asking.activity = Some("Running npm test".to_string());
@@ -334,11 +347,11 @@ mod tests {
         assert_eq!(
             render(&snapshot, NOW),
             "\
-SESSION   STATE             PROJECT        SURFACE   ACTIVITY                             TURN   FLAGS
-22222222  needs permission  site           VS Code   Running npm test                     1h02m  bg:1
-11111111  working           beacon (main)  terminal  Running GITHUB_TOKEN=*** gh pr list  2m05s  sub:2 compacting
-33333333  idle              -              unknown   -                                    -      limited
-44444444  ended             tmp            headless  -                                    47s
+SESSION   STATE             SESSION NAME                      PROJECT        SURFACE   ACTIVITY                             TURN   FLAGS
+22222222  needs permission  Refactor the authentication m...  site           VS Code   Running npm test                     1h02m  bg:1
+11111111  working           Fix the login flow                beacon (main)  terminal  Running GITHUB_TOKEN=*** gh pr list  2m05s  sub:2 compacting
+33333333  idle              33333333                          -              unknown   -                                    -      limited
+44444444  ended             44444444                          tmp            headless  -                                    47s
 
 ID  PROJECT  TOOL                    INPUT                                        AGE
 3   site     Bash                    curl -H \"Authorization: ***\" https://x.test  5s
@@ -429,8 +442,8 @@ ID  PROJECT  TOOL  INPUT  AGE
         assert_eq!(
             render(&shown(snapshot.clone(), false), NOW),
             "\
-SESSION   STATE    PROJECT  SURFACE  ACTIVITY  TURN  FLAGS
-77777777  working  -        unknown  -         -
+SESSION   STATE    SESSION NAME  PROJECT  SURFACE  ACTIVITY  TURN  FLAGS
+77777777  working  77777777      -        unknown  -         -
 
 No pending decisions.
 "
@@ -438,9 +451,9 @@ No pending decisions.
         assert_eq!(
             render(&shown(snapshot, true), NOW),
             "\
-SESSION   STATE    PROJECT  SURFACE  ACTIVITY  TURN  FLAGS
-77777777  working  -        unknown  -         -
-66666666  idle     -        unknown  -         -     dismissed
+SESSION   STATE    SESSION NAME  PROJECT  SURFACE  ACTIVITY  TURN  FLAGS
+77777777  working  77777777      -        unknown  -         -
+66666666  idle     66666666      -        unknown  -         -     dismissed
 
 No pending decisions.
 "

@@ -42,7 +42,7 @@ fn a_healthy_installation_passes_every_check() {
         [
             format!("ok   helper: {}", paths.helper().display()),
             format!(
-                "ok   hooks: all 22 events registered in {}",
+                "ok   hooks: all 23 handlers registered in {}",
                 paths.settings.display()
             ),
             "ok   disableAllHooks: not set".to_string(),
@@ -79,7 +79,7 @@ fn a_broken_installation_fails_the_broken_checks() {
         lines[..5],
         [
             format!("fail helper: missing at {}", paths.helper().display()),
-            "fail hooks: Stop is not registered".to_string(),
+            "fail hooks: Stop is not registered; StopWaiter is not registered".to_string(),
             format!(
                 "fail disableAllHooks: true in {}, so no hook runs",
                 paths.settings.display()
@@ -148,7 +148,9 @@ fn hooks_status_says_installed_not_installed_or_needs_repair() {
         hooks_status(&paths),
         HooksStatus {
             state: HooksState::NeedsRepair,
-            problems: vec!["hooks: Stop is not registered".to_string()],
+            problems: vec![
+                "hooks: Stop is not registered; StopWaiter is not registered".to_string()
+            ],
             ..not_installed.clone()
         }
     );

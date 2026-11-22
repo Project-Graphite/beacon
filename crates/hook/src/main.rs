@@ -2,7 +2,7 @@ mod platform;
 
 use beacon_protocol::{
     AUTOSTART_FILE, BACKGROUND_ARG, DOCTOR_EVENT, Endpoint, FORWARDED_ENV, HookReply, HookRequest,
-    LAUNCHING_FILE, VERSION, home_dir, is_waiting_event,
+    LAUNCHING_FILE, STOP_WAITER_EVENT, VERSION, home_dir, is_waiting_event,
 };
 use std::fmt::Write as _;
 use std::io::{ErrorKind, Read, Write};
@@ -26,10 +26,18 @@ fn main() {
     };
     let event = event.to_string_lossy().into_owned();
     let sent = start_watchdog(started, reply_budget(&event));
-    if let Some(bytes) = forward(&event, started, sent) {
-        let _writing = STDOUT.lock();
-        let mut stdout = std::io::stdout().lock();
-        let _ = stdout.write_all(&bytes).and_then(|()| stdout.flush());
+    match forward(&event, started, sent) {
+        Some(HookReply::Stdout(bytes)) => {
+            let _writing = STDOUT.lock();
+            let mut stdout = std::io::stdout().lock();
+            let _ = stdout.write_all(&bytes).and_then(|()| stdout.flush());
+        }
+        Some(HookReply::Rewake(bytes)) if event == STOP_WAITER_EVENT => {
+            let mut stderr = std::io::stderr().lock();
+            let _ = stderr.write_all(&bytes).and_then(|()| stderr.flush());
+            std::process::exit(2);
+        }
+        _ => {}
     }
 }
 
@@ -54,7 +62,7 @@ fn start_watchdog(started: Instant, reply_budget: Option<Duration>) -> Sender<()
     sent
 }
 
-fn forward(event: &str, started: Instant, sent: Sender<()>) -> Option<Vec<u8>> {
+fn forward(event: &str, started: Instant, sent: Sender<()>) -> Option<HookReply> {
     let home = home_dir()?;
     let Some(endpoint) = Endpoint::read(&home) else {
         start_app(&home, event);
@@ -81,10 +89,7 @@ fn forward(event: &str, started: Instant, sent: Sender<()>) -> Option<Vec<u8>> {
     if !is_waiting_event(event) {
         return None;
     }
-    match HookReply::read_from(&mut pipe).ok()? {
-        HookReply::Stdout(bytes) => Some(bytes),
-        HookReply::NoDecision => None,
-    }
+    HookReply::read_from(&mut pipe).ok()
 }
 
 fn start_app(home: &Path, event: &str) {

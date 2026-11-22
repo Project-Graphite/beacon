@@ -1,6 +1,8 @@
 use crate::focus::Host;
+use crate::preview::one_line;
 use crate::progress::{CurrentStep, Step, Task};
 use crate::prompts::Prompt;
+use crate::redact::redact;
 use crate::state::{AgentStatus, Input, Overlays, SessionState, overlays_after, transition};
 use crate::usage::SessionUsage;
 use serde::{Deserialize, Serialize};
@@ -10,6 +12,7 @@ use std::path::Path;
 
 const COMMAND_CHARS: usize = 80;
 const PREVIEW_CHARS: usize = 400;
+const TITLE_CHARS: usize = 80;
 const IMAGE_SURFACES: [(&str, &str, Option<&str>); 7] = [
     (r"\.vscode\extensions\", "claude-vscode", Some("VS Code")),
     (
@@ -82,6 +85,14 @@ pub struct Session {
     pub command_current: Option<String>,
     #[serde(default)]
     pub dismissed: bool,
+    #[serde(default)]
+    pub ai_title: Option<String>,
+    #[serde(default)]
+    pub last_prompt: Option<String>,
+    #[serde(default)]
+    pub display_title: String,
+    #[serde(default)]
+    pub can_wake: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -131,6 +142,10 @@ impl Session {
             step_current: None,
             command_current: None,
             dismissed: false,
+            ai_title: None,
+            last_prompt: None,
+            display_title: String::new(),
+            can_wake: false,
         }
     }
 
@@ -166,6 +181,52 @@ impl Session {
     pub fn set_preview(&mut self, message: &str) {
         self.last_message_preview = Some(message.chars().take(PREVIEW_CHARS).collect());
     }
+}
+
+pub fn title_line(text: &str) -> String {
+    one_line(&redact(text), TITLE_CHARS)
+}
+
+pub fn display_title(session: &Session) -> String {
+    let listed = session.listed_name.as_deref().filter(|listed| {
+        !session
+            .project
+            .as_deref()
+            .is_some_and(|project| is_derived_name(listed, project))
+    });
+    [
+        session.title.as_deref(),
+        session.ai_title.as_deref(),
+        session.last_prompt.as_deref(),
+        listed,
+        session.project.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::trim)
+    .find(|name| !name.is_empty())
+    .map_or_else(|| session.session_id.chars().take(8).collect(), redact)
+}
+
+fn is_derived_name(listed: &str, project: &str) -> bool {
+    let dashed = |text: &str| -> String {
+        text.chars()
+            .flat_map(char::to_lowercase)
+            .map(|character| {
+                if character.is_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect()
+    };
+    dashed(listed)
+        .strip_prefix(&dashed(project))
+        .and_then(|rest| rest.strip_prefix('-'))
+        .is_some_and(|suffix| {
+            suffix.len() == 2 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
 }
 
 pub fn surface_from_image(image_path: &str) -> Option<(&'static str, Option<&'static str>)> {
@@ -362,6 +423,103 @@ mod tests {
         for (path, expected) in cases {
             assert_eq!(surface_from_image(path), expected, "{path}");
         }
+    }
+
+    #[test]
+    fn the_display_title_takes_the_first_real_name() {
+        let named = |names: [Option<&str>; 5]| {
+            let [title, ai_title, last_prompt, listed_name, project] =
+                names.map(|name| name.map(str::to_string));
+            display_title(&Session {
+                title,
+                ai_title,
+                last_prompt,
+                listed_name,
+                project,
+                ..Session::new("0123456789abcdef", 0)
+            })
+        };
+        let cases = [
+            (
+                [
+                    Some("Custom"),
+                    Some("Ai"),
+                    Some("Prompt"),
+                    Some("listed"),
+                    Some("beacon"),
+                ],
+                "Custom",
+            ),
+            (
+                [
+                    None,
+                    Some("Ai"),
+                    Some("Prompt"),
+                    Some("listed"),
+                    Some("beacon"),
+                ],
+                "Ai",
+            ),
+            ([Some("  "), Some("Ai"), None, None, None], "Ai"),
+            (
+                [None, None, Some("Prompt"), Some("listed"), Some("beacon")],
+                "Prompt",
+            ),
+            ([None, None, None, Some("listed"), Some("beacon")], "listed"),
+            (
+                [None, None, None, Some("beacon-1a"), Some("beacon")],
+                "beacon",
+            ),
+            (
+                [None, None, None, Some("Beacon-F0"), Some("beacon")],
+                "beacon",
+            ),
+            (
+                [None, None, None, Some("my-app-0c"), Some("My App")],
+                "My App",
+            ),
+            (
+                [None, None, None, Some("my-app-0c"), Some("my_app")],
+                "my_app",
+            ),
+            (
+                [None, None, None, Some("beacon-1g"), Some("beacon")],
+                "beacon-1g",
+            ),
+            (
+                [None, None, None, Some("beacon-1a2"), Some("beacon")],
+                "beacon-1a2",
+            ),
+            (
+                [None, None, None, Some("beacon1a"), Some("beacon")],
+                "beacon1a",
+            ),
+            (
+                [None, None, None, Some("other-1a"), Some("beacon")],
+                "other-1a",
+            ),
+            ([None, None, None, Some("beacon-1a"), None], "beacon-1a"),
+            ([None, None, None, None, Some("beacon")], "beacon"),
+            ([None, None, None, None, None], "01234567"),
+            (
+                [Some("Deploy with API_KEY=abc123"), None, None, None, None],
+                "Deploy with API_KEY=***",
+            ),
+        ];
+        for (names, expected) in cases {
+            assert_eq!(named(names), expected, "{names:?}");
+        }
+    }
+
+    #[test]
+    fn title_lines_are_redacted_flat_and_eighty_characters_at_most() {
+        assert_eq!(
+            title_line("one\ntwo GITHUB_TOKEN=abc123"),
+            "one two GITHUB_TOKEN=***"
+        );
+        let long = title_line(&"é".repeat(500));
+        assert_eq!(long.chars().count(), 80);
+        assert!(long.ends_with("..."));
     }
 
     #[test]
