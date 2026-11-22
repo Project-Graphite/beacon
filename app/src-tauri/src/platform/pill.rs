@@ -417,6 +417,10 @@ pub fn move_to_edge(edge: Edge) {
     });
 }
 
+pub fn window() -> HWND {
+    WINDOW.load(Ordering::Relaxed)
+}
+
 pub fn shown_rect() -> Option<Rect> {
     with_pill(|pill| pill.shown.then_some(pill.rect)).flatten()
 }

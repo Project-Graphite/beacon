@@ -1,5 +1,6 @@
 use crate::feed::{self, Feed};
 use crate::geometry::Rect;
+use crate::platform::pill;
 use crate::shell::{self, Action};
 use beacon_core::{Decision, Reply, Request, SessionDetail, Snapshot};
 use std::path::PathBuf;
@@ -23,7 +24,7 @@ pub fn create(
         .decorations(false)
         .transparent(true)
         .always_on_top(true)
-        .skip_taskbar(true)
+        .owner_raw(unsafe { std::mem::transmute_copy(&pill::window()) })
         .resizable(false)
         .shadow(false)
         .focused(focused)
