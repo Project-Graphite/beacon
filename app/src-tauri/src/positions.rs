@@ -5,6 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
+use std::sync::{Mutex, PoisonError};
 
 const UI_FILE: &str = "ui.json";
 const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Space";
@@ -238,10 +239,23 @@ fn read(home: &Path) -> UiFile {
 }
 
 fn update(home: &Path, change: impl FnOnce(&mut UiFile)) -> io::Result<()> {
-    let mut file = read(home);
+    static UPDATING: Mutex<()> = Mutex::new(());
+    let _updating = UPDATING.lock().unwrap_or_else(PoisonError::into_inner);
+    let path = home.join(UI_FILE);
+    let mut file = match std::fs::read(&path) {
+        Ok(bytes) => match serde_json::from_slice(&bytes) {
+            Ok(file) => file,
+            Err(_) => {
+                std::fs::rename(&path, path.with_extension("json.bad"))?;
+                UiFile::default()
+            }
+        },
+        Err(error) if error.kind() == io::ErrorKind::NotFound => UiFile::default(),
+        Err(error) => return Err(error),
+    };
     change(&mut file);
     std::fs::create_dir_all(home)?;
-    std::fs::write(home.join(UI_FILE), serde_json::to_vec_pretty(&file)?)
+    beacon_core::write_atomic(&path, &serde_json::to_vec_pretty(&file)?)
 }
 
 pub fn hotkey(home: &Path) -> String {
@@ -380,6 +394,21 @@ mod tests {
         assert_eq!(load(&home, "b"), Some(Rect::sized(5, 6, 7, 8)));
         std::fs::write(home.join(UI_FILE), "not json").unwrap();
         assert_eq!(load(&home, "a"), None);
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn saving_over_an_unreadable_ui_file_keeps_it_aside() {
+        let home = std::env::temp_dir().join(format!("beacon-ui-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(UI_FILE), r#"{"hotkey":"Ctrl+Shift+B","#).unwrap();
+        save(&home, "a", Rect::sized(1, 2, 3, 4)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(home.join("ui.json.bad")).unwrap(),
+            r#"{"hotkey":"Ctrl+Shift+B","#
+        );
+        assert_eq!(load(&home, "a"), Some(Rect::sized(1, 2, 3, 4)));
         std::fs::remove_dir_all(&home).unwrap();
     }
 

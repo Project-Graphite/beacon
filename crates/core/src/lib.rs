@@ -31,7 +31,7 @@ pub use log::{now_ms, utc_timestamp};
 pub use platform::clipboard;
 pub use preview::{input_preview, one_line};
 pub use redact::redact;
-pub use server::{Core, CoreHandle, CoreOptions};
+pub use server::{Core, CoreHandle, CoreOptions, write_atomic};
 pub use session::Session;
 pub use state::{PermissionKind, SessionState};
 pub use usage::{SessionUsage, UsageStatus, claude_projects_dir};

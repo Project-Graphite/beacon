@@ -12,7 +12,7 @@ use beacon_protocol::{
 };
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -192,11 +192,26 @@ fn start(
         &options.home.join("logs").join("core.log"),
         options.config.log_level,
     )?;
-    let (sessions, global_snooze) = match std::fs::read(options.home.join("state.json")) {
-        Ok(bytes) => (
-            Engine::load_sessions(&bytes)?,
-            Engine::load_global_snooze(&bytes)?,
-        ),
+    let state_path = options.home.join("state.json");
+    let (sessions, global_snooze) = match std::fs::read(&state_path) {
+        Ok(bytes) => match Engine::load_sessions(&bytes)
+            .and_then(|sessions| Ok((sessions, Engine::load_global_snooze(&bytes)?)))
+        {
+            Ok(state) => state,
+            Err(error) => {
+                log.error(format_args!(
+                    "state.json cannot be read, starting with no sessions: {error}"
+                ));
+                if let Err(error) =
+                    std::fs::rename(&state_path, state_path.with_extension("json.bad"))
+                {
+                    log.warn(format_args!(
+                        "cannot keep state.json as state.json.bad: {error}"
+                    ));
+                }
+                (Vec::new(), None)
+            }
+        },
         Err(error) if error.kind() == io::ErrorKind::NotFound => (Vec::new(), None),
         Err(error) => return Err(error),
     };
@@ -256,9 +271,12 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let temporary = path.with_extension("tmp");
-    std::fs::write(&temporary, bytes)?;
+    let mut file = std::fs::File::create(&temporary)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
     std::fs::rename(&temporary, path)
 }
 
@@ -743,7 +761,11 @@ async fn persist(shared: Rc<Shared>, home: PathBuf) -> io::Result<()> {
         sleep(PERSIST_DEBOUNCE).await;
         changes.borrow_and_update();
         let state = shared.engine.borrow().persisted_state()?;
-        write_atomic(&path, &state)?;
+        if let Err(error) = write_atomic(&path, &state) {
+            shared.engine.borrow().log.warn(format_args!(
+                "cannot write state.json, trying again on the next change: {error}"
+            ));
+        }
     }
     Ok(())
 }

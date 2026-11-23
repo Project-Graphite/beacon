@@ -130,6 +130,19 @@ fn the_endpoint_is_written_at_start_and_removed_at_shutdown() {
 }
 
 #[test]
+fn an_unreadable_state_file_is_kept_aside_and_the_core_starts_empty() {
+    let home = TempHome::new();
+    std::fs::create_dir_all(&home.0).unwrap();
+    std::fs::write(home.0.join("state.json"), "").unwrap();
+    let core = start(&home, Ok(Vec::new())).unwrap();
+    assert!(snapshot(&home).sessions.is_empty());
+    core.shutdown().unwrap();
+    assert_eq!(std::fs::read(home.0.join("state.json.bad")).unwrap(), b"");
+    let log = std::fs::read_to_string(home.0.join("logs").join("core.log")).unwrap();
+    assert!(log.contains("state.json cannot be read, starting with no sessions"));
+}
+
+#[test]
 fn sessions_survive_a_restart() {
     let home = TempHome::new();
     let core = start(&home, Ok(vec![listed("kept", "idle")])).unwrap();
