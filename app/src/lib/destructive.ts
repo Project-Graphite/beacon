@@ -1,7 +1,21 @@
 import { REDIRECTS, tokenizeCommand, type Token } from './command.ts';
 import { relativeInside } from './paths.ts';
 
-const PREFIXES = new Set(['sudo', 'doas', 'command', 'nohup', 'time', 'exec', 'env', 'nice', 'xargs']);
+const PREFIXES = new Map<string, string[]>([
+  ['sudo', ['-u', '-g', '-h', '-p', '-C', '-r', '-t', '-U', '-D', '-R']],
+  ['doas', ['-u', '-C']],
+  ['command', []],
+  ['nohup', []],
+  ['time', ['-f', '-o']],
+  ['exec', ['-a']],
+  ['env', ['-u', '-C', '-S']],
+  ['nice', ['-n']],
+  ['timeout', ['-s', '-k']],
+  ['xargs', ['-I', '-n', '-P', '-d', '-L', '-E', '-s', '-a', '-l']],
+]);
+const BLOCK_KEYWORDS = new Set(['then', 'do', 'else', 'elif']);
+const FIND_EXEC = new Set(['-exec', '-execdir', '-ok', '-okdir']);
+const GROUP = /[({`]([^(){}`]*)[)}`]/g;
 const MENTIONS = new Set([
   'echo',
   'printf',
@@ -16,17 +30,33 @@ const MENTIONS = new Set([
   'findstr',
   'select-string',
 ]);
-const SCRIPT_FLAGS: Record<string, string[]> = {
-  bash: ['-c'],
-  sh: ['-c'],
-  zsh: ['-c'],
-  dash: ['-c'],
-  pwsh: ['-c', '-command'],
-  powershell: ['-c', '-command'],
-  cmd: ['/c', '/k'],
+const POSIX_SCRIPT_FLAG = /^-[a-z]*c[a-z]*$/;
+const POWERSHELL_SCRIPT_FLAG = /^-c(?:ommand)?$/i;
+const SCRIPT_FLAGS: Record<string, RegExp> = {
+  bash: POSIX_SCRIPT_FLAG,
+  sh: POSIX_SCRIPT_FLAG,
+  zsh: POSIX_SCRIPT_FLAG,
+  dash: POSIX_SCRIPT_FLAG,
+  pwsh: POWERSHELL_SCRIPT_FLAG,
+  powershell: POWERSHELL_SCRIPT_FLAG,
+  cmd: /^\/[ck]$/i,
 };
-const DOWNLOADERS = new Set(['curl', 'wget']);
-const SCRIPT_RUNNERS = new Set(['sh', 'bash', 'zsh', 'dash', 'pwsh', 'powershell', 'iex', 'invoke-expression']);
+const DOWNLOADERS = new Set([
+  'curl',
+  'wget',
+  'iwr',
+  'irm',
+  'invoke-webrequest',
+  'invoke-restmethod',
+  'start-bitstransfer',
+]);
+const SCRIPT_RUNNERS = new Set(['sh', 'bash', 'zsh', 'dash', 'pwsh', 'powershell', 'iex', 'invoke-expression', 'eval']);
+const INTERPRETERS = new Set(['python', 'python3', 'node', 'perl', 'ruby']);
+const DOTNET_DOWNLOAD = /webclient|download(?:string|file)/i;
+const RUN_DOWNLOAD = new RegExp(
+  `\\b(${[...SCRIPT_RUNNERS].join('|')})\\b[^|;&\\n]*[(\`][^|;&\\n]*\\b(?:${[...DOWNLOADERS].join('|')}|${DOTNET_DOWNLOAD.source})`,
+  'i',
+);
 const RM_FLAG_LETTERS = /^-[rRfdivI]+$/;
 const WRITING_TOOLS = ['Edit', 'Write', 'NotebookEdit'];
 
@@ -38,7 +68,10 @@ function pipelines(source: string): string[][][] {
   const command = () => found[found.length - 1][found[found.length - 1].length - 1];
   let word: string | null = null;
   const endWord = () => {
-    if (word !== null) command().push(word);
+    if (word === null) return;
+    const atStart = command().length === 0;
+    const text = atStart ? word.replace(/^(?:\$?[({]|`)+/, '') : word;
+    if (text !== '' && !(atStart && BLOCK_KEYWORDS.has(text))) command().push(text);
     word = null;
   };
   for (const token of tokenizeCommand(source)) {
@@ -65,8 +98,17 @@ function pipelines(source: string): string[][][] {
 }
 
 function withoutPrefixes(words: string[]): string[] {
-  const start = words.findIndex((word) => !PREFIXES.has(commandName(word)) && !/^\w+=/.test(word));
-  return start === -1 ? [] : words.slice(start);
+  let index = 0;
+  while (index < words.length) {
+    const name = commandName(words[index]);
+    const valued = PREFIXES.get(name);
+    if (valued === undefined && !/^\w+=/.test(words[index])) break;
+    index++;
+    if (valued === undefined) continue;
+    while (index < words.length && words[index].startsWith('-')) index += valued.includes(words[index]) ? 2 : 1;
+    if (name === 'timeout') index++;
+  }
+  return words.slice(index);
 }
 
 function commandName(word: string): string {
@@ -85,7 +127,7 @@ function rmReason(args: string[]): string | null {
   const groups = options.filter((arg) => RM_FLAG_LETTERS.test(arg));
   const recursive = options.includes('--recursive') || groups.some((group) => /[rR]/.test(group));
   const force = options.includes('--force') || groups.some((group) => group.includes('f'));
-  if (recursive && force) return 'rm with recursive and force flags';
+  if (recursive) return force ? 'rm with recursive and force flags' : 'rm with recursive flag';
   if (args.some((arg) => recurseParameter(arg, 4) || arg.toLowerCase() === '/s')) return 'recursive delete';
   return null;
 }
@@ -98,15 +140,22 @@ function gitReason(args: string[]): string | null {
   const [subcommand, ...rest] = args.slice(index);
   switch (subcommand) {
     case 'push':
-      return rest.some((arg) => arg === '--force' || arg.startsWith('--force-with-lease')) || shortFlags(rest, 'f')
-        ? 'git push --force'
-        : null;
+      if (rest.some((arg) => arg === '--force' || arg.startsWith('--force-with-lease') || /^\+./.test(arg)) || shortFlags(rest, 'f')) {
+        return 'git push --force';
+      }
+      if (rest.includes('--delete') || shortFlags(rest, 'd') || rest.some((arg) => /^:./.test(arg))) return 'git push --delete';
+      return rest.includes('--mirror') ? 'git push --mirror' : null;
     case 'reset':
       return rest.includes('--hard') ? 'git reset --hard' : null;
     case 'clean':
       return rest.includes('--force') || shortFlags(rest, 'f') ? 'git clean -f' : null;
+    case 'branch':
+      return shortFlags(rest, 'D') ? 'git branch -D' : null;
+    case 'stash':
+      return rest[0] === 'clear' ? 'git stash clear' : null;
     case 'checkout':
     case 'restore':
+      if (subcommand === 'checkout' && (rest.includes('--force') || shortFlags(rest, 'f'))) return 'git checkout -f';
       return rest.includes('.') ? `git ${subcommand} . discards local changes` : null;
     default:
       return null;
@@ -127,9 +176,19 @@ function commandReason(words: string[]): string | null {
   const [first, ...args] = words;
   const name = commandName(first);
   if (MENTIONS.has(name)) return null;
-  const scriptFlag = args.findIndex((arg) => SCRIPT_FLAGS[name]?.includes(arg.toLowerCase()));
+  const scriptFlag = args.findIndex((arg) => SCRIPT_FLAGS[name]?.test(arg));
   if (scriptFlag !== -1) return scriptReason(args.slice(scriptFlag + 1).join(' '));
   switch (name) {
+    case 'eval':
+    case 'iex':
+    case 'invoke-expression':
+      return scriptReason(args.join(' '));
+    case 'find': {
+      if (args.includes('-delete')) return 'find -delete';
+      const exec = args.findIndex((arg) => FIND_EXEC.has(arg));
+      const command = exec === -1 ? [] : withoutPrefixes(args.slice(exec + 1));
+      return command.length > 0 ? commandReason(command) : null;
+    }
     case 'rm':
       return rmReason(args);
     case 'remove-item':
@@ -155,16 +214,44 @@ function commandReason(words: string[]): string | null {
   return sqlReason(args.join(' '));
 }
 
-function scriptReason(script: string): string | null {
+const runsInput = (words: string[]) => {
+  const name = commandName(words[0]);
+  return SCRIPT_RUNNERS.has(name) || (INTERPRETERS.has(name) && (words.length === 1 || words[1] === '-'));
+};
+
+function groupBodies(script: string): string[] {
+  const bodies: string[] = [];
+  for (let rest = script, previous = ''; previous !== rest; ) {
+    previous = rest;
+    rest = rest.replace(GROUP, (_, body: string) => {
+      bodies.push(body);
+      return ' ; ';
+    });
+  }
+  return bodies;
+}
+
+function pipelineReason(script: string): string | null {
   for (const pipeline of pipelines(script)) {
-    const names = pipeline.map((words) => commandName(words[0]));
-    const download = names.findIndex((name) => DOWNLOADERS.has(name));
-    const runner = names.slice(download + 1).find((name) => SCRIPT_RUNNERS.has(name));
-    if (download !== -1 && runner) return `${names[download]} piped into ${runner}`;
+    const download = pipeline.findIndex(
+      (words) => DOWNLOADERS.has(commandName(words[0])) || DOTNET_DOWNLOAD.test(words.join(' ')),
+    );
+    const runner = download === -1 ? undefined : pipeline.slice(download + 1).find(runsInput);
+    if (runner) return `${commandName(pipeline[download][0])} piped into ${commandName(runner[0])}`;
     for (const words of pipeline) {
       const reason = commandReason(words);
       if (reason) return reason;
     }
+  }
+  return null;
+}
+
+function scriptReason(script: string): string | null {
+  const runningDownload = RUN_DOWNLOAD.exec(script);
+  if (runningDownload) return `${runningDownload[1].toLowerCase()} running a download`;
+  for (const part of [script, ...groupBodies(script)]) {
+    const reason = pipelineReason(part);
+    if (reason) return reason;
   }
   return null;
 }
