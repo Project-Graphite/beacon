@@ -45,8 +45,10 @@ import { thumbFraction } from './lib/scroll.ts';
 import {
   currentRequest,
   firstRequestOf,
+  keyTarget,
   requestId,
   requestQueue,
+  requestsOf,
   resolutionNotices,
   stepRequest,
   type ResolutionNotice,
@@ -205,7 +207,7 @@ export function App() {
   const openSession = findSession(sessions, ended, openId);
   const queue = requestQueue(snapshot?.pending ?? []);
   const current = currentRequest(queue, chosenRequestId);
-  const pendingOf = (sessionId: string) => queue.filter((request) => request.session_id === sessionId);
+  const pendingOf = (sessionId: string) => requestsOf(queue, sessionId);
   const view = settingsOpen
     ? { key: 'settings', depth: 2 }
     : openSession
@@ -327,7 +329,12 @@ export function App() {
   useEffect(() => {
     const index = visible.findIndex((session) => session.session_id === selectedId);
     const selected: Session | undefined = openSession ?? visible[index];
+    const tabQueue = openSession ? pendingOf(openSession.session_id) : queue;
     const handleKey = (event: KeyboardEvent) => {
+      if (event.repeat && !isTextField(event.target) && !event.key.startsWith('Arrow')) {
+        if (event.key === 'Enter' || event.key === ' ') event.preventDefault();
+        return;
+      }
       if (settingsOpen) {
         if (event.key === 'Escape') setSettingsOpen(false);
         return;
@@ -338,20 +345,25 @@ export function App() {
       }
       if (event.ctrlKey || event.altKey || event.metaKey || isTextField(event.target)) return;
       const key = event.key.toLowerCase();
-      if (current && (key === 'a' || key === 'd' || key === 'm')) {
+      const target = keyTarget(queue, chosenRequestId, selected?.session_id ?? null);
+      if (target && (key === 'a' || key === 'd' || key === 'm')) {
         event.preventDefault();
-        const act = requestKeys.current.get(current.id);
+        const act = requestKeys.current.get(target.id);
         if (act) act(key);
-        else void openDetail(current.session_id).then(() => window.setTimeout(() => requestKeys.current.get(current.id)?.(key)));
+        else void openDetail(target.session_id);
         return;
       }
       switch (event.key) {
-        case 'Tab':
-          if (queue.length > 0) {
+        case 'Tab': {
+          const nextId = stepRequest(tabQueue, chosenRequestId, event.shiftKey ? -1 : 1);
+          const next = tabQueue.find((request) => request.id === nextId);
+          if (next) {
             event.preventDefault();
-            setChosenRequestId(stepRequest(queue, chosenRequestId, event.shiftKey ? -1 : 1));
+            setChosenRequestId(next.id);
+            if (!openSession) setSelectedId(next.session_id);
           }
           break;
+        }
         case 'ArrowDown':
         case 'ArrowUp': {
           if (openSession) break;
@@ -388,8 +400,8 @@ export function App() {
           if (selected && canSnooze(selected)) run(snooze(selected.session_id, 5));
           break;
         case 'j': {
-          const target = current?.session_id ?? (selected && selected.state !== 'ended' ? selected.session_id : null);
-          if (target) jumpTo(target);
+          const jumpTarget = selected ? (selected.state !== 'ended' ? selected.session_id : null) : current?.session_id;
+          if (jumpTarget) jumpTo(jumpTarget);
           break;
         }
         case 'x':
@@ -432,8 +444,8 @@ export function App() {
             tabs={sessionTabs(listOrder, session.session_id)}
             pending={pendingOf(session.session_id)}
             notices={notices.filter((notice) => notice.sessionId === session.session_id)}
-            currentId={current?.id ?? null}
-            queueSize={queue.length}
+            currentId={keyTarget(queue, chosenRequestId, session.session_id)?.id ?? null}
+            queueSize={pendingOf(session.session_id).length}
             keys={keys}
             globalSnoozedUntil={snapshot?.snoozed_until_ms ?? null}
             moreOpen={moreOpen.includes(session.session_id)}

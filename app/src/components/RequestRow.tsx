@@ -43,7 +43,7 @@ export function RequestRow({ request, marked, currentId, keys, onOpen }: Request
       if (outcome) return;
       if (request.kind === 'tool' && key === 'a') allow();
       else if (request.kind === 'tool' && key === 'd') send({ type: 'deny' });
-      else void onOpen().then(() => window.setTimeout(() => keys.get(request.id)?.(key)));
+      else void onOpen();
     });
     return () => void keys.delete(request.id);
   });

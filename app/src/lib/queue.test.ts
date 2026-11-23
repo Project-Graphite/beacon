@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { PendingDecision, ResolvedDecision } from '../beacon';
-import { currentRequest, firstRequestOf, requestQueue, resolutionNotices, stepRequest } from './queue.ts';
+import { currentRequest, firstRequestOf, keyTarget, requestQueue, resolutionNotices, stepRequest } from './queue.ts';
 
 const request = (id: number, created_ms: number, session_id = 's'): PendingDecision => ({
   id,
@@ -51,6 +51,15 @@ test('selecting a card picks its first request', () => {
   assert.equal(firstRequestOf(queue, 'b'), 3);
   assert.equal(firstRequestOf(queue, 'a'), 1);
   assert.equal(firstRequestOf(queue, 'c'), null);
+});
+
+test('keys target only the requests of the open or selected session', () => {
+  const queue = requestQueue([request(1, 100, 'a'), request(2, 200, 'b'), request(3, 300, 'b')]);
+  assert.equal(keyTarget(queue, null, null)?.id, 1);
+  assert.equal(keyTarget(queue, null, 'b')?.id, 2);
+  assert.equal(keyTarget(queue, 3, 'b')?.id, 3);
+  assert.equal(keyTarget(queue, 1, 'b')?.id, 2);
+  assert.equal(keyTarget(queue, null, 'c'), null);
 });
 
 test('requests answered elsewhere leave a notice, Beacon decisions do not', () => {

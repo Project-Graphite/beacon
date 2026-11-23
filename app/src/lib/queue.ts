@@ -22,6 +22,14 @@ export function currentRequest(queue: PendingDecision[], chosenId: number | null
   return queue.find((request) => request.id === chosenId) ?? queue[0] ?? null;
 }
 
+export function requestsOf(queue: PendingDecision[], sessionId: string): PendingDecision[] {
+  return queue.filter((request) => request.session_id === sessionId);
+}
+
+export function keyTarget(queue: PendingDecision[], chosenId: number | null, sessionId: string | null): PendingDecision | null {
+  return currentRequest(sessionId === null ? queue : requestsOf(queue, sessionId), chosenId);
+}
+
 export function stepRequest(queue: PendingDecision[], chosenId: number | null, step: 1 | -1): number | null {
   if (queue.length === 0) return null;
   const index = queue.findIndex((request) => request.id === currentRequest(queue, chosenId)?.id);

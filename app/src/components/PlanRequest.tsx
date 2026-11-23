@@ -37,7 +37,7 @@ export function PlanRequest({ request, sending, keys, send, onJump }: PlanReques
     if (!keys) return;
     keys.set(request.id, (key) => {
       if (sending || feedback) return;
-      if (key === 'a') approve();
+      if (key === 'a' && request.plan !== null) approve();
       if (key === 'd') keepPlanning();
       if (key === 'm') setFeedback(true);
     });
@@ -70,7 +70,7 @@ export function PlanRequest({ request, sending, keys, send, onJump }: PlanReques
         />
       ) : (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <FilledButton disabled={sending} onClick={approve}>
+          <FilledButton disabled={sending || request.plan === null} onClick={approve}>
             Approve plan
             <KeyHint shortcut="A" />
           </FilledButton>
