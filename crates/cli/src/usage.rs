@@ -103,7 +103,7 @@ fn account_windows(account: &AccountUsage, now: u64) -> String {
 fn tokens(count: u64) -> String {
     match count {
         0..1000 => count.to_string(),
-        1000..1_000_000 => format!("{:.1}k", count as f64 / 1000.0),
+        1000..999_950 => format!("{:.1}k", count as f64 / 1000.0),
         _ => format!("{:.1}M", count as f64 / 1_000_000.0),
     }
 }
@@ -204,6 +204,20 @@ SESSION   PROJECT  MODEL          CONTEXT  IN     OUT     CACHE-W  CACHE-R  SUBA
 33333333  beacon   unrecognized   0        0      0       0        0        0          -
 "
         );
+    }
+
+    #[test]
+    fn token_counts_roll_over_to_the_next_unit() {
+        for (count, shown) in [
+            (999, "999"),
+            (1000, "1.0k"),
+            (999_949, "999.9k"),
+            (999_950, "1.0M"),
+            (1_000_000, "1.0M"),
+            (2_500_000, "2.5M"),
+        ] {
+            assert_eq!(tokens(count), shown, "{count}");
+        }
     }
 
     #[test]
