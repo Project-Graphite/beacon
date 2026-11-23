@@ -989,6 +989,36 @@ fn ended_sessions_are_pruned_by_the_periodic_check() {
 }
 
 #[test]
+fn ended_sessions_are_kept_for_two_hours_from_when_they_ended() {
+    let kept = 2 * 60 * 60 * 1000;
+    let mut fixture = fixture();
+    fixture.send_with_env(USER_PROMPT_SUBMIT, &[("CLAUDE_PID", "4242")]);
+    fixture.send_with_env(
+        &custom("UserPromptSubmit", json!({"session_id": "other"})),
+        &[("CLAUDE_PID", "4343")],
+    );
+    for session in fixture.engine.sessions.values_mut() {
+        session.last_event_ms -= 3 * kept;
+    }
+    fixture.engine.process_exited("other", 4343);
+    fixture.engine.process_exited(SESSION, 4242);
+    let ended_at = fixture.session().ended_ms.unwrap();
+    let first_ended_at = fixture.engine.sessions["other"].ended_ms.unwrap();
+    fixture.engine.check_stalls(first_ended_at + kept);
+    assert_eq!(
+        fixture
+            .engine
+            .ended()
+            .iter()
+            .map(|session| session.session_id.clone())
+            .collect::<Vec<_>>(),
+        [SESSION.to_string(), "other".to_string()]
+    );
+    fixture.engine.check_stalls(ended_at + kept + 1);
+    assert!(session_ids(&fixture.engine).is_empty());
+}
+
+#[test]
 fn at_most_twenty_ended_sessions_are_kept_and_five_are_in_the_snapshot() {
     let now = now_ms();
     let ended = (0..25u64).map(|index| {

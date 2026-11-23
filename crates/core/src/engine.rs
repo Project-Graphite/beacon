@@ -259,7 +259,7 @@ impl Engine {
             .values()
             .filter(|session| session.state == SessionState::Ended)
             .collect();
-        ended.sort_by_key(|session| std::cmp::Reverse(session.last_event_ms));
+        ended.sort_by_key(|session| std::cmp::Reverse(ended_at(session)));
         ended
     }
 
@@ -1331,7 +1331,7 @@ impl Engine {
             .into_iter()
             .enumerate()
             .filter(|(index, session)| {
-                *index >= ENDED_KEPT || now.saturating_sub(session.last_event_ms) > ENDED_KEPT_MS
+                *index >= ENDED_KEPT || now.saturating_sub(ended_at(session)) > ENDED_KEPT_MS
             })
             .map(|(_, session)| session.session_id.clone())
             .collect();
@@ -1397,6 +1397,10 @@ impl Engine {
         self.settle_sessions();
         self.changes.send_modify(|version| *version += 1);
     }
+}
+
+fn ended_at(session: &Session) -> u64 {
+    session.ended_ms.unwrap_or(session.last_event_ms)
 }
 
 fn shown(session: &Session) -> Session {

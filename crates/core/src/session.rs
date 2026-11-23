@@ -67,6 +67,8 @@ pub struct Session {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_ended_ms: Option<u64>,
     pub last_event_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_ms: Option<u64>,
     pub event_count: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_message_preview: Option<String>,
@@ -140,6 +142,7 @@ impl Session {
             turn_started_ms: None,
             turn_ended_ms: None,
             last_event_ms: now_ms,
+            ended_ms: None,
             event_count: 0,
             last_message_preview: None,
             last_error: None,
@@ -178,6 +181,11 @@ impl Session {
             self.snoozed_until_ms = None;
         }
         self.attention = self.state.needs_attention();
+        if self.state == SessionState::Ended {
+            self.ended_ms.get_or_insert(now_ms);
+        } else {
+            self.ended_ms = None;
+        }
         let turn_ended = ends_turn(input, before, self.state);
         if turn_ended {
             self.stop_running_steps();
