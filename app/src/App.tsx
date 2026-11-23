@@ -382,7 +382,7 @@ export function App() {
           break;
         case 'ArrowLeft':
         case 'Backspace':
-          if (openSession) {
+          if (openSession && !(event.target instanceof HTMLInputElement)) {
             event.preventDefault();
             closeDetail();
           }
