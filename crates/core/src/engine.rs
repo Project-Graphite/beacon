@@ -994,7 +994,7 @@ impl Engine {
 
     fn claim_recent_tool_use(&mut self, view: &PendingDecision) -> Option<String> {
         let recent = &mut self.runtime.get_mut(&view.session_id)?.recent_tool_uses;
-        let index = recent.iter().rposition(|tool_use| {
+        let index = recent.iter().position(|tool_use| {
             tool_use.agent_id == view.agent_id
                 && tool_use.tool_name == view.tool_name
                 && tool_use.tool_input == view.tool_input
@@ -1035,6 +1035,11 @@ impl Engine {
     }
 
     fn resolve_elsewhere(&mut self, session_id: &str, tool_use_id: &str, resolution: Resolution) {
+        if let Some(runtime) = self.runtime.get_mut(session_id) {
+            runtime
+                .recent_tool_uses
+                .retain(|tool_use| tool_use.tool_use_id != tool_use_id);
+        }
         let joined = self.pending.iter().find(|(_, pending)| {
             pending.view.session_id == session_id
                 && pending.view.tool_use_id.as_deref() == Some(tool_use_id)

@@ -240,6 +240,43 @@ fn tool_use_id_does_not_join_a_different_input_or_agent() {
     assert_eq!(fixture.engine.snapshot().pending[0].tool_use_id, None);
 }
 
+fn identical_tool_use(event: &str, tool_use_id: &str) -> Vec<u8> {
+    custom(
+        event,
+        json!({"tool_name": "Bash", "tool_input": {"command": "npm test"}, "tool_use_id": tool_use_id}),
+    )
+}
+
+#[test]
+fn identical_parallel_tool_calls_pair_with_their_permission_requests_in_order() {
+    let mut fixture = fixture();
+    fixture.send(&identical_tool_use("PreToolUse", "toolu_first"));
+    fixture.send(&identical_tool_use("PreToolUse", "toolu_second"));
+    let request = custom(
+        "PermissionRequest",
+        json!({"tool_name": "Bash", "tool_input": {"command": "npm test"}}),
+    );
+    let (first, _first_receiver) = fixture.ask(&request);
+    let (second, _second_receiver) = fixture.ask(&request);
+    let pending = fixture.engine.snapshot().pending;
+    assert_eq!(pending[0].id, first);
+    assert_eq!(pending[0].tool_use_id.as_deref(), Some("toolu_first"));
+    assert_eq!(pending[1].id, second);
+    assert_eq!(pending[1].tool_use_id.as_deref(), Some("toolu_second"));
+}
+
+#[test]
+fn a_finished_tool_call_cannot_be_claimed_by_a_later_permission_request() {
+    let mut fixture = fixture();
+    fixture.send(&identical_tool_use("PreToolUse", "toolu_done"));
+    fixture.send(&identical_tool_use("PostToolUse", "toolu_done"));
+    let (_id, _receiver) = fixture.ask(&custom(
+        "PermissionRequest",
+        json!({"tool_name": "Bash", "tool_input": {"command": "npm test"}}),
+    ));
+    assert_eq!(fixture.engine.snapshot().pending[0].tool_use_id, None);
+}
+
 #[test]
 fn post_tool_use_resolves_a_pending_decision_as_allowed_in_session() {
     let mut fixture = fixture();
