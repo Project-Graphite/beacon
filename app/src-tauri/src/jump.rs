@@ -1,11 +1,13 @@
 use crate::feed::{self, Feed};
+use crate::shell::{self, Action};
 use beacon_core::focus::{self, JumpOutcome};
 use beacon_core::prompts::{PromptPath, check_text, prompt_path};
 use beacon_core::{Request, Session, SessionState, Snapshot, clipboard};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::State;
+use std::thread;
+use tauri::{AppHandle, State};
 
 #[derive(Serialize)]
 pub struct WindowPrompt {
@@ -70,25 +72,40 @@ pub async fn send_prompt_to_window(
     .await
 }
 
-pub fn focused_session(snapshot: Option<&Snapshot>) -> Option<String> {
-    focus::foreground_session(&snapshot?.sessions).unwrap_or_else(|error| {
+fn focused_session(sessions: &[Session]) -> Option<String> {
+    if sessions.is_empty() {
+        return None;
+    }
+    focus::foreground_session(sessions).unwrap_or_else(|error| {
         eprintln!("cannot tell which session has focus: {error}");
         None
     })
 }
 
-pub fn acknowledge_focused(home: &Path, snapshot: Option<&Snapshot>) {
-    let Some(snapshot) = snapshot.filter(|snapshot| {
+pub fn resolve_focus(
+    app: &AppHandle,
+    snapshot: Option<&Snapshot>,
+    report: impl FnOnce(Option<String>) -> Action + Send + 'static,
+) {
+    let sessions = snapshot.map_or_else(Vec::new, |snapshot| snapshot.sessions.clone());
+    let app = app.clone();
+    thread::spawn(move || shell::post(&app, report(focused_session(&sessions))));
+}
+
+pub fn has_done(snapshot: Option<&Snapshot>) -> bool {
+    snapshot.is_some_and(|snapshot| {
         snapshot
             .sessions
             .iter()
             .any(|session| session.state == SessionState::Done)
-    }) else {
-        return;
-    };
-    let focused = focused_session(Some(snapshot));
-    if let Some(session) = snapshot.sessions.iter().find(|session| {
-        session.state == SessionState::Done && focused.as_ref() == Some(&session.session_id)
+    })
+}
+
+pub fn acknowledge_focused(home: &Path, snapshot: Option<&Snapshot>, focused: Option<&str>) {
+    if let Some(session) = snapshot.and_then(|snapshot| {
+        snapshot.sessions.iter().find(|session| {
+            session.state == SessionState::Done && focused == Some(session.session_id.as_str())
+        })
     }) {
         feed::send(
             home.to_path_buf(),

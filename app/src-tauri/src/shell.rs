@@ -46,6 +46,9 @@ pub enum Action {
     FinishClosing(u64),
     PanelHeight(f64),
     FlushToasts,
+    ToastFocus(Option<String>),
+    AcknowledgeFocus(Option<String>),
+    PeekGains(Vec<String>, Option<String>),
     TogglePill,
     SetStyle(Style),
     ShowOn(String),
@@ -202,7 +205,13 @@ impl Shell {
             Action::Pill(PillEvent::Moved) => self.overlay_changed(),
             Action::Pill(PillEvent::HoverTick) => self.check_hover(),
             Action::Pill(PillEvent::ForegroundChanged) => {
-                jump::acknowledge_focused(&self.feed.home, self.snapshot.as_ref());
+                if jump::has_done(self.snapshot.as_ref()) {
+                    jump::resolve_focus(
+                        &self.app,
+                        self.snapshot.as_ref(),
+                        Action::AcknowledgeFocus,
+                    );
+                }
                 if self.mode() == Some(Mode::Sticky) {
                     self.close();
                 }
@@ -226,7 +235,16 @@ impl Shell {
                 }
                 self.place();
             }
-            Action::FlushToasts => self.flush_toasts(),
+            Action::FlushToasts => {
+                jump::resolve_focus(&self.app, self.snapshot.as_ref(), Action::ToastFocus)
+            }
+            Action::ToastFocus(focused) => self.flush_toasts(focused.as_deref()),
+            Action::AcknowledgeFocus(focused) => jump::acknowledge_focused(
+                &self.feed.home,
+                self.snapshot.as_ref(),
+                focused.as_deref(),
+            ),
+            Action::PeekGains(gained, focused) => self.peek_gains(&gained, focused.as_deref()),
             Action::TogglePill => {
                 let shown = !pill::user_visible();
                 pill::set_user_visible(shown);
@@ -410,18 +428,20 @@ impl Shell {
         }
     }
 
-    fn peek_gains(&mut self, gained: &[String]) {
-        if gained.is_empty()
-            || self.mode().is_some()
-            || self.settings.visibility == Visibility::Never
-            || self.settings.attention_style != AttentionStyle::PulsePeek
-        {
+    fn peeking(&self, gained: &[String]) -> bool {
+        !gained.is_empty()
+            && self.mode().is_none()
+            && self.settings.visibility != Visibility::Never
+            && self.settings.attention_style == AttentionStyle::PulsePeek
+    }
+
+    fn peek_gains(&mut self, gained: &[String], focused: Option<&str>) {
+        if !self.peeking(gained) {
             return;
         }
-        let focused = jump::focused_session(self.snapshot.as_ref());
         let unfocused: Vec<String> = gained
             .iter()
-            .filter(|id| focused.as_ref() != Some(*id))
+            .filter(|id| focused != Some(id.as_str()))
             .cloned()
             .collect();
         let Some(snapshot) = self.snapshot.as_ref().filter(|_| !unfocused.is_empty()) else {
@@ -719,7 +739,11 @@ impl Shell {
         if self.mode().is_some() {
             self.unseen.clear();
         }
-        self.peek_gains(&gained);
+        if self.peeking(&gained) {
+            jump::resolve_focus(&self.app, self.snapshot.as_ref(), |focused| {
+                Action::PeekGains(gained, focused)
+            });
+        }
         self.show_tab();
         if self.mode().is_some()
             && let Err(error) = self.app.emit_to(PANEL, "beacon://snapshot", &self.snapshot)
@@ -728,14 +752,14 @@ impl Shell {
         }
     }
 
-    fn flush_toasts(&mut self) {
+    fn flush_toasts(&mut self, focused: Option<&str>) {
         let preferences = positions::ui_settings(&self.feed.home);
         if !preferences.toast_on_finished {
             self.toaster.drop_finished();
         }
         let Some(toast) = self
             .toaster
-            .flush_unless_focused(jump::focused_session(self.snapshot.as_ref()).as_deref())
+            .flush_unless_focused(focused)
             .filter(|_| preferences.toasts_enabled)
         else {
             return;
