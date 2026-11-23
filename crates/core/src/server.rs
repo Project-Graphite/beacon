@@ -23,7 +23,7 @@ use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tokio::sync::{mpsc, oneshot, watch};
-use tokio::task::{JoinSet, spawn_blocking};
+use tokio::task::{JoinError, JoinSet, spawn_blocking};
 use tokio::time::{Instant, sleep, sleep_until, timeout};
 
 const LISTENERS: usize = 2;
@@ -164,9 +164,14 @@ fn run(
         tasks.spawn_local(find_transcripts(shared.clone(), account.projects_dir));
         tasks.spawn_local(persist(shared.clone(), options.home.clone()));
         let mut shutdown_requested = shutdown.subscribe();
-        tokio::select! {
-            _ = shutdown_requested.wait_for(|requested| *requested) => Ok(()),
-            Some(finished) = tasks.join_next() => finished.map_err(io::Error::other).and_then(|result| result),
+        loop {
+            tokio::select! {
+                _ = shutdown_requested.wait_for(|requested| *requested) => break Ok(()),
+                Some(finished) = tasks.join_next() => match finished {
+                    Err(error) if error.is_panic() => log_panic(&shared, &error),
+                    finished => break finished.map_err(io::Error::other).and_then(|result| result),
+                },
+            }
         }
     });
     drop(local);
@@ -296,7 +301,7 @@ async fn listen(shared: Rc<Shared>, mut server: NamedPipeServer) -> io::Result<(
             continue;
         }
         let connection = shared.clone();
-        tokio::task::spawn_local(async move {
+        let served = tokio::task::spawn_local(async move {
             if let Err(error) = serve(&connection, client).await {
                 connection
                     .engine
@@ -305,7 +310,23 @@ async fn listen(shared: Rc<Shared>, mut server: NamedPipeServer) -> io::Result<(
                     .debug(format_args!("connection dropped: {error}"));
             }
         });
+        let watcher = shared.clone();
+        tokio::task::spawn_local(async move {
+            if let Err(error) = served.await
+                && error.is_panic()
+            {
+                log_panic(&watcher, &error);
+            }
+        });
     }
+}
+
+fn log_panic(shared: &Shared, error: &JoinError) {
+    shared
+        .engine
+        .borrow()
+        .log
+        .error(format_args!("a task panicked and was dropped: {error}"));
 }
 
 async fn serve(shared: &Shared, mut pipe: NamedPipeServer) -> io::Result<()> {

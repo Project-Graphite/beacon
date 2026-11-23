@@ -23,6 +23,14 @@ impl SessionLister for FakeLister {
     }
 }
 
+struct PanickingLister;
+
+impl SessionLister for PanickingLister {
+    fn list(&self) -> ListFuture<'_> {
+        panic!("the lister broke");
+    }
+}
+
 struct TempHome(PathBuf);
 
 impl TempHome {
@@ -225,6 +233,29 @@ fn a_decision_from_a_process_inside_a_known_session_is_refused() {
         })
         .unwrap();
     assert_eq!(outside, Reply::failed("no pending decision 1"));
+    core.shutdown().unwrap();
+}
+
+#[test]
+fn a_panicking_task_is_logged_and_the_core_keeps_answering() {
+    let home = TempHome::new();
+    let core = Core::start(CoreOptions {
+        home: home.0.clone(),
+        lister: Box::new(PanickingLister),
+        config: Config::default(),
+    })
+    .unwrap();
+    assert!(snapshot(&home).sessions.is_empty());
+    let log_path = home.0.join("logs").join("core.log");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !std::fs::read_to_string(&log_path)
+        .unwrap()
+        .contains("a task panicked and was dropped")
+    {
+        assert!(Instant::now() < deadline, "the panic was never logged");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(snapshot(&home).sessions.is_empty());
     core.shutdown().unwrap();
 }
 
