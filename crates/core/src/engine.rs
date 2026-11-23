@@ -217,6 +217,14 @@ impl Engine {
             .collect()
     }
 
+    pub fn live_claude_pids(&self) -> Vec<u32> {
+        self.sessions
+            .values()
+            .filter(|session| session.state != SessionState::Ended)
+            .filter_map(|session| session.claude_pid)
+            .collect()
+    }
+
     pub fn has_live_sessions(&self) -> bool {
         self.sessions
             .values()

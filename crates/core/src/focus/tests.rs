@@ -488,3 +488,42 @@ fn target_kinds_have_display_names() {
         r#"{"result":"no_window","kind":{"type":"editor","scheme":"vscode"},"ambiguous":true,"link_opened":false}"#
     );
 }
+
+#[test]
+fn a_process_descends_from_a_listed_ancestor_through_older_parents() {
+    let processes = [
+        named(10, 1, "claude.exe"),
+        named(20, 10, "cmd.exe"),
+        named(30, 20, "beacon.exe"),
+    ];
+    let created = |pid: u32| Some(u64::from(pid));
+    assert!(descends_from(30, &[10], &processes, created));
+    assert!(!descends_from(10, &[10], &processes, created));
+    assert!(!descends_from(30, &[99], &processes, created));
+    assert!(!descends_from(20, &[30], &processes, created));
+}
+
+#[test]
+fn the_ancestry_walk_stops_at_a_parent_created_later_or_of_unknown_age() {
+    let processes = [
+        named(10, 1, "claude.exe"),
+        named(20, 10, "cmd.exe"),
+        named(30, 20, "beacon.exe"),
+    ];
+    let reused_parent = |pid: u32| Some(if pid == 20 { 900 } else { u64::from(pid) });
+    assert!(!descends_from(30, &[10], &processes, reused_parent));
+    assert!(!descends_from(30, &[10], &processes, |_| None));
+}
+
+#[test]
+fn an_app_started_by_a_hook_whose_helper_has_exited_is_not_inside_the_session() {
+    let with_helper = [
+        named(10, 1, "claude.exe"),
+        named(50, 10, "beacon-hook.exe"),
+        named(60, 50, "beacon-app.exe"),
+    ];
+    let without_helper = [with_helper[0].clone(), with_helper[2].clone()];
+    let created = |pid: u32| Some(u64::from(pid));
+    assert!(descends_from(60, &[10], &with_helper, created));
+    assert!(!descends_from(60, &[10], &without_helper, created));
+}

@@ -178,6 +178,56 @@ fn control_requests_report_failures() {
     core.shutdown().unwrap();
 }
 
+const DECISION_CLIENT_HOME: &str = "BEACON_TEST_DECISION_CLIENT_HOME";
+
+#[test]
+fn decision_client_child() {
+    let Some(home) = std::env::var_os(DECISION_CLIENT_HOME) else {
+        return;
+    };
+    let reply = ControlClient::connect(std::path::Path::new(&home))
+        .unwrap()
+        .request(&Request::Decide {
+            id: 1,
+            decision: Decision::Allow,
+        })
+        .unwrap();
+    println!("REPLY:{}", serde_json::to_string(&reply).unwrap());
+}
+
+#[test]
+fn a_decision_from_a_process_inside_a_known_session_is_refused() {
+    let home = TempHome::new();
+    let core = start(&home, Ok(vec![listed("a", "waiting")])).unwrap();
+    wait_for(&home, |snapshot| snapshot.sessions.len() == 1);
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "decision_client_child", "--nocapture"])
+        .env(DECISION_CLIENT_HOME, &home.0)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let reply: Reply = serde_json::from_str(
+        stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("REPLY:"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        reply,
+        Reply::failed("decisions cannot come from inside a Claude session")
+    );
+    let outside = ControlClient::connect(&home.0)
+        .unwrap()
+        .request(&Request::Decide {
+            id: 1,
+            decision: Decision::Allow,
+        })
+        .unwrap();
+    assert_eq!(outside, Reply::failed("no pending decision 1"));
+    core.shutdown().unwrap();
+}
+
 #[test]
 fn malformed_control_lines_get_an_error_reply() {
     use std::io::{BufRead, BufReader, Write};

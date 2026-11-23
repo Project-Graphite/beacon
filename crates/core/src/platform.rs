@@ -2,12 +2,13 @@ use crate::focus::{Process, Window};
 use std::ffi::c_void;
 use std::fs::{File, OpenOptions};
 use std::io;
+use std::os::windows::io::RawHandle;
 use std::path::Path;
 use std::ptr::{null, null_mut};
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY, GetLastError, HANDLE,
-    HWND, INVALID_HANDLE_VALUE, LPARAM, LocalFree, WAIT_TIMEOUT,
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY, FILETIME,
+    GetLastError, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, LocalFree, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -22,10 +23,10 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
-use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
+use windows_sys::Win32::System::Pipes::{GetNamedPipeClientProcessId, WaitNamedPipeW};
 use windows_sys::Win32::System::Threading::{
-    CREATE_NO_WINDOW, CreateMutexW, GetCurrentProcess, OpenProcess, OpenProcessToken,
-    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    CREATE_NO_WINDOW, CreateMutexW, GetCurrentProcess, GetProcessTimes, OpenProcess,
+    OpenProcessToken, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
     QueryFullProcessImageNameW, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEONLYONCE,
     WaitForSingleObject,
 };
@@ -208,6 +209,28 @@ pub fn process_image_path(pid: u32) -> io::Result<String> {
     unsafe { CloseHandle(process) };
     queried?;
     Ok(String::from_utf16_lossy(&buffer[..length as usize]))
+}
+
+pub fn pipe_client_pid(pipe: RawHandle) -> io::Result<u32> {
+    let mut pid = 0;
+    check(unsafe { GetNamedPipeClientProcessId(pipe, &mut pid) })?;
+    Ok(pid)
+}
+
+pub fn process_created(pid: u32) -> Option<u64> {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return None;
+    }
+    let unset = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut created, mut exited, mut kernel, mut user) = (unset, unset, unset, unset);
+    let queried =
+        unsafe { GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user) } != 0;
+    unsafe { CloseHandle(process) };
+    queried.then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
 }
 
 pub fn process_alive(pid: u32) -> bool {

@@ -2,6 +2,7 @@ use crate::account::{self, AccountSources, UsageProber};
 use crate::config::Config;
 use crate::control::{Reply, Request};
 use crate::engine::{Engine, HookOutcome, ProcessExit};
+use crate::focus;
 use crate::lister::SessionLister;
 use crate::log::{Logger, now_ms};
 use crate::platform::{self, InstanceLock, PIPE_PREFIX, PipeSecurity};
@@ -13,6 +14,7 @@ use beacon_protocol::{
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Write};
+use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -389,7 +391,23 @@ async fn send_reply(pipe: &mut NamedPipeServer, reply: HookReply) -> io::Result<
     Ok(())
 }
 
+fn decide_refusal(shared: &Shared, client_pid: &io::Result<u32>) -> Option<String> {
+    let pid = match client_pid {
+        Ok(pid) => *pid,
+        Err(error) => return Some(format!("cannot identify the control client: {error}")),
+    };
+    let sessions = shared.engine.borrow().live_claude_pids();
+    match platform::processes() {
+        Ok(processes) => {
+            focus::descends_from(pid, &sessions, &processes, platform::process_created)
+                .then(|| "decisions cannot come from inside a Claude session".to_string())
+        }
+        Err(error) => Some(format!("cannot inspect the running processes: {error}")),
+    }
+}
+
 async fn serve_control(shared: &Shared, pipe: NamedPipeServer) -> io::Result<()> {
+    let client_pid = platform::pipe_client_pid(pipe.as_raw_handle());
     let (reader, mut writer) = tokio::io::split(pipe);
     let mut reader = BufReader::new(reader);
     while let Some(line) = read_line(&mut reader).await? {
@@ -420,6 +438,10 @@ async fn serve_control(shared: &Shared, pipe: NamedPipeServer) -> io::Result<()>
                     clear_finished_minutes,
                 )
                 .map_or_else(Reply::failed, |()| Reply::ok()),
+            Ok(request @ Request::Decide { .. }) => match decide_refusal(shared, &client_pid) {
+                Some(refusal) => Reply::failed(refusal),
+                None => shared.engine.borrow_mut().control(request),
+            },
             Ok(request) => shared.engine.borrow_mut().control(request),
             Err(error) => Reply::failed(format!("bad request: {error}")),
         };

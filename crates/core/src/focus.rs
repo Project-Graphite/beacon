@@ -250,6 +250,34 @@ fn lineage(pid: u32, processes: &[Process]) -> Vec<&Process> {
     .collect()
 }
 
+pub fn descends_from(
+    pid: u32,
+    ancestors: &[u32],
+    processes: &[Process],
+    created: impl Fn(u32) -> Option<u64>,
+) -> bool {
+    let mut seen = HashSet::new();
+    let mut child = pid;
+    while seen.insert(child) {
+        let Some(parent) = processes
+            .iter()
+            .find(|process| process.pid == child)
+            .map(|process| process.parent_pid)
+        else {
+            return false;
+        };
+        match (created(parent), created(child)) {
+            (Some(parent_created), Some(child_created)) if parent_created <= child_created => {}
+            _ => return false,
+        }
+        if ancestors.contains(&parent) {
+            return true;
+        }
+        child = parent;
+    }
+    false
+}
+
 fn hosting_target(
     member: &Process,
     ancestors: &[&Process],
