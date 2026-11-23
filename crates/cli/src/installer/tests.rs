@@ -326,6 +326,17 @@ fn uninstall_without_a_record_still_removes_beacon_handlers() {
 }
 
 #[test]
+fn reinstalling_without_a_record_never_restores_beacon_on_uninstall() {
+    let case = case("realistic");
+    case.install();
+    std::fs::remove_file(case.paths.record()).unwrap();
+    case.install();
+    case.uninstall();
+    let (settings, _) = settings::parse(&case.settings().unwrap()).unwrap();
+    assert!(!settings::has_beacon(&settings));
+}
+
+#[test]
 fn uninstall_refuses_a_record_for_another_settings_file() {
     let case = case("realistic");
     case.install();

@@ -147,6 +147,7 @@ pub fn install(paths: &Paths, apply: bool) -> Result<String, String> {
             previous.created,
         ),
         Some(_) if settings::has_beacon(&original) => (true, None, created),
+        None if current.as_ref() == Some(&installed) => (true, None, created),
         _ => {
             let backup_path = match &current {
                 Some(bytes) => {
