@@ -860,11 +860,14 @@ fn reconciliation_adds_limited_sessions_and_feeds_statuses() {
         &custom("UserPromptSubmit", json!({"session_id": "gone"})),
         &[("CLAUDE_PID", &gone_pid)],
     );
-    fixture.engine.reconcile(vec![
-        listed(SESSION, None, "idle"),
-        listed("new-busy", Some(own_pid), "busy"),
-        listed("new-waiting", None, "waiting"),
-    ]);
+    fixture.engine.reconcile(
+        vec![
+            listed(SESSION, None, "idle"),
+            listed("new-busy", Some(own_pid), "busy"),
+            listed("new-waiting", None, "waiting"),
+        ],
+        now_ms(),
+    );
     let sessions: BTreeMap<String, Session> = fixture
         .engine
         .snapshot()
@@ -885,12 +888,27 @@ fn reconciliation_adds_limited_sessions_and_feeds_statuses() {
     assert_eq!(sessions["new-waiting"].state, SessionState::NeedsPermission);
     assert_eq!(sessions["alive"].state, SessionState::Working);
     assert_eq!(sessions["gone"].state, SessionState::Ended);
-    fixture.engine.reconcile(Vec::new());
+    fixture.engine.reconcile(Vec::new(), now_ms());
     assert_eq!(
         fixture.engine.sessions["new-waiting"].state,
         SessionState::NeedsPermission
     );
     assert_eq!(fixture.engine.sessions[SESSION].state, SessionState::Ended);
+}
+
+#[test]
+fn a_listed_status_older_than_the_last_hook_event_is_ignored() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    let last_event = fixture.session().last_event_ms;
+    fixture
+        .engine
+        .reconcile(vec![listed(SESSION, None, "idle")], last_event - 1);
+    assert_eq!(fixture.state(), SessionState::Working);
+    fixture
+        .engine
+        .reconcile(vec![listed(SESSION, None, "idle")], last_event);
+    assert_eq!(fixture.state(), SessionState::Idle);
 }
 
 #[test]
@@ -949,7 +967,7 @@ fn the_turn_end_is_recorded_once_and_cleared_by_the_next_prompt() {
     ended_by(&mut fixture, &|fixture| {
         fixture
             .engine
-            .reconcile(vec![listed(SESSION, None, "idle")]);
+            .reconcile(vec![listed(SESSION, None, "idle")], now_ms());
     });
     ended_by(&mut fixture, &|fixture| {
         fixture.send(&custom("StopFailure", json!({"error": "rate_limit"})));
@@ -965,7 +983,7 @@ fn the_turn_end_is_recorded_once_and_cleared_by_the_next_prompt() {
     fixture.send(PRE_TOOL_USE);
     fixture
         .engine
-        .reconcile(vec![listed(SESSION, None, "busy")]);
+        .reconcile(vec![listed(SESSION, None, "busy")], now_ms());
     assert_eq!(fixture.session().turn_ended_ms, None);
     let persisted = fixture.engine.persisted_state().unwrap();
     let without_the_field = String::from_utf8(persisted)
@@ -1513,9 +1531,10 @@ fn usage_and_account_readings_reach_the_snapshot() {
 #[test]
 fn a_listed_session_whose_image_names_no_surface_keeps_no_entrypoint() {
     let mut fixture = fixture();
-    fixture
-        .engine
-        .reconcile(vec![listed("listed", Some(std::process::id()), "idle")]);
+    fixture.engine.reconcile(
+        vec![listed("listed", Some(std::process::id()), "idle")],
+        now_ms(),
+    );
     let session = &fixture.engine.sessions["listed"];
     assert_eq!(session.entrypoint, None);
     assert_eq!(session.editor, None);
@@ -1802,7 +1821,7 @@ fn queued_prompts_fail_when_the_session_ends_or_the_turn_is_interrupted() {
     assert!(fixture.queue("two").ok);
     fixture
         .engine
-        .reconcile(vec![listed(SESSION, None, "idle")]);
+        .reconcile(vec![listed(SESSION, None, "idle")], now_ms());
     assert_eq!(fixture.state(), SessionState::Idle);
     assert_eq!(
         fixture.prompt_statuses()[1],
@@ -2598,17 +2617,20 @@ fn titles_come_from_the_prompt_and_the_transcript_and_a_hook_title_wins() {
 #[test]
 fn a_session_without_a_transcript_is_looked_up_once_and_adopts_what_is_found() {
     let mut fixture = fixture();
-    fixture.engine.reconcile(vec![
-        listed("limited", None, "idle"),
-        listed("other", None, "idle"),
-    ]);
+    fixture.engine.reconcile(
+        vec![
+            listed("limited", None, "idle"),
+            listed("other", None, "idle"),
+        ],
+        now_ms(),
+    );
     assert_eq!(
         fixture.engine.take_transcripts_wanted(),
         ["limited", "other"]
     );
     fixture
         .engine
-        .reconcile(vec![listed("limited", None, "idle")]);
+        .reconcile(vec![listed("limited", None, "idle")], now_ms());
     assert!(fixture.engine.take_transcripts_wanted().is_empty());
     fixture
         .engine
@@ -2625,7 +2647,7 @@ fn a_session_without_a_transcript_is_looked_up_once_and_adopts_what_is_found() {
     );
     fixture
         .engine
-        .reconcile(vec![listed("limited", None, "idle")]);
+        .reconcile(vec![listed("limited", None, "idle")], now_ms());
     assert_eq!(fixture.engine.take_usage_wanted().len(), 1);
     fixture
         .engine

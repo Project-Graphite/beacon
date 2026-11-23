@@ -1192,7 +1192,7 @@ impl Engine {
         }
     }
 
-    pub fn reconcile(&mut self, listed: Vec<ListedSession>) {
+    pub fn reconcile(&mut self, listed: Vec<ListedSession>, listing_started_ms: u64) {
         let now = now_ms();
         let listed_ids: HashSet<String> = listed
             .iter()
@@ -1246,7 +1246,9 @@ impl Engine {
                 }
                 Some(_) => {}
             }
-            if let Some(status) = agent_status(entry.status.as_deref()) {
+            if let Some(status) = agent_status(entry.status.as_deref())
+                && (session.event_count == 0 || session.last_event_ms <= listing_started_ms)
+            {
                 session.apply(Input::Reconciled(status), now);
             }
             if let Some(pid) = session

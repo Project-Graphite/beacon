@@ -530,8 +530,12 @@ async fn reconcile(
     cache.refresh(&shared).await?;
     loop {
         shared.engine.borrow_mut().take_reconcile_wanted();
+        let listing_started_ms = now_ms();
         match lister.list().await {
-            Ok(listed) => shared.engine.borrow_mut().reconcile(listed),
+            Ok(listed) => shared
+                .engine
+                .borrow_mut()
+                .reconcile(listed, listing_started_ms),
             Err(error) => shared
                 .engine
                 .borrow()
