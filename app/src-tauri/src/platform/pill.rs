@@ -38,11 +38,12 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DefWindowProcW, EVENT_SYSTEM_FOREGROUND, GetClassNameW, GetForegroundWindow,
     GetWindowRect, HC_ACTION, HHOOK, IDC_ARROW, IsZoomed, KillTimer, LoadCursorW, MA_NOACTIVATE,
-    MSLLHOOKSTRUCT, PostMessageW, RegisterClassExW, SPI_SETWORKAREA, SWP_NOACTIVATE, SWP_NOSIZE,
-    SWP_NOZORDER, SetTimer, SetWindowPos, SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL,
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_CAPTURECHANGED, WM_DISPLAYCHANGE,
-    WM_DPICHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
-    WM_RBUTTONDOWN, WM_SETTINGCHANGE, WM_TIMER, WM_XBUTTONDOWN, WNDCLASSEXW,
+    MSLLHOOKSTRUCT, PostMessageW, RegisterClassExW, SPI_SETCLIENTAREAANIMATION, SPI_SETWORKAREA,
+    SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetTimer, SetWindowPos, SetWindowsHookExW,
+    UnhookWindowsHookEx, WH_MOUSE_LL, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP,
+    WM_CAPTURECHANGED, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_SETTINGCHANGE, WM_TIMER,
+    WM_XBUTTONDOWN, WNDCLASSEXW,
 };
 
 const CLASS: &str = "BeaconPill";
@@ -1168,15 +1169,16 @@ impl Pill {
                 self.reappear();
                 Some(Some(PillEvent::Moved))
             }
-            WM_SETTINGCHANGE => {
-                self.reduced_motion = reduced_motion();
-                if wparam == SPI_SETWORKAREA as WPARAM {
-                    self.relocate();
-                } else {
-                    self.present();
-                }
+            WM_SETTINGCHANGE if wparam == SPI_SETWORKAREA as WPARAM => {
+                let before = (self.rect, self.placement, self.work);
+                self.relocate();
                 self.sync();
-                Some(Some(PillEvent::Moved))
+                Some((before != (self.rect, self.placement, self.work)).then_some(PillEvent::Moved))
+            }
+            WM_SETTINGCHANGE if wparam == SPI_SETCLIENTAREAANIMATION as WPARAM => {
+                self.reduced_motion = reduced_motion();
+                self.sync();
+                Some(None)
             }
             WM_FOREGROUND_CHANGED => {
                 self.fullscreen = foreground_is_fullscreen(self.hwnd);
