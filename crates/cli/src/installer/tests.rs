@@ -269,6 +269,34 @@ fn disabled_hooks_and_managed_hooks_only_are_warned_about() {
 }
 
 #[test]
+fn a_managed_policy_with_a_bom_is_read_and_an_unparsable_one_is_a_warning() {
+    let case = case("empty-object");
+    std::fs::create_dir_all(&case.paths.managed_dir).unwrap();
+    let managed = case.paths.managed_dir.join("managed-settings.json");
+    std::fs::write(&managed, b"\xef\xbb\xbf{\"allowManagedHooksOnly\": true}").unwrap();
+    assert_eq!(
+        managed_policy_findings(&case.paths.managed_dir),
+        [(
+            Level::Fail,
+            format!(
+                "{} sets allowManagedHooksOnly: Beacon cannot work under that policy",
+                managed.display()
+            )
+        )]
+    );
+    std::fs::write(&managed, b"{\"allowManagedHooksOnly\": tru").unwrap();
+    let findings = managed_policy_findings(&case.paths.managed_dir);
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].0, Level::Warn);
+    assert!(findings[0].1.contains("could not be parsed"));
+    assert!(
+        install(&case.paths, false)
+            .unwrap()
+            .contains(&format!("Warning: {}", findings[0].1))
+    );
+}
+
+#[test]
 fn the_record_says_what_install_created() {
     let case = case("user-handlers");
     case.install();

@@ -6,11 +6,12 @@ use beacon_protocol::{DOCTOR_EVENT, HOME_ENV};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+const ROUND_TRIP_TIMEOUT: Duration = Duration::from_secs(5);
 const DOCTOR_REPLY: &[u8] = br#"{"beacon":"ok"}"#;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -93,7 +94,7 @@ pub fn run(paths: &Paths) -> (String, bool) {
     let mut checks = installation_checks(paths);
     let (core, snapshot) = core_check(&paths.home);
     checks.push(core);
-    checks.push(round_trip(&paths.home, &helper));
+    checks.push(round_trip(&paths.home, &helper, ROUND_TRIP_TIMEOUT));
     checks.push(match find_on_path("claude.exe") {
         Some(claude) => (Level::Ok, format!("claude: {}", claude.display())),
         None => (
@@ -184,7 +185,7 @@ fn managed_policy_checks(managed_dir: &Path) -> Vec<Check> {
         .chain(
             findings
                 .into_iter()
-                .map(|finding| (Level::Fail, format!("managed policy: {finding}"))),
+                .map(|(level, finding)| (level, format!("managed policy: {finding}"))),
         )
         .chain([(Level::Warn, format!("managed policy: {REGISTRY_NOTICE}"))])
         .collect()
@@ -230,7 +231,7 @@ fn core_check(home: &Path) -> (Check, Option<Snapshot>) {
     }
 }
 
-fn round_trip(home: &Path, helper: &Path) -> Check {
+fn round_trip(home: &Path, helper: &Path, timeout: Duration) -> Check {
     if !helper.is_file() {
         return (
             Level::Fail,
@@ -238,7 +239,7 @@ fn round_trip(home: &Path, helper: &Path) -> Check {
         );
     }
     let started = Instant::now();
-    let output = run_helper(home, helper);
+    let output = run_helper(home, helper, timeout);
     let elapsed_ms = started.elapsed().as_millis();
     match output {
         Ok(output) if output.stdout == DOCTOR_REPLY => (
@@ -253,6 +254,13 @@ fn round_trip(home: &Path, helper: &Path) -> Check {
                 String::from_utf8_lossy(&output.stdout)
             ),
         ),
+        Err(error) if error.kind() == io::ErrorKind::TimedOut => (
+            Level::Fail,
+            format!(
+                "round trip: the helper did not finish within {} ms",
+                timeout.as_millis()
+            ),
+        ),
         Err(error) => (
             Level::Fail,
             format!("round trip: cannot run the helper: {error}"),
@@ -260,7 +268,7 @@ fn round_trip(home: &Path, helper: &Path) -> Check {
     }
 }
 
-fn run_helper(home: &Path, helper: &Path) -> io::Result<Output> {
+fn run_helper(home: &Path, helper: &Path, timeout: Duration) -> io::Result<Output> {
     let mut child = Command::new(helper)
         .arg(DOCTOR_EVENT)
         .env(HOME_ENV, home)
@@ -268,12 +276,48 @@ fn run_helper(home: &Path, helper: &Path) -> io::Result<Output> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()?;
-    child
-        .stdin
+    let sent = write_payload(
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("the helper has no stdin"))?,
+    );
+    let mut stdout = child
+        .stdout
         .take()
-        .ok_or_else(|| io::Error::other("the helper has no stdin"))?
-        .write_all(b"{}")?;
-    child.wait_with_output()
+        .ok_or_else(|| io::Error::other("the helper has no stdout"))?;
+    let reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).map(|_| bytes)
+    });
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    sent?;
+    let stdout = reader
+        .join()
+        .map_err(|_| io::Error::other("reading the helper output failed"))??;
+    Ok(Output {
+        status,
+        stdout,
+        stderr: Vec::new(),
+    })
+}
+
+fn write_payload(mut stdin: impl Write) -> io::Result<()> {
+    match stdin.write_all(b"{}") {
+        Err(error) if error.kind() != io::ErrorKind::BrokenPipe => Err(error),
+        _ => Ok(()),
+    }
 }
 
 fn find_on_path(file_name: &str) -> Option<PathBuf> {

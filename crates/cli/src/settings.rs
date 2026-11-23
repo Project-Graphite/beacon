@@ -161,14 +161,23 @@ pub fn is_beacon_handler(handler: &Value) -> bool {
         .is_some_and(|name| name.eq_ignore_ascii_case(HELPER_FILE_NAME))
 }
 
-fn beacon_handlers(groups: &Value) -> impl Iterator<Item = &Value> {
+fn beacon_handlers(groups: &Value) -> impl Iterator<Item = (&Value, bool)> {
     groups
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|group| group.get("hooks")?.as_array())
-        .flatten()
-        .filter(|handler| is_beacon_handler(handler))
+        .flat_map(|group| {
+            let narrowed = group
+                .get("matcher")
+                .is_some_and(|matcher| !matches!(matcher.as_str(), Some("" | "*")));
+            group
+                .get("hooks")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(move |handler| (handler, narrowed))
+        })
+        .filter(|(handler, _)| is_beacon_handler(handler))
 }
 
 pub fn beacon_groups(settings: &Map<String, Value>) -> BTreeMap<&str, Vec<&Value>> {
@@ -269,15 +278,18 @@ pub fn registration_problems(settings: &Map<String, Value>, helper: &str) -> Vec
     let hooks = settings.get("hooks").and_then(Value::as_object);
     let mut problems = Vec::new();
     for (event, argument, shape) in HANDLERS {
-        let found: Vec<&Value> = hooks
+        let found: Vec<(&Value, bool)> = hooks
             .and_then(|hooks| hooks.get(event))
             .into_iter()
             .flat_map(beacon_handlers)
-            .filter(|handler| handler_argument(handler) == Some(argument))
+            .filter(|(handler, _)| handler_argument(handler) == Some(argument))
             .collect();
         match found.as_slice() {
             [] => problems.push(format!("{argument} is not registered")),
-            [handler] if **handler == beacon_handler(argument, shape, helper) => {}
+            [(handler, false)] if **handler == beacon_handler(argument, shape, helper) => {}
+            [(_, true)] => problems.push(format!(
+                "{argument} is limited by a matcher, so Beacon only sees part of {event}"
+            )),
             [_] => problems.push(format!("{argument} has the wrong helper path or shape")),
             several => problems.push(format!("{argument} is registered {} times", several.len())),
         }
@@ -288,7 +300,7 @@ pub fn registration_problems(settings: &Map<String, Value>, helper: &str) -> Vec
             .filter(|(beacon_event, ..)| beacon_event == event)
             .map(|(_, argument, _)| *argument)
             .collect();
-        let stray = beacon_handlers(groups).any(|handler| {
+        let stray = beacon_handlers(groups).any(|(handler, _)| {
             !handler_argument(handler).is_some_and(|argument| arguments.contains(&argument))
         });
         match (stray, arguments.is_empty()) {
@@ -400,6 +412,22 @@ mod tests {
     }
 
     const HELPER: &str = r"C:\b\beacon-hook.exe";
+
+    #[test]
+    fn a_matcher_that_narrows_the_event_is_a_problem() {
+        let mut settings = Map::new();
+        add_beacon(&mut settings, HELPER).unwrap();
+        for matcher in ["", "*"] {
+            settings["hooks"]["PreToolUse"][0]["matcher"] = json!(matcher);
+            assert!(registration_problems(&settings, HELPER).is_empty());
+        }
+        settings["hooks"]["PreToolUse"][0]["matcher"] = json!("Bash");
+        assert_eq!(
+            registration_problems(&settings, HELPER),
+            ["PreToolUse is limited by a matcher, so Beacon only sees part of PreToolUse"]
+        );
+        assert!(has_beacon(&settings));
+    }
 
     #[test]
     fn registration_problems_name_each_fault() {

@@ -170,6 +170,65 @@ fn hooks_status_says_installed_not_installed_or_needs_repair() {
 }
 
 #[test]
+fn a_matcher_added_to_a_beacon_group_needs_repair_until_reinstalled() {
+    let root = TempDir::new("doctor-matcher");
+    let helper_source = root.0.join("beacon-hook.exe");
+    std::fs::write(&helper_source, b"stand-in helper").unwrap();
+    let paths = test_paths(&root, helper_source);
+    install(&paths, true).unwrap();
+    let mut settings: Value =
+        serde_json::from_slice(&std::fs::read(&paths.settings).unwrap()).unwrap();
+    settings["hooks"]["PreToolUse"][0]["matcher"] = json!("Bash");
+    std::fs::write(
+        &paths.settings,
+        serde_json::to_string_pretty(&settings).unwrap(),
+    )
+    .unwrap();
+    let status = hooks_status(&paths);
+    assert_eq!(status.state, HooksState::NeedsRepair);
+    assert_eq!(
+        status.problems,
+        ["hooks: PreToolUse is limited by a matcher, so Beacon only sees part of PreToolUse"]
+    );
+    install(&paths, true).unwrap();
+    assert_eq!(hooks_status(&paths).state, HooksState::Installed);
+}
+
+#[test]
+fn a_helper_that_outlasts_the_timeout_fails_the_round_trip() {
+    let root = TempDir::new("doctor-timeout");
+    let paths = test_paths(&root, built_helper());
+    install(&paths, true).unwrap();
+    assert_eq!(
+        round_trip(&paths.home, &paths.helper(), Duration::ZERO),
+        (
+            Level::Fail,
+            "round trip: the helper did not finish within 0 ms".to_string()
+        )
+    );
+}
+
+#[test]
+fn a_closed_stdin_is_not_a_failed_write_but_other_errors_are() {
+    struct Failing(io::ErrorKind);
+    impl Write for Failing {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(self.0.into())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    assert!(write_payload(Failing(io::ErrorKind::BrokenPipe)).is_ok());
+    assert_eq!(
+        write_payload(Failing(io::ErrorKind::PermissionDenied))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::PermissionDenied
+    );
+}
+
+#[test]
 fn surfaces_are_counted_with_limited_sessions() {
     let session = |id: &str, entrypoint: Option<&str>, limited: bool| Session {
         entrypoint: entrypoint.map(str::to_string),

@@ -1,3 +1,4 @@
+use crate::doctor::{Check, Level};
 use crate::settings::{self, Created, HELPER_FILE_NAME, TextFormat};
 use crate::{Context, diff};
 use beacon_core::{home_dir, now_ms, utc_timestamp};
@@ -109,7 +110,10 @@ pub fn install(paths: &Paths, apply: bool) -> Result<String, String> {
     let _ = writeln!(report, "Helper:   {}", paths.helper_source.display());
     let _ = writeln!(report, "  copied to {}", helper.display());
     report.push_str(&changes(paths, current.as_deref(), Some(&installed)));
-    let mut warnings = managed_policy_findings(&paths.managed_dir);
+    let mut warnings: Vec<String> = managed_policy_findings(&paths.managed_dir)
+        .into_iter()
+        .map(|(_, finding)| finding)
+        .collect();
     if hooks_disabled {
         warnings.insert(
             0,
@@ -302,7 +306,7 @@ fn changes(paths: &Paths, before: Option<&[u8]>, after: Option<&[u8]>) -> String
     }
 }
 
-pub fn managed_policy_findings(managed_dir: &Path) -> Vec<String> {
+pub fn managed_policy_findings(managed_dir: &Path) -> Vec<Check> {
     let mut drop_ins: Vec<PathBuf> = std::fs::read_dir(managed_dir.join("managed-settings.d"))
         .into_iter()
         .flatten()
@@ -317,20 +321,36 @@ pub fn managed_policy_findings(managed_dir: &Path) -> Vec<String> {
         .chain(drop_ins)
         .filter_map(|path| match std::fs::read(&path) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => Some(format!(
-                "{} could not be read ({error}); if it sets allowManagedHooksOnly, Beacon cannot work",
-                path.display()
+            Err(error) => Some((
+                Level::Fail,
+                format!(
+                    "{} could not be read ({error}); if it sets allowManagedHooksOnly, Beacon cannot work",
+                    path.display()
+                ),
             )),
-            Ok(bytes) => serde_json::from_slice::<Value>(&bytes)
-                .ok()?
-                .get("allowManagedHooksOnly")
-                .filter(|value| **value == Value::Bool(true))
-                .map(|_| {
+            Ok(bytes) => match serde_json::from_slice::<Value>(
+                bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes),
+            ) {
+                Err(error) => Some((
+                    Level::Warn,
                     format!(
-                        "{} sets allowManagedHooksOnly: Beacon cannot work under that policy",
+                        "{} could not be parsed ({error}); if it sets allowManagedHooksOnly, Beacon cannot work",
                         path.display()
-                    )
-                }),
+                    ),
+                )),
+                Ok(policy) => policy
+                    .get("allowManagedHooksOnly")
+                    .filter(|value| **value == Value::Bool(true))
+                    .map(|_| {
+                        (
+                            Level::Fail,
+                            format!(
+                                "{} sets allowManagedHooksOnly: Beacon cannot work under that policy",
+                                path.display()
+                            ),
+                        )
+                    }),
+            },
         })
         .collect()
 }
