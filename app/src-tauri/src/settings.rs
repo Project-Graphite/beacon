@@ -151,32 +151,6 @@ pub async fn set_ui_settings(
 }
 
 #[tauri::command]
-pub async fn get_login_start(feed: State<'_, Arc<Feed>>) -> Result<bool, String> {
-    Ok(positions::ui_settings(&feed.home).start_mode == StartMode::Login)
-}
-
-#[tauri::command]
-pub async fn set_login_start(
-    app: AppHandle,
-    feed: State<'_, Arc<Feed>>,
-    enabled: bool,
-) -> Result<(), String> {
-    change_settings(
-        &app,
-        &feed.home,
-        UiSettingsChange {
-            start_mode: Some(if enabled {
-                StartMode::Login
-            } else {
-                StartMode::Claude
-            }),
-            ..UiSettingsChange::default()
-        },
-    )
-    .map(drop)
-}
-
-#[tauri::command]
 pub async fn preview_attention(app: AppHandle) {
     shell::post(&app, Action::PreviewAttention);
 }

@@ -23,8 +23,6 @@
     "allow-hooks-plan",
     "allow-hooks-apply",
     "allow-set-ui-settings",
-    "allow-get-login-start",
-    "allow-set-login-start",
     "allow-preview-attention",
     "allow-open-logs-folder",
     "allow-app-info",

@@ -98,8 +98,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings::hooks_plan,
             settings::hooks_apply,
             settings::set_ui_settings,
-            settings::get_login_start,
-            settings::set_login_start,
             settings::preview_attention,
             settings::open_logs_folder,
             settings::app_info,

@@ -20,8 +20,6 @@ fn main() {
             "hooks_plan",
             "hooks_apply",
             "set_ui_settings",
-            "get_login_start",
-            "set_login_start",
             "preview_attention",
             "open_logs_folder",
             "app_info",
