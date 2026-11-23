@@ -195,13 +195,13 @@ impl Tray {
         if state != self.state {
             self.state = state;
             if let Err(error) = self.icon.set_icon(Some(image(state, &self.text))) {
-                eprintln!("cannot update the tray icon: {error}");
+                log_error!("cannot update the tray icon: {error}");
             }
         }
         let tooltip = tooltip(snapshot);
         if tooltip != self.tooltip {
             if let Err(error) = self.icon.set_tooltip(Some(&tooltip)) {
-                eprintln!("cannot update the tray tooltip: {error}");
+                log_error!("cannot update the tray tooltip: {error}");
             }
             self.tooltip = tooltip;
         }
@@ -214,7 +214,7 @@ impl Tray {
             &display_menu(&self.home),
         );
         if let Err(error) = rebuilt.and_then(|menu| self.icon.set_menu(Some(menu))) {
-            eprintln!("cannot rebuild the tray menu: {error}");
+            log_error!("cannot rebuild the tray menu: {error}");
         }
     }
 
@@ -232,7 +232,7 @@ impl Tray {
             .pill_item
             .set_text(pill_label(shown, positions::style(&self.home)))
         {
-            eprintln!("cannot relabel the pill menu item: {error}");
+            log_error!("cannot relabel the pill menu item: {error}");
         }
     }
 }

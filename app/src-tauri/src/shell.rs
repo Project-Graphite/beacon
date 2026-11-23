@@ -149,7 +149,7 @@ pub fn dispatch(action: Action) {
 
 pub fn post(app: &AppHandle, action: Action) {
     if let Err(error) = app.run_on_main_thread(move || dispatch(action)) {
-        eprintln!("cannot reach the main thread: {error}");
+        log_error!("cannot reach the main thread: {error}");
     }
 }
 
@@ -253,7 +253,7 @@ impl Shell {
             }
             Action::SetStyle(style) => {
                 if let Err(error) = positions::save_style(&self.feed.home, style) {
-                    eprintln!("cannot save the style: {error}");
+                    log_error!("cannot save the style: {error}");
                 }
                 pill::set_style(style);
                 self.tray.show_pill_state(pill::user_visible());
@@ -335,7 +335,7 @@ impl Shell {
         if self.panel.is_some()
             && let Err(error) = self.app.emit_to(PANEL, "beacon://settings-changed", ())
         {
-            eprintln!("cannot tell the panel the settings changed: {error}");
+            log_error!("cannot tell the panel the settings changed: {error}");
         }
     }
 
@@ -467,7 +467,7 @@ impl Shell {
 
     fn change_displays(&mut self, saved: io::Result<()>) {
         if let Err(error) = saved {
-            eprintln!("cannot save the display choice: {error}");
+            log_error!("cannot save the display choice: {error}");
         }
         pill::retarget();
         self.overlay_changed();
@@ -512,7 +512,7 @@ impl Shell {
                 self.recheck_after(KEPT_WARM);
                 self.recheck_after(KEPT_WARM_WHILE_ACTIVE);
             }
-            Err(error) => eprintln!("cannot create the panel: {error}"),
+            Err(error) => log_error!("cannot create the panel: {error}"),
         }
     }
 
@@ -546,7 +546,7 @@ impl Shell {
             panel.focused = true;
             match panel.window.hwnd() {
                 Ok(hwnd) => platform::focus_window(hwnd.0),
-                Err(error) => eprintln!("cannot focus the panel: {error}"),
+                Err(error) => log_error!("cannot focus the panel: {error}"),
             }
         }
         self.place();
@@ -558,10 +558,10 @@ impl Shell {
         };
         match panel.window.hwnd() {
             Ok(hwnd) => platform::show_without_activation(hwnd.0),
-            Err(error) => eprintln!("cannot show the panel: {error}"),
+            Err(error) => log_error!("cannot show the panel: {error}"),
         }
         if let Err(error) = panel.window.as_ref().show() {
-            eprintln!("cannot show the panel page: {error}");
+            log_error!("cannot show the panel page: {error}");
         }
     }
 
@@ -572,11 +572,11 @@ impl Shell {
         panel.closing = None;
         panel.hidden_since = Some(Instant::now());
         if let Err(error) = panel.window.as_ref().hide() {
-            eprintln!("cannot hide the panel page: {error}");
+            log_error!("cannot hide the panel page: {error}");
         }
         match panel.window.hwnd() {
             Ok(hwnd) => platform::hide_window(hwnd.0),
-            Err(error) => eprintln!("cannot hide the panel: {error}"),
+            Err(error) => log_error!("cannot hide the panel: {error}"),
         }
         self.recheck_after(KEPT_WARM);
         self.recheck_after(KEPT_WARM_WHILE_ACTIVE);
@@ -593,7 +593,7 @@ impl Shell {
         self.closings += 1;
         panel.closing = Some(self.closings);
         if let Err(error) = self.app.emit_to(PANEL, "beacon://closing", ()) {
-            eprintln!("cannot tell the panel it is closing: {error}");
+            log_error!("cannot tell the panel it is closing: {error}");
         }
         let (app, closing) = (self.app.clone(), self.closings);
         thread::spawn(move || {
@@ -606,7 +606,7 @@ impl Shell {
         if let Some(panel) = self.panel.take()
             && let Err(error) = panel.window.destroy()
         {
-            eprintln!("cannot close the panel: {error}");
+            log_error!("cannot close the panel: {error}");
         }
     }
 
@@ -622,7 +622,7 @@ impl Shell {
                 platform::place_window(hwnd.0, rect).map_err(|error| error.to_string())
             });
         if let Err(error) = placed {
-            eprintln!("cannot place the panel: {error}");
+            log_error!("cannot place the panel: {error}");
         }
     }
 
@@ -647,7 +647,7 @@ impl Shell {
                 ui: &self.settings,
             };
             if let Err(error) = self.app.emit_to(PANEL, "beacon://opened", payload) {
-                eprintln!("cannot tell the panel it opened: {error}");
+                log_error!("cannot tell the panel it opened: {error}");
             }
         }
     }
@@ -748,7 +748,7 @@ impl Shell {
         if self.mode().is_some()
             && let Err(error) = self.app.emit_to(PANEL, "beacon://snapshot", &self.snapshot)
         {
-            eprintln!("cannot send the snapshot to the panel: {error}");
+            log_error!("cannot send the snapshot to the panel: {error}");
         }
     }
 
@@ -772,7 +772,7 @@ impl Shell {
             .body(toast.body)
             .show()
         {
-            eprintln!("cannot show a toast: {error}");
+            log_error!("cannot show a toast: {error}");
         }
     }
 }

@@ -36,7 +36,7 @@ impl Surface {
     fn resize(&mut self, width: i32, height: i32) -> bool {
         let (created, bits) = bitmap(self.dc, width, height);
         if created.is_null() || bits.is_null() {
-            eprintln!(
+            log_error!(
                 "cannot create a layer bitmap: {}",
                 io::Error::last_os_error()
             );

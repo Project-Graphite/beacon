@@ -42,7 +42,7 @@ impl Feed {
         if let Some(core) = self.hosted.lock().unwrap().take()
             && let Err(error) = core.shutdown()
         {
-            eprintln!("the Beacon core did not stop cleanly: {error}");
+            log_error!("the Beacon core did not stop cleanly: {error}");
         }
     }
 
@@ -64,7 +64,7 @@ impl Feed {
                             }) => publish(Some(snapshot)),
                             Ok(_) => {}
                             Err(error) => {
-                                eprintln!("the Beacon subscription failed: {error}");
+                                log_error!("the Beacon subscription failed: {error}");
                                 closed_by_core = false;
                                 break;
                             }
@@ -74,7 +74,7 @@ impl Feed {
                         self.reap();
                     }
                 }
-                Err(error) => eprintln!("cannot connect to the Beacon core: {error}"),
+                Err(error) => log_error!("cannot connect to the Beacon core: {error}"),
             }
             if !self.quitting() {
                 publish(None);
@@ -105,7 +105,7 @@ impl Feed {
         match started {
             Ok(core) => *hosted = Some(core),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => eprintln!("cannot host the Beacon core: {error}"),
+            Err(error) => log_error!("cannot host the Beacon core: {error}"),
         }
     }
 
@@ -114,7 +114,7 @@ impl Feed {
         if let Some(core) = stopped
             && let Err(error) = core.wait()
         {
-            eprintln!("the hosted Beacon core stopped: {error}");
+            log_error!("the hosted Beacon core stopped: {error}");
         }
     }
 }
@@ -135,7 +135,7 @@ pub fn request(home: &Path, request: &Request) -> Result<Reply, String> {
 pub fn send(home: PathBuf, message: Request) {
     thread::spawn(move || {
         if let Err(error) = request(&home, &message) {
-            eprintln!("the Beacon core did not take {message:?}: {error}");
+            log_error!("the Beacon core did not take {message:?}: {error}");
         }
     });
 }

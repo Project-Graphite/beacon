@@ -433,7 +433,7 @@ pub fn move_to_edge(edge: Edge) {
         let from = pill.rect;
         pill.placement = TabPlacement { edge, offset: 0.5 };
         if let Err(error) = positions::save_tab(&pill.home, &pill.display, pill.placement) {
-            eprintln!("cannot save the tab position: {error}");
+            log_error!("cannot save the tab position: {error}");
         }
         pill.glide_from(from);
     });
@@ -509,7 +509,7 @@ pub fn watch_presses(watching: bool) {
                 )
             };
             if pill.press_hook.is_null() {
-                eprintln!(
+                log_error!(
                     "cannot watch for presses outside the panel: {}",
                     io::Error::last_os_error()
                 );
@@ -961,7 +961,7 @@ impl Pill {
         self.move_to(snapped.left, snapped.top);
         self.adopt(monitor);
         if let Err(error) = positions::choose_display(&self.home, &monitor.id) {
-            eprintln!("cannot save the chosen display: {error}");
+            log_error!("cannot save the chosen display: {error}");
         }
         self.save(&monitors, &monitor.id);
     }
@@ -988,7 +988,7 @@ impl Pill {
                 let saved = positions::save_tab(&self.home, &monitor.id, placement)
                     .and_then(|()| positions::choose_display(&self.home, &monitor.id));
                 if let Err(error) = saved {
-                    eprintln!("cannot save the tab position: {error}");
+                    log_error!("cannot save the tab position: {error}");
                 }
             }
             None => self.placement = origin,
@@ -1000,7 +1000,7 @@ impl Pill {
         let saved = positions::save(&self.home, &layout_signature(monitors), self.rect)
             .and_then(|()| positions::save_for_display(&self.home, display, self.rect));
         if let Err(error) = saved {
-            eprintln!("cannot save the pill position: {error}");
+            log_error!("cannot save the pill position: {error}");
         }
     }
 

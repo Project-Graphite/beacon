@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[macro_use]
+mod applog;
 mod displays;
 mod feed;
 mod geometry;
@@ -61,6 +63,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         beacon_core::home_dir()
             .ok_or("cannot locate the Beacon home: set BEACON_HOME or LOCALAPPDATA")?,
     );
+    if let Err(error) = applog::init(&feed.home) {
+        eprintln!("cannot open the app log: {error}");
+    }
     let mut builder = tauri::Builder::default();
     if std::env::var_os("BEACON_HOME").is_none() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, arguments, _| {
@@ -120,21 +125,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             })?;
             shell::install(Shell::new(handle.clone(), feed.clone(), tray));
             if let Err(error) = settings::register_hotkey(&handle, &positions::hotkey(&feed.home)) {
-                eprintln!("{error}");
+                log_error!("{error}");
             }
             let installed = settings::is_installed(&std::env::current_exe()?);
             if installed
                 && let Err(error) =
                     toasts::register_identity(&feed.home, &handle.config().identifier)
             {
-                eprintln!("cannot register the notification identity: {error}");
+                log_error!("cannot register the notification identity: {error}");
             }
             if let Err(error) = settings::apply_start_mode(
                 &feed.home,
                 positions::ui_settings(&feed.home).start_mode,
                 installed,
             ) {
-                eprintln!("cannot apply the start mode: {error}");
+                log_error!("cannot apply the start mode: {error}");
             }
             let publisher = handle.clone();
             feed.start(move |snapshot| shell::post(&publisher, Action::Snapshot(snapshot)))?;

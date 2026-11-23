@@ -47,7 +47,7 @@ fn pace() {
         )
     };
     if timer.is_null() {
-        eprintln!(
+        log_error!(
             "cannot create the frame timer: {}",
             std::io::Error::last_os_error()
         );

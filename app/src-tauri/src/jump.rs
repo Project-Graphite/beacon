@@ -77,7 +77,7 @@ fn focused_session(sessions: &[Session]) -> Option<String> {
         return None;
     }
     focus::foreground_session(sessions).unwrap_or_else(|error| {
-        eprintln!("cannot tell which session has focus: {error}");
+        log_error!("cannot tell which session has focus: {error}");
         None
     })
 }

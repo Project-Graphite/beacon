@@ -27,7 +27,7 @@ pub use control::{
     SessionDetail, Snapshot, Subscription, TimelineEntry,
 };
 pub use lister::{ClaudeAgentsLister, ListFuture, ListedSession, SessionLister};
-pub use log::{now_ms, utc_timestamp};
+pub use log::{Logger, now_ms, utc_timestamp};
 pub use platform::clipboard;
 pub use preview::{input_preview, one_line};
 pub use redact::redact;

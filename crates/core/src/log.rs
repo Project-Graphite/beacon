@@ -1,16 +1,16 @@
 use crate::config::LogLevel;
-use std::cell::RefCell;
 use std::fmt::Display;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
 
 pub struct Logger {
     path: PathBuf,
-    file: RefCell<(File, u64)>,
+    file: Mutex<(File, u64)>,
     level: LogLevel,
 }
 
@@ -27,7 +27,7 @@ impl Logger {
         }
         Ok(Logger {
             path: path.to_path_buf(),
-            file: RefCell::new(open_for_append(path)?),
+            file: Mutex::new(open_for_append(path)?),
             level,
         })
     }
@@ -59,7 +59,7 @@ impl Logger {
             LogLevel::Debug => "DEBUG",
         };
         let line = format!("{} {label} {message}\n", utc_timestamp(now_ms()));
-        let mut file = self.file.borrow_mut();
+        let mut file = self.file.lock().unwrap_or_else(PoisonError::into_inner);
         if file.1 + line.len() as u64 > MAX_LOG_BYTES {
             let _ = std::fs::rename(&self.path, self.path.with_extension("log.1"));
             if let Ok(reopened) = open_for_append(&self.path) {
