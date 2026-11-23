@@ -296,6 +296,122 @@ fn a_managed_policy_with_a_bom_is_read_and_an_unparsable_one_is_a_warning() {
     );
 }
 
+fn backup_names(paths: &Paths) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(paths.backups())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_no_op_reinstall_writes_no_new_backup() {
+    let case = case("realistic");
+    case.install();
+    let names = backup_names(&case.paths);
+    let record = read_record(&case.paths).unwrap().unwrap();
+    case.install();
+    assert_eq!(backup_names(&case.paths), names);
+    assert_eq!(
+        read_record(&case.paths)
+            .unwrap()
+            .unwrap()
+            .installed_copy_path,
+        record.installed_copy_path
+    );
+}
+
+#[test]
+fn backups_made_in_the_same_second_get_distinct_names() {
+    let root = TempDir::new("backup-names");
+    let first = unused_backup(&root.0, ".json");
+    std::fs::write(&first, b"a").unwrap();
+    let second = unused_backup(&root.0, ".json");
+    assert_ne!(first, second);
+    std::fs::write(&second, b"b").unwrap();
+    assert_eq!(std::fs::read(&first).unwrap(), b"a");
+}
+
+fn seed_old_backups(paths: &Paths, kinds: &[&str]) {
+    std::fs::create_dir_all(paths.backups()).unwrap();
+    for day in 1..=12 {
+        for kind in kinds {
+            std::fs::write(
+                paths
+                    .backups()
+                    .join(format!("settings-202001{day:02}-000000{kind}")),
+                b"old",
+            )
+            .unwrap();
+        }
+    }
+}
+
+fn backups_of_kind(paths: &Paths, kind: &str) -> usize {
+    backup_names(paths)
+        .iter()
+        .filter(|name| {
+            name.strip_prefix("settings-")
+                .and_then(|name| name.strip_suffix(kind))
+                .is_some_and(|stem| !stem.contains('.'))
+        })
+        .count()
+}
+
+#[test]
+fn install_keeps_the_newest_ten_backups_of_each_kind() {
+    let case = case("realistic");
+    case.install();
+    seed_old_backups(&case.paths, &[".json", ".installed.json"]);
+    std::fs::write(case.paths.backups().join("notes.txt"), b"keep").unwrap();
+    std::fs::remove_file(case.paths.record()).unwrap();
+    case.install();
+    assert_eq!(backups_of_kind(&case.paths, ".json"), 10);
+    assert_eq!(backups_of_kind(&case.paths, ".installed.json"), 10);
+    assert!(case.paths.backups().join("notes.txt").exists());
+    assert!(
+        read_record(&case.paths)
+            .unwrap()
+            .unwrap()
+            .installed_copy_path
+            .exists()
+    );
+}
+
+#[test]
+fn uninstall_keeps_the_newest_ten_before_uninstall_backups() {
+    let case = case("realistic");
+    case.install();
+    seed_old_backups(&case.paths, &[".before-uninstall.json"]);
+    case.uninstall();
+    assert_eq!(backups_of_kind(&case.paths, ".before-uninstall.json"), 10);
+    assert!(
+        !case
+            .paths
+            .backups()
+            .join("settings-20200101-000000.before-uninstall.json")
+            .exists()
+    );
+}
+
+#[test]
+fn a_backup_the_record_points_at_is_never_pruned() {
+    let root = TempDir::new("backup-referenced");
+    for day in 1..=12 {
+        std::fs::write(
+            root.0.join(format!("settings-202001{day:02}-000000.json")),
+            b"old",
+        )
+        .unwrap();
+    }
+    let oldest = root.0.join("settings-20200101-000000.json");
+    prune_backups(&root.0, ".json", &[Some(oldest.as_path())]);
+    assert_eq!(std::fs::read_dir(&root.0).unwrap().count(), 11);
+    assert!(oldest.exists());
+    assert!(!root.0.join("settings-20200102-000000.json").exists());
+}
+
 #[test]
 fn the_record_says_what_install_created() {
     let case = case("user-handlers");

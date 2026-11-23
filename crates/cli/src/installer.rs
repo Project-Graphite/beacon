@@ -9,6 +9,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 const MANAGED_DIR: &str = r"C:\Program Files\ClaudeCode";
+const MAX_BACKUPS_PER_KIND: usize = 10;
 pub const REGISTRY_NOTICE: &str = "the registry-delivered managed policy is not checked; if it sets allowManagedHooksOnly, Beacon cannot work";
 
 pub struct Paths {
@@ -128,9 +129,11 @@ pub fn install(paths: &Paths, apply: bool) -> Result<String, String> {
         report.push_str("Nothing was changed. Run again with --yes to install.\n");
         return Ok(report);
     }
-    let stamp = backup_stamp();
     let previous =
         read_record(paths)?.filter(|record| same_path(&record.settings_path, &paths.settings));
+    let previous_copy = previous
+        .as_ref()
+        .map(|record| record.installed_copy_path.clone());
     std::fs::create_dir_all(paths.bin()).context("cannot create the helper directory")?;
     remove_retired_helpers(&paths.bin());
     std::fs::create_dir_all(paths.backups()).context("cannot create the backups directory")?;
@@ -155,7 +158,7 @@ pub fn install(paths: &Paths, apply: bool) -> Result<String, String> {
         _ => {
             let backup_path = match &current {
                 Some(bytes) => {
-                    let path = paths.backups().join(format!("settings-{stamp}.json"));
+                    let path = unused_backup(&paths.backups(), ".json");
                     write_file(&path, bytes)?;
                     Some(path)
                 }
@@ -167,10 +170,14 @@ pub fn install(paths: &Paths, apply: bool) -> Result<String, String> {
     if current.as_ref() != Some(&installed) {
         write_atomic(&paths.settings, &installed)?;
     }
-    let installed_copy_path = paths
-        .backups()
-        .join(format!("settings-{stamp}.installed.json"));
-    write_file(&installed_copy_path, &installed)?;
+    let installed_copy_path = match previous_copy {
+        Some(path) if std::fs::read(&path).ok().as_ref() == Some(&installed) => path,
+        _ => {
+            let path = unused_backup(&paths.backups(), ".installed.json");
+            write_file(&path, &installed)?;
+            path
+        }
+    };
     let record = InstallRecord {
         settings_path: paths.settings.clone(),
         existed_before,
@@ -182,6 +189,13 @@ pub fn install(paths: &Paths, apply: bool) -> Result<String, String> {
     };
     let record_bytes = serde_json::to_vec_pretty(&record).context("cannot encode install.json")?;
     write_atomic(&paths.record(), &record_bytes)?;
+    let referenced = [
+        Some(record.installed_copy_path.as_path()),
+        record.backup_path.as_deref(),
+    ];
+    for kind in [".json", ".installed.json"] {
+        prune_backups(&paths.backups(), kind, &referenced);
+    }
     report.push_str("Installed.\n");
     Ok(report)
 }
@@ -254,11 +268,10 @@ pub fn uninstall(paths: &Paths, apply: bool) -> Result<String, String> {
             std::fs::create_dir_all(paths.backups())
                 .context("cannot create the backups directory")?;
             write_file(
-                &paths
-                    .backups()
-                    .join(format!("settings-{}.before-uninstall.json", backup_stamp())),
+                &unused_backup(&paths.backups(), ".before-uninstall.json"),
                 bytes,
             )?;
+            prune_backups(&paths.backups(), ".before-uninstall.json", &[]);
         }
         match &target {
             Some(bytes) => write_atomic(&paths.settings, bytes)?,
@@ -425,6 +438,43 @@ fn remove_if_present(path: &Path) -> Result<(), String> {
 
 fn same_path(left: &Path, right: &Path) -> bool {
     left.as_os_str().eq_ignore_ascii_case(right.as_os_str())
+}
+
+fn unused_backup(directory: &Path, kind: &str) -> PathBuf {
+    let stamp = backup_stamp();
+    let mut path = directory.join(format!("settings-{stamp}{kind}"));
+    let mut attempt = 1;
+    while path.exists() {
+        attempt += 1;
+        path = directory.join(format!("settings-{stamp}-{attempt}{kind}"));
+    }
+    path
+}
+
+fn backup_order(stem: &str) -> (&str, u32) {
+    match stem.rsplit_once('-') {
+        Some((stamp, attempt)) if attempt.len() != 6 => (stamp, attempt.parse().unwrap_or(0)),
+        _ => (stem, 0),
+    }
+}
+
+fn prune_backups(directory: &Path, kind: &str, referenced: &[Option<&Path>]) {
+    let mut backups: Vec<(String, PathBuf)> = std::fs::read_dir(directory)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let stem = name.strip_prefix("settings-")?.strip_suffix(kind)?;
+            (!stem.contains('.')).then(|| (stem.to_string(), entry.path()))
+        })
+        .collect();
+    backups.sort_by(|(left, _), (right, _)| backup_order(right).cmp(&backup_order(left)));
+    for (_, path) in backups.into_iter().skip(MAX_BACKUPS_PER_KIND) {
+        if !referenced.contains(&Some(path.as_path())) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 fn backup_stamp() -> String {
