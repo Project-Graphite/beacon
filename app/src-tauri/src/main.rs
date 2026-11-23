@@ -122,9 +122,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Err(error) = settings::register_hotkey(&handle, &positions::hotkey(&feed.home)) {
                 eprintln!("{error}");
             }
-            let installed = !std::env::current_exe()?
-                .to_string_lossy()
-                .contains(r"\target\");
+            let installed = settings::is_installed(&std::env::current_exe()?);
             if installed
                 && let Err(error) =
                     toasts::register_identity(&feed.home, &handle.config().identifier)

@@ -44,6 +44,10 @@ fn change_hooks(paths: &Paths, action: HooksAction, apply: bool) -> Result<Strin
     }
 }
 
+pub fn is_installed(executable: &Path) -> bool {
+    !executable.to_string_lossy().contains(r"\target\")
+}
+
 fn login_command(executable: &Path) -> String {
     format!("\"{}\"", executable.display())
 }
@@ -121,12 +125,17 @@ fn change_settings(
     positions::save_ui_settings(home, change)
         .map_err(|error| format!("cannot save the settings: {error}"))?;
     let settings = positions::ui_settings(home);
-    if start_mode_changed {
-        apply_start_mode(home, settings.start_mode, true)
-            .map_err(|error| format!("cannot apply the start mode: {error}"))?;
-    }
+    let applied = if start_mode_changed {
+        std::env::current_exe()
+            .and_then(|executable| {
+                apply_start_mode(home, settings.start_mode, is_installed(&executable))
+            })
+            .map_err(|error| format!("cannot apply the start mode: {error}"))
+    } else {
+        Ok(())
+    };
     shell::post(app, Action::SettingsChanged);
-    Ok(settings)
+    applied.map(|()| settings)
 }
 
 #[tauri::command]
@@ -249,6 +258,16 @@ mod tests {
             login_command(Path::new(r"C:\Program Files\Beacon\beacon-app.exe")),
             r#""C:\Program Files\Beacon\beacon-app.exe""#
         );
+    }
+
+    #[test]
+    fn a_build_under_target_is_not_the_installed_beacon() {
+        assert!(!is_installed(Path::new(
+            r"C:\src\beacon\target\fast\beacon-app.exe"
+        )));
+        assert!(is_installed(Path::new(
+            r"C:\Users\amr\AppData\Local\Beacon\beacon-app.exe"
+        )));
     }
 
     #[test]
