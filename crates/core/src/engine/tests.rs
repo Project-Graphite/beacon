@@ -391,6 +391,32 @@ fn questions_and_plans_have_their_own_kinds() {
 }
 
 #[test]
+fn a_question_refuses_every_allow_but_still_accepts_a_deny() {
+    let mut fixture = fixture();
+    let question = custom(
+        "PermissionRequest",
+        json!({"tool_name": "AskUserQuestion", "tool_input": {"questions": [{"question": "Which?"}]}}),
+    );
+    let (id, mut receiver) = fixture.ask(&question);
+    for decision in [
+        Decision::Allow,
+        Decision::AllowWithInput { input: json!({}) },
+        Decision::AllowAlways {
+            permissions: Vec::new(),
+        },
+    ] {
+        assert!(fixture.engine.decide(id, decision).is_err());
+        assert_eq!(fixture.engine.snapshot().pending.len(), 1);
+    }
+    assert!(receiver.try_recv().is_err());
+    fixture
+        .engine
+        .decide(id, Decision::Deny { message: None })
+        .unwrap();
+    assert!(receiver.try_recv().is_ok());
+}
+
+#[test]
 fn a_helper_that_goes_away_expires_its_decision() {
     let mut fixture = fixture();
     fixture.send(USER_PROMPT_SUBMIT);

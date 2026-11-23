@@ -1059,6 +1059,14 @@ impl Engine {
         {
             return Err(format!("decision {id} is not a question"));
         }
+        if pending.view.kind == PermissionKind::Question
+            && matches!(
+                decision,
+                Decision::Allow | Decision::AllowWithInput { .. } | Decision::AllowAlways { .. }
+            )
+        {
+            return Err(format!("decision {id} is a question and needs an answer"));
+        }
         let output = hook_output(&decision, &pending.view.tool_input);
         let session_id = pending.view.session_id.clone();
         if !self.finish(
