@@ -25,7 +25,7 @@ export function MessageField({ label, placeholder, sendLabel, disabled, onSend, 
         disabled={disabled}
         onChange={(event) => setMessage(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter') send();
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing) send();
           if (event.key === 'Escape') {
             event.stopPropagation();
             onCancel();
