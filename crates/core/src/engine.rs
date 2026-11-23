@@ -150,7 +150,7 @@ impl Engine {
             runtime: HashMap::new(),
             pending: BTreeMap::new(),
             resolved: VecDeque::new(),
-            next_id: 1,
+            next_id: now_ms(),
             next_prompt_id,
             changes: watch::channel(0).0,
             process_exits,

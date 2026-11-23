@@ -417,6 +417,15 @@ fn a_question_refuses_every_allow_but_still_accepts_a_deny() {
 }
 
 #[test]
+fn decision_ids_start_from_the_clock_so_they_never_repeat_across_restarts() {
+    let before = now_ms();
+    let mut fixture = fixture();
+    let (id, _receiver) = fixture.ask(PERMISSION_REQUEST);
+    assert!(id >= before);
+    assert!(id < 1 << 53);
+}
+
+#[test]
 fn a_helper_that_goes_away_expires_its_decision() {
     let mut fixture = fixture();
     fixture.send(USER_PROMPT_SUBMIT);
