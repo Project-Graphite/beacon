@@ -2,6 +2,7 @@ import type { Decision, PendingDecision } from '../beacon';
 import { readQuestions } from './answers.ts';
 import { formatDuration } from './format.ts';
 import { shortenPath } from './paths.ts';
+import { redactValue } from './redact.ts';
 
 const META_CHARS = 52;
 const MIN_PATH_CHARS = 16;
@@ -40,13 +41,14 @@ export function mcpTool(toolName: string): { server: string; tool: string } | nu
   return match ? { server: match[1], tool: match[2] } : null;
 }
 
-export function argumentEntries(toolInput: unknown): [string, string][] {
+export function argumentEntries(toolInput: unknown, masked = false): [string, string][] {
   const entries =
     toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput)
       ? Object.entries(toolInput)
       : [['input', toolInput] as const];
   return entries.map(([key, value]) => {
-    const shown = JSON.stringify(value) ?? String(value);
+    const raw = JSON.stringify(value) ?? String(value);
+    const shown = masked ? redactValue(key, raw) : raw;
     return [key, shown.length > ARGUMENT_CHARS ? `${shown.slice(0, ARGUMENT_CHARS - 1)}…` : shown];
   });
 }

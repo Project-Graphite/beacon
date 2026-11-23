@@ -1,6 +1,7 @@
 import type { PendingDecision } from '../beacon';
 import { lineDiff, writePreview } from '../lib/diff.ts';
 import { displayPath } from '../lib/paths.ts';
+import { redact } from '../lib/redact.ts';
 import { argumentEntries, mcpTool, splitUrl } from '../lib/requests.ts';
 import { ArgumentList } from './ArgumentList';
 import { CommandBlock } from './CommandBlock';
@@ -8,14 +9,14 @@ import { DiffBlock } from './DiffBlock';
 
 interface ToolRequestBodyProps {
   request: PendingDecision;
-  mask: (text: string) => string;
+  masked: boolean;
 }
 
-export function ToolRequestBody({ request, mask }: ToolRequestBodyProps) {
+export function ToolRequestBody({ request, masked }: ToolRequestBodyProps) {
   const input = (request.tool_input ?? {}) as Record<string, unknown>;
   const field = (name: string) => {
     const value = input[name];
-    return typeof value === 'string' ? mask(value) : null;
+    return typeof value !== 'string' ? null : masked ? redact(value) : value;
   };
   const path = field('file_path');
   const pathLine = path !== null && (
@@ -24,7 +25,7 @@ export function ToolRequestBody({ request, mask }: ToolRequestBodyProps) {
   const command = field('command');
   const url = field('url');
   const mcp = mcpTool(request.tool_name);
-  const maskedArguments = argumentEntries(request.tool_input).map(([key, value]): [string, string] => [key, mask(value)]);
+  const shownArguments = argumentEntries(request.tool_input, masked);
 
   if ((request.tool_name === 'Bash' || request.tool_name === 'PowerShell') && command !== null) {
     return (
@@ -75,9 +76,9 @@ export function ToolRequestBody({ request, mask }: ToolRequestBodyProps) {
           <dt className="text-muted">Tool</dt>
           <dd className="truncate font-mono text-ink">{mcp.tool}</dd>
         </dl>
-        <ArgumentList entries={maskedArguments} />
+        <ArgumentList entries={shownArguments} />
       </>
     );
   }
-  return <ArgumentList entries={maskedArguments} />;
+  return <ArgumentList entries={shownArguments} />;
 }

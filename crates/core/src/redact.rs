@@ -1,7 +1,25 @@
 const MASK: &str = "***";
 const SECRET_NAME_PARTS: [&str; 5] = ["KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD"];
-const TOKEN_PREFIXES: [&str; 3] = ["sk-", "ghp_", "xox"];
+const TOKEN_PREFIXES: [&str; 14] = [
+    "sk-",
+    "sk_live_",
+    "rk_live_",
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghs_",
+    "ghr_",
+    "github_pat_",
+    "glpat-",
+    "npm_",
+    "xox",
+    "AKIA",
+    "AIza",
+];
 const MIN_PREFIXED_TOKEN_LEN: usize = 20;
+const JWT_START: &str = "eyJ";
+const PEM_START: &str = "-----BEGIN ";
+const PEM_DASHES: &str = "-----";
 
 pub fn redact(text: &str) -> String {
     let mut redacted = String::with_capacity(text.len());
@@ -32,7 +50,10 @@ fn secret_at(text: &str) -> Option<(usize, usize)> {
         })
         .filter(|&(kept, _)| kept > "bearer".len())
     })
+    .or_else(|| private_key_block(text))
+    .or_else(|| url_password(text))
     .or_else(|| prefixed_token(text))
+    .or_else(|| json_web_token(text))
     .or_else(|| secret_assignment(text))
 }
 
@@ -45,10 +66,7 @@ fn header_value(
     if !head.eq_ignore_ascii_case(label) {
         return None;
     }
-    let kept = label.len()
-        + prefix_len(&text[label.len()..], |character| {
-            matches!(character, ' ' | '\t')
-        });
+    let kept = label.len() + prefix_len(&text[label.len()..], is_blank);
     let value_len = prefix_len(&text[kept..], |character| !ends_value(character));
     (value_len > 0).then_some((kept, kept + value_len))
 }
@@ -57,21 +75,83 @@ fn prefixed_token(text: &str) -> Option<(usize, usize)> {
     TOKEN_PREFIXES
         .iter()
         .find(|prefix| text.starts_with(*prefix))?;
-    let token_len = prefix_len(text, |character| {
-        character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
-    });
+    let token_len = prefix_len(text, is_token_char);
     (token_len >= MIN_PREFIXED_TOKEN_LEN).then_some((0, token_len))
+}
+
+fn json_web_token(text: &str) -> Option<(usize, usize)> {
+    if !text.starts_with(JWT_START) {
+        return None;
+    }
+    let token_len = prefix_len(text, |character| {
+        is_token_char(character) || character == '.'
+    });
+    (token_len >= MIN_PREFIXED_TOKEN_LEN && text[..token_len].matches('.').count() >= 2)
+        .then_some((0, token_len))
+}
+
+fn private_key_block(text: &str) -> Option<(usize, usize)> {
+    if !text.starts_with(PEM_START) {
+        return None;
+    }
+    let header_end = PEM_START.len() + text[PEM_START.len()..].find(PEM_DASHES)?;
+    if !text[..header_end].ends_with("PRIVATE KEY") {
+        return None;
+    }
+    let kept = header_end + PEM_DASHES.len();
+    let end = text[kept..]
+        .find("-----END ")
+        .and_then(|footer| {
+            let after_dashes = kept + footer + PEM_DASHES.len();
+            text[after_dashes..]
+                .find(PEM_DASHES)
+                .map(|closing| after_dashes + closing + PEM_DASHES.len())
+        })
+        .unwrap_or(text.len());
+    (end > kept).then_some((kept, end))
+}
+
+fn url_password(text: &str) -> Option<(usize, usize)> {
+    let scheme_len = prefix_len(text, |character| {
+        character.is_ascii_alphanumeric() || matches!(character, '+' | '.' | '-')
+    });
+    if scheme_len == 0 || !text[scheme_len..].starts_with("://") {
+        return None;
+    }
+    let user_start = scheme_len + 3;
+    let user_end = user_start
+        + prefix_len(&text[user_start..], |character| {
+            !character.is_whitespace()
+                && !matches!(character, '/' | '@' | ':' | '?' | '#' | '"' | '\'')
+        });
+    if !text[user_end..].starts_with(':') {
+        return None;
+    }
+    let kept = user_end + 1;
+    let end = kept
+        + prefix_len(&text[kept..], |character| {
+            !character.is_whitespace() && !matches!(character, '/' | '@' | '?' | '#' | '"' | '\'')
+        });
+    (end > kept && text[end..].starts_with('@')).then_some((kept, end))
 }
 
 fn secret_assignment(text: &str) -> Option<(usize, usize)> {
     let name_len = prefix_len(text, is_name_char);
     let name = text[..name_len].to_ascii_uppercase();
-    if !text[name_len..].starts_with('=')
-        || !SECRET_NAME_PARTS.iter().any(|part| name.contains(part))
-    {
+    if !SECRET_NAME_PARTS.iter().any(|part| name.contains(part)) {
         return None;
     }
-    let kept = name_len + 1;
+    let quoted_name = text[name_len..].starts_with(is_quote);
+    let after_name = name_len + usize::from(quoted_name);
+    let operator = after_name + prefix_len(&text[after_name..], is_blank);
+    let operator_char = text[operator..].chars().next();
+    let value_start = operator + 1 + prefix_len(text.get(operator + 1..).unwrap_or(""), is_blank);
+    let kept = match operator_char {
+        Some('=') => value_start,
+        Some(':') if quoted_name || text[value_start..].starts_with(is_quote) => value_start,
+        _ if text.starts_with('-') && operator > name_len && operator_char != Some('-') => operator,
+        _ => return None,
+    };
     let value = &text[kept..];
     let value_len = match value.chars().next() {
         Some(quote) if is_quote(quote) => value[1..]
@@ -95,6 +175,14 @@ fn is_name_char(character: char) -> bool {
 
 fn is_quote(character: char) -> bool {
     matches!(character, '"' | '\'')
+}
+
+fn is_blank(character: char) -> bool {
+    matches!(character, ' ' | '\t')
+}
+
+fn is_token_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
 }
 
 #[cfg(test)]
@@ -164,6 +252,60 @@ mod tests {
         assert_eq!(
             redact("sk-short and task-sk-0123456789abcdefghij"),
             "sk-short and task-sk-0123456789abcdefghij"
+        );
+    }
+
+    #[test]
+    fn spaced_quoted_and_flag_forms_are_masked() {
+        assert_eq!(
+            redact(r#"$env:GITHUB_TOKEN = "abc"; git push"#),
+            "$env:GITHUB_TOKEN = ***; git push"
+        );
+        assert_eq!(
+            redact(r#"{"api_key":"abc123","n":1}"#),
+            r#"{"api_key":***,"n":1}"#
+        );
+        assert_eq!(redact(r#"password: "hunter2""#), "password: ***");
+        assert_eq!(
+            redact("mysql --password hunter2 db"),
+            "mysql --password *** db"
+        );
+        for text in [
+            "apiKey: string",
+            r#"git commit -m "fix: token refresh""#,
+            "--api-key",
+        ] {
+            assert_eq!(redact(text), text);
+        }
+    }
+
+    #[test]
+    fn url_credentials_lose_their_password() {
+        assert_eq!(
+            redact("psql postgres://user:pw@host/db"),
+            "psql postgres://user:***@host/db"
+        );
+        assert_eq!(
+            redact("curl https://host:8080/x"),
+            "curl https://host:8080/x"
+        );
+    }
+
+    #[test]
+    fn more_token_shapes_are_masked() {
+        assert_eq!(
+            redact("github_pat_11ABCDEFG0123456789_abcdefghij x"),
+            "*** x"
+        );
+        assert_eq!(redact("AKIAIOSFODNN7EXAMPLE"), "***");
+        assert_eq!(redact("glpat-abcdefghij0123456789"), "***");
+        assert_eq!(
+            redact("token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig_value"),
+            "token ***"
+        );
+        assert_eq!(
+            redact("a\n-----BEGIN PRIVATE KEY-----\nMIIabc\n-----END PRIVATE KEY-----\nb"),
+            "a\n-----BEGIN PRIVATE KEY-----***\nb"
         );
     }
 

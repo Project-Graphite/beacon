@@ -21,8 +21,6 @@ interface RequestCardProps {
   onJump: () => void;
 }
 
-const unchanged = (text: string) => text;
-
 export function RequestCard({ request, marked, currentId, keys, onJump }: RequestCardProps) {
   const now = useNow(true);
   const [outcome, setOutcome] = useState<'check' | 'cross' | null>(null);
@@ -64,7 +62,7 @@ export function RequestCard({ request, marked, currentId, keys, onJump }: Reques
       <p className="truncate font-mono text-micro text-faint">{requestMeta(request, now).join(' · ')}</p>
       {request.kind === 'tool' && (
         <>
-          <ToolRequestBody request={request} mask={unmasked ? unchanged : redact} />
+          <ToolRequestBody request={request} masked={!unmasked} />
           {destructive && <p className="mt-1.5 text-micro text-danger">Looks destructive: {destructive}</p>}
           <ToolActions
             request={request}

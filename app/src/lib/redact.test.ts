@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { redact } from './redact.ts';
+import { redact, redactValue } from './redact.ts';
 
 test('secret assignments keep the name and mask the value', () => {
   assert.equal(redact('GITHUB_TOKEN=abc123 npm publish'), 'GITHUB_TOKEN=*** npm publish');
@@ -38,6 +38,38 @@ test('long prefixed tokens are masked', () => {
     redact('sk-short and task-sk-0123456789abcdefghij'),
     'sk-short and task-sk-0123456789abcdefghij',
   );
+});
+
+test('spaced, quoted and flag forms are masked', () => {
+  assert.equal(redact('$env:GITHUB_TOKEN = "abc"; git push'), '$env:GITHUB_TOKEN = ***; git push');
+  assert.equal(redact('{"api_key":"abc123","n":1}'), '{"api_key":***,"n":1}');
+  assert.equal(redact('password: "hunter2"'), 'password: ***');
+  assert.equal(redact('mysql --password hunter2 db'), 'mysql --password *** db');
+  for (const text of ['apiKey: string', 'git commit -m "fix: token refresh"', '--api-key']) {
+    assert.equal(redact(text), text);
+  }
+});
+
+test('url credentials lose their password', () => {
+  assert.equal(redact('psql postgres://user:pw@host/db'), 'psql postgres://user:***@host/db');
+  assert.equal(redact('curl https://host:8080/x'), 'curl https://host:8080/x');
+});
+
+test('more token shapes are masked', () => {
+  assert.equal(redact('github_pat_11ABCDEFG0123456789_abcdefghij x'), '*** x');
+  assert.equal(redact('AKIAIOSFODNN7EXAMPLE'), '***');
+  assert.equal(redact('glpat-abcdefghij0123456789'), '***');
+  assert.equal(redact('token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig_value'), 'token ***');
+  assert.equal(
+    redact('a\n-----BEGIN PRIVATE KEY-----\nMIIabc\n-----END PRIVATE KEY-----\nb'),
+    'a\n-----BEGIN PRIVATE KEY-----***\nb',
+  );
+});
+
+test('a value under a secret name is masked whole', () => {
+  assert.equal(redactValue('api_key', '"abc"'), '***');
+  assert.equal(redactValue('title', '"Fix it"'), '"Fix it"');
+  assert.equal(redactValue('body', '"use sk-ant-api03-abcdefghijklmnop"'), '"use ***"');
 });
 
 test('non-ASCII text survives', () => {

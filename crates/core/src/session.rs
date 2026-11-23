@@ -318,7 +318,7 @@ pub fn activity_line(tool_name: &str, tool_input: Option<&Value>, cwd: Option<&s
         "Read" => describe("Reading", shown_path("file_path"), tool_name),
         "Bash" | "PowerShell" => describe(
             "Running",
-            field("command").map(|command| command.chars().take(COMMAND_CHARS).collect()),
+            field("command").map(|command| redact(command).chars().take(COMMAND_CHARS).collect()),
             tool_name,
         ),
         "Grep" | "Glob" | "WebSearch" | "ToolSearch" => "Searching".to_string(),
@@ -381,6 +381,13 @@ mod tests {
         let command = "é".repeat(1_000_000);
         let line = activity_line("Bash", Some(&json!({ "command": command })), None);
         assert_eq!(line, format!("Running {}", "é".repeat(80)));
+    }
+
+    #[test]
+    fn a_token_crossing_the_cut_is_masked_before_it() {
+        let command = format!("{} sk-ant-api03-abcdefghijklmnop", "x".repeat(70));
+        let line = activity_line("Bash", Some(&json!({ "command": command })), None);
+        assert_eq!(line, format!("Running {} ***", "x".repeat(70)));
     }
 
     #[test]
