@@ -92,7 +92,12 @@ impl Options {
             if switches.contains(&arg.as_str()) {
                 options.switches.push(arg.clone());
             } else if valued.contains(&arg.as_str()) {
-                let value = args.next().ok_or_else(|| format!("{arg} needs a value"))?;
+                let value = args
+                    .next()
+                    .filter(|value| {
+                        !switches.contains(&value.as_str()) && !valued.contains(&value.as_str())
+                    })
+                    .ok_or_else(|| format!("{arg} needs a value"))?;
                 options.values.push((arg.clone(), value.clone()));
             } else {
                 return Err(format!("unexpected argument: {arg}"));
@@ -529,6 +534,21 @@ mod tests {
             assert!(parsed(line).is_err(), "{line:?}");
         }
         assert!(USAGE.contains("beacon prompt <session-id-or-unique-prefix> \"<text>\""));
+    }
+
+    #[test]
+    fn message_followed_by_a_flag_is_missing_its_text() {
+        for line in [
+            &["decide", "1", "deny", "--message", "--stop"][..],
+            &["decide", "1", "deny", "--stop", "--message"],
+            &["decide", "1", "deny", "--message", "--message", "x"],
+        ] {
+            let error = parsed(line).unwrap_err();
+            assert!(
+                error.contains("--message needs a value"),
+                "{line:?}: {error}"
+            );
+        }
     }
 
     #[test]
