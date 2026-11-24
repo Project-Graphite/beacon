@@ -8,12 +8,10 @@ interface Preview {
 }
 
 const VIEW = { width: 1280, height: 720 };
-const CAMERA = 1.3;
 const world = document.getElementById('world') as HTMLDivElement;
 const frame = document.getElementById('panel') as HTMLIFrameElement;
 const cursor = document.getElementById('cursor') as unknown as SVGSVGElement;
 const ripple = document.getElementById('ripple') as HTMLDivElement;
-const caption = document.getElementById('caption') as HTMLDivElement;
 const pill = document.getElementById('pill') as HTMLDivElement;
 const endcard = document.getElementById('endcard') as HTMLDivElement;
 
@@ -30,6 +28,7 @@ let open = false;
 let position: Point = { x: 470, y: 430 };
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const ease = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
 
 function drawPill() {
   const count = marks.filter((kind) => kind === 'needs').length;
@@ -42,33 +41,37 @@ function drawPill() {
 
 function place(point: Point) {
   position = point;
-  cursor.style.transform = `translate(${point.x - 3}px, ${point.y - 2}px)`;
+  cursor.style.transform = `translate3d(${point.x - 3}px, ${point.y - 2}px, 0)`;
 }
 
 const preview = () => (frame.contentWindow as unknown as { __beaconPreview: Preview }).__beaconPreview;
 const inner = () => frame.contentDocument as Document;
 
-function worldPoint(element: Element, inFrame: boolean): Point {
+function framePoint(element: Element): Point {
   const rect = element.getBoundingClientRect();
-  if (inFrame) return { x: frame.offsetLeft + rect.left + rect.width / 2, y: frame.offsetTop + rect.top + rect.height / 2 };
-  const view = world.getBoundingClientRect();
-  const scale = view.width / VIEW.width;
-  return { x: (rect.left - view.left + rect.width / 2) / scale, y: (rect.top - view.top + rect.height / 2) / scale };
+  return { x: frame.offsetLeft + rect.left + rect.width / 2, y: frame.offsetTop + rect.top + rect.height / 2 };
 }
 
-function inPanel(selector: string, text?: string): Element {
-  const found = [...inner().querySelectorAll(selector)].find((element) => text === undefined || element.textContent?.trim() === text);
+function pillPoint(element: HTMLElement): Point {
+  return {
+    x: pill.offsetLeft + element.offsetLeft + element.offsetWidth / 2,
+    y: pill.offsetTop + element.offsetTop + element.offsetHeight / 2,
+  };
+}
+
+function inPanel(selector: string, text?: string): HTMLElement {
+  const found = [...inner().querySelectorAll<HTMLElement>(selector)].find(
+    (element) => text === undefined || element.textContent?.trim().startsWith(text),
+  );
   if (!found) throw new Error(`not found: ${selector} ${text ?? ''}`);
   return found;
 }
 
-const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
-
 function moveTo(target: Point): Promise<void> {
   const from = position;
   const distance = Math.hypot(target.x - from.x, target.y - from.y);
-  const duration = Math.min(1250, Math.max(520, 420 + distance * 0.75));
-  const bend = { x: -(target.y - from.y) * 0.12, y: (target.x - from.x) * 0.12 };
+  const duration = Math.min(1400, Math.max(750, 600 + distance * 0.9));
+  const bend = { x: -(target.y - from.y) * 0.06, y: (target.x - from.x) * 0.06 };
   const control = { x: (from.x + target.x) / 2 + bend.x, y: (from.y + target.y) / 2 + bend.y };
   const start = performance.now();
   return new Promise((resolve) => {
@@ -93,44 +96,32 @@ async function press(action: () => void) {
   ripple.classList.remove('go');
   void ripple.offsetWidth;
   ripple.classList.add('go');
-  await wait(110);
+  await wait(140);
   action();
   cursor.classList.remove('pressed');
 }
 
-async function reach(element: Element) {
-  element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  await wait(380);
-  const point = worldPoint(element, true);
-  zoom(CAMERA, point);
-  await moveTo(point);
+async function clickPanel(selector: string, text?: string) {
+  await clickElement(inPanel(selector, text));
 }
 
-async function clickPanel(selector: string, text?: string, settle = 260) {
-  const element = inPanel(selector, text);
-  await reach(element);
-  await wait(settle);
-  await press(() => (element as HTMLElement).click());
+async function clickElement(element: HTMLElement) {
+  await moveTo(framePoint(element));
+  await wait(420);
+  await press(() => element.click());
+  await wait(500);
+}
+
+function settle(title: string, fields: Record<string, unknown>) {
+  const state = preview().snapshot;
+  state.sessions = state.sessions.map((session) => (session.display_title === title ? { ...session, ...fields } : session));
+  preview().emit('beacon://snapshot', state);
 }
 
 function zoom(scale: number, focus: Point) {
   const x = Math.min(0, Math.max(VIEW.width - VIEW.width * scale, VIEW.width / 2 - focus.x * scale));
   const y = Math.min(0, Math.max(VIEW.height - VIEW.height * scale, VIEW.height / 2 - focus.y * scale));
-  world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
-}
-
-async function say(text: string | null) {
-  caption.classList.remove('on');
-  if (text === null) return;
-  await wait(text && caption.textContent ? 260 : 0);
-  caption.textContent = text;
-  caption.classList.add('on');
-}
-
-function settleSession(title: string, fields: Record<string, unknown>) {
-  const state = preview().snapshot;
-  state.sessions = state.sessions.map((session) => (session.display_title === title ? { ...session, ...fields } : session));
-  preview().emit('beacon://snapshot', state);
+  world.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`;
 }
 
 async function type(text: string) {
@@ -140,106 +131,73 @@ async function type(text: string) {
   for (let index = 1; index <= text.length; index++) {
     setter?.call(field, text.slice(0, index));
     field.dispatchEvent(new view.Event('input', { bubbles: true }));
-    await wait(38 + Math.random() * 40);
+    await wait(55);
   }
 }
 
 async function ready() {
-  await new Promise<void>((resolve) => (frame.contentDocument?.readyState === 'complete' ? resolve() : frame.addEventListener('load', () => resolve(), { once: true })));
+  await new Promise<void>((resolve) =>
+    frame.contentDocument?.readyState === 'complete' ? resolve() : frame.addEventListener('load', () => resolve(), { once: true }),
+  );
   const style = inner().createElement('style');
-  style.textContent = 'html{background:transparent!important}body{margin:0!important;width:376px!important}#root>section{height:100vh!important}*:focus-visible,label:has(:focus-visible){outline:none!important}';
+  style.textContent =
+    'html{background:transparent!important}body{margin:0!important;width:376px!important}#root>section{height:100vh!important}*:focus-visible,label:has(:focus-visible){outline:none!important}';
   inner().head.append(style);
   await wait(900);
 }
 
-async function partOne() {
-  await say('Beacon watches every Claude Code session on your PC');
-  await wait(2100);
+async function play() {
+  await wait(1000);
   const chevron = pill.querySelector('.chevron') as HTMLElement;
-  zoom(CAMERA, { x: 1120, y: 180 });
-  await moveTo(worldPoint(chevron, false));
+  await moveTo(pillPoint(chevron));
   chevron.classList.add('hover');
-  await wait(380);
+  await wait(450);
   await press(() => {
     open = true;
     drawPill();
     frame.classList.add('open');
     preview().emit('beacon://closing');
-    setTimeout(() => preview().emit('beacon://opened', { mode: 'sticky', focused: true, edge: 'top', snapshot: preview().snapshot, ui: preview().ui }), 30);
+    setTimeout(
+      () => preview().emit('beacon://opened', { mode: 'sticky', focused: true, edge: 'top', snapshot: preview().snapshot, ui: preview().ui }),
+      30,
+    );
   });
-  await wait(900);
+  await wait(700);
+  zoom(1.15, { x: 1100, y: 313 });
+  await wait(1300);
 
-  await say('Answer permission prompts without switching windows');
-  await clickPanel('button', 'Allow', 420);
-  await wait(500);
+  await clickPanel('button', 'Allow');
   marks = ['working', 'needs', 'working', 'working', 'done', 'idle'];
   drawPill();
-  settleSession('Fix the flaky login test', { state: 'working', alerting: false, attention: false, step_current: { kind: 'run', label: 'Running npm test -- auth/login.spec.ts' } });
-  await wait(1300);
+  await wait(500);
 
-  await say('Questions and plans, right from the panel');
   await clickPanel('button', 'Answer');
-  await wait(1300);
-  const redis = [...inner().querySelectorAll('label')].find((label) => label.textContent?.startsWith('Redis'));
-  if (redis) {
-    await reach(redis);
-    await wait(220);
-    await press(() => (redis as HTMLElement).click());
-  }
-  await wait(600);
-  await clickPanel('button', 'Send answerA');
+  settle('Fix the flaky login test', { state: 'working', alerting: false, attention: false, step_current: { kind: 'run', label: 'Running npm test -- auth/login.spec.ts' } });
+  await wait(500);
+  await clickElement(inPanel('label', 'Redis').querySelector('input') as HTMLElement);
+  await clickPanel('button', 'Send answer');
   marks = ['working', 'working', 'working', 'working', 'done', 'idle'];
   drawPill();
-  settleSession('Choose a cache for the tile server', { state: 'working', alerting: false, attention: false });
-  await wait(1200);
+  settle('Choose a cache for the tile server', { state: 'working', alerting: false, attention: false });
+  await wait(400);
   await clickPanel('button[aria-label="Back to sessions"]');
-  await wait(1000);
+  await wait(300);
 
-  await say('Send a prompt; Beacon delivers it, even to an idle session');
   await clickPanel('span', 'Draft the 0.2.0 release notes');
-  await wait(1400);
+  await wait(400);
   await clickPanel('textarea');
-  await wait(200);
   await type('Open a pull request with these notes');
-  await wait(350);
+  await wait(450);
   await clickPanel('button', 'Send');
-  await wait(1500);
-  await clickPanel('button[aria-label="Back to sessions"]');
-  await wait(1000);
+  await wait(1200);
 
-  await say('Hide what you are done with; undo is one click away');
-  const row = [...inner().querySelectorAll('li')].find((item) => item.textContent?.includes('Tidy the PowerShell profile'));
-  const hide = row?.querySelector('button[title^="Hide until"]');
-  if (hide) {
-    await reach(hide);
-    await wait(300);
-    await press(() => (hide as HTMLElement).click());
-  }
-  await wait(1700);
-  await clickPanel('button', 'Undo');
-  await wait(1300);
-}
-
-async function partTwo() {
-  await say('It follows your Windows theme, light or dark');
-  await wait(2200);
-  await clickPanel('button[aria-label="Settings"]');
-  await wait(900);
-  await clickPanel('section[aria-label="Overlay"] > button');
-  await wait(1000);
-  await say('Solid or invisible: with no background, only the marks float');
-  await clickPanel('label', 'None');
-  pill.classList.add('clear');
-  await wait(600);
-  zoom(1.9, { x: 1170, y: 40 });
-  await wait(2300);
-  await say(null);
   zoom(1, { x: 640, y: 360 });
-  await wait(1300);
+  await moveTo({ x: 560, y: 470 });
+  await wait(900);
   endcard.classList.add('on');
-  await wait(3200);
+  await wait(2800);
 }
 
 drawPill();
 place(position);
-Object.assign(window, { demo: { ready, partOne, partTwo } });
+Object.assign(window, { demo: { ready, play } });

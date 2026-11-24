@@ -203,6 +203,8 @@ const step = (id: number, kind: string, label: string, ago: number, duration: nu
   duration_ms: duration,
 });
 
+const PLANNING = '9d0e4a61-3c7b-4e88-b5f2-1a6c8d2e7f34';
+
 export const detail = (sessionId: string) => ({
   session_id: sessionId,
   timeline: [],
@@ -210,7 +212,7 @@ export const detail = (sessionId: string) => ({
     sessionId === sessions[4].session_id
       ? 'The release notes are in `docs/notes/0.2.0.md`, grouped by area:\n\n- **Answering requests**: held keys, off-screen requests\n- **Secrets**: more shapes masked\n- **Reliability**: state files, panics\n\nWant me to open a PR?'
       : 'Reading the manifest format before writing the reader.',
-  steps: [
+  steps: sessionId !== PLANNING ? [] : [
     step(1, 'prompt', 'Prompt submitted', 12, null),
     step(2, 'read', 'Reading src/packs/index.ts', 11, 400),
     step(3, 'search', 'Searching', 10, 900),
@@ -218,7 +220,7 @@ export const detail = (sessionId: string) => ({
     step(5, 'run', 'Running npm test -- packs', 6, 18_400),
     step(6, 'edit', 'Editing src/packs/manifest.ts', 1, null, 'running'),
   ],
-  tasks: [
+  tasks: sessionId !== PLANNING ? [] : [
     { id: '1', subject: 'Sketch the pack format', done: true },
     { id: '2', subject: 'Download packs in the background', done: true },
     { id: '3', subject: 'Verify pack checksums', done: true },
