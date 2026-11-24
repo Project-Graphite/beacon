@@ -3,6 +3,19 @@
 Decisions taken while building Beacon, newest phase first. Evidence for the phase 0 entries is in
 [SPIKES.md](SPIKES.md). An entry marked **needs Amr** is a proposal until he answers.
 
+## Self-approval check and the wake hook's lifetime (2026-11-24)
+
+- **Refusing decisions from inside a Claude session is a speed bump, not a security boundary.** The
+  core refuses a `decide` request whose pipe client descends from a live session's `claude.exe`, so
+  an agent cannot casually approve its own requests with `beacon decide`. A process that was
+  reparented away from the session, or any other process of the same user, can still reach the pipe
+  and send the request: the pipe is only closed to other users. Nothing here defends against a
+  hostile agent.
+- **The wake hook reconnects and exits when its Claude process is gone.** The `StopWaiter` helper
+  that outlives a core restart keeps trying to register again, and now ends when the process named
+  by `CLAUDE_PID` no longer exists or after 24 hours, instead of waiting forever. The core likewise
+  releases a waiter for a session it still does not know after a reconcile pass.
+
 ## Pill arrow, a lighter panel, settings and idle wake (2026-11-22)
 
 ### The pill's arrow and hover
