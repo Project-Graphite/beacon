@@ -21,6 +21,7 @@ import {
   onSnapshot,
   setUiSettings,
   snooze,
+  undismiss,
   type Opened,
   type OpenedEvent,
   type Session,
@@ -33,6 +34,7 @@ import { SessionList } from './components/SessionList';
 import { SessionRow } from './components/SessionRow';
 import { SessionView } from './components/SessionView';
 import { SettingsView, type SettingsPart } from './components/SettingsView';
+import { TextButton } from './components/TextButton';
 import { ViewStack } from './components/ViewStack';
 import { useListMotion } from './hooks/useListMotion.ts';
 import { PanelFit, usePanelHeight } from './hooks/usePanelHeight.ts';
@@ -62,11 +64,13 @@ import {
   findSession,
   groupSessions,
   sessionTabs,
+  sessionTitle,
   stepTab,
 } from './lib/sessions.ts';
 import { flashRow } from './motion.ts';
 
 const NOTICE_MS = 4000;
+const HIDDEN_NOTICE_MS = 6000;
 const SCROLL_IDLE_MS = 800;
 const PRELOAD_WAIT_MS = 150;
 const DETAIL_PREFIX = 'detail:';
@@ -99,6 +103,8 @@ export function App() {
   const [viewReset, setViewReset] = useState(0);
   const [moreOpen, setMoreOpen] = useState<string[]>([]);
   const [settingsParts, setSettingsParts] = useState<SettingsPart[]>([]);
+  const [hidden, setHidden] = useState<{ sessionId: string; title: string } | null>(null);
+  const hiddenTimer = useRef(0);
   const panel = useRef<HTMLElement>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -279,14 +285,25 @@ export function App() {
     setOpenId(null);
   };
 
-  const crossOff = (sessionId: string) =>
+  const crossOff = (sessionId: string) => {
+    const session = findSession(sessions, ended, sessionId);
     run(
       dismiss(sessionId).then(() => {
         if (opening.current === sessionId) opening.current = null;
         setOpenId((open) => (open === sessionId ? null : open));
+        window.clearTimeout(hiddenTimer.current);
+        setHidden({ sessionId, title: session ? sessionTitle(session) : sessionId.slice(0, 8) });
+        hiddenTimer.current = window.setTimeout(() => setHidden(null), HIDDEN_NOTICE_MS);
         if (endedOpen) return getEnded().then(setEndedList);
       }),
     );
+  };
+
+  const undoHide = (sessionId: string) => {
+    window.clearTimeout(hiddenTimer.current);
+    setHidden(null);
+    run(undismiss(sessionId));
+  };
 
   const toggleEnded = () => {
     if (endedOpen) setEndedOpen(false);
@@ -527,6 +544,17 @@ export function App() {
                 <p title={failure} className="origin-top animate-appear truncate border-b border-line-soft px-4 py-2 text-secondary text-danger">
                   {failure}
                 </p>
+              )}
+              {hidden && (
+                <div
+                  role="status"
+                  className="flex origin-top animate-appear items-center gap-3 border-b border-line-soft bg-surface px-4 py-2 text-secondary"
+                >
+                  <p className="min-w-0 flex-1 truncate text-muted">
+                    <span className="text-ink">{hidden.title}</span> is hidden until its next prompt
+                  </p>
+                  <TextButton onClick={() => undoHide(hidden.sessionId)}>Undo</TextButton>
+                </div>
               )}
               <ViewStack key={viewReset} view={view} scroller={scroller} render={renderView} />
               <div ref={ghosts} aria-hidden="true" className="pointer-events-none absolute inset-0" />

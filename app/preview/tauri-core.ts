@@ -3,6 +3,11 @@ import { emit } from './tauri-event';
 
 const settings = { ...ui };
 
+function hide(sessionId: string, dismissed: boolean) {
+  snapshot.sessions = snapshot.sessions.map((session) => (session.session_id === sessionId ? { ...session, dismissed } : session));
+  emit('beacon://snapshot', snapshot);
+}
+
 const answers: Record<string, (args: Record<string, unknown>) => unknown> = {
   get_detail: ({ sessionId }) => detail(String(sessionId)),
   get_ended: () => ended,
@@ -12,6 +17,8 @@ const answers: Record<string, (args: Record<string, unknown>) => unknown> = {
   app_info: () => ({ version: '0.2.0', home: 'C:\\Users\\you\\AppData\\Local\\Beacon' }),
   get_overlay: () => overlay,
   set_ui_settings: ({ change }) => Object.assign(settings, change),
+  dismiss: ({ sessionId }) => hide(String(sessionId), true),
+  undismiss: ({ sessionId }) => hide(String(sessionId), false),
   decide: ({ id }) => {
     snapshot.pending = snapshot.pending.filter((request) => request.id !== id);
     emit('beacon://snapshot', snapshot);

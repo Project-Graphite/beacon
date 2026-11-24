@@ -59,7 +59,7 @@ export function RequestCard({ request, marked, currentId, keys, onJump }: Reques
           </span>
         )}
       </div>
-      <p className="truncate font-mono text-micro text-faint">{requestMeta(request, now).join(' · ')}</p>
+      <p className="mt-0.5 truncate text-micro text-faint tabular-nums">{requestMeta(request, now).join(' · ')}</p>
       {request.kind === 'tool' && (
         <>
           <ToolRequestBody request={request} masked={!unmasked} />
