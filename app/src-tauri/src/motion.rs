@@ -1,7 +1,8 @@
 use std::f64::consts::PI;
 use std::time::Duration;
 
-const MIN_FRAME_RATE: u32 = 60;
+const MIN_FRAME_RATE: u32 = 30;
+const MAX_FRAME_RATE: u32 = 60;
 const POP_RISE: f64 = 0.12;
 const POP_FALL: f64 = 0.24;
 const BURST: f64 = 0.9;
@@ -205,7 +206,16 @@ pub fn peek_next_change(elapsed: f64, hold: f64, reduced_motion: bool) -> Option
 }
 
 pub fn frame_interval(refresh_rate: u32) -> Duration {
-    Duration::from_secs_f64(1.0 / f64::from(refresh_rate.max(MIN_FRAME_RATE)))
+    Duration::from_secs_f64(
+        1.0 / f64::from(
+            (if refresh_rate == 0 {
+                MAX_FRAME_RATE
+            } else {
+                refresh_rate
+            })
+            .clamp(MIN_FRAME_RATE, MAX_FRAME_RATE),
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -367,10 +377,12 @@ mod tests {
     }
 
     #[test]
-    fn frames_follow_the_refresh_rate_but_never_drop_below_sixty() {
-        assert_eq!(frame_interval(144), Duration::from_secs_f64(1.0 / 144.0));
+    fn frames_follow_the_refresh_rate_but_never_exceed_sixty_or_drop_below_thirty() {
+        assert_eq!(frame_interval(144), Duration::from_secs_f64(1.0 / 60.0));
         assert_eq!(frame_interval(60), Duration::from_secs_f64(1.0 / 60.0));
-        assert_eq!(frame_interval(30), Duration::from_secs_f64(1.0 / 60.0));
+        assert_eq!(frame_interval(48), Duration::from_secs_f64(1.0 / 48.0));
+        assert_eq!(frame_interval(30), Duration::from_secs_f64(1.0 / 30.0));
+        assert_eq!(frame_interval(24), Duration::from_secs_f64(1.0 / 30.0));
         assert_eq!(frame_interval(0), Duration::from_secs_f64(1.0 / 60.0));
     }
 }

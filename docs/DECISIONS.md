@@ -148,8 +148,9 @@ Changed on Amr's feedback after using v1.
 - **Motion follows the display.** In the panel only `transform`, `opacity` and grid-row heights
   animate, as CSS or Web Animations, so the compositor paces them at the refresh rate; measured at
   238 Hz with no slow frames on expand, reorder and view switch. The native tab is paced by a
-  high-resolution timer at its display's refresh rate, computed from elapsed time, and the timer is
-  parked when nothing moves: 0.00 CPU seconds over 60 s idle and 0.2 while pulsing.
+  high-resolution timer at the display's refresh rate capped at 60 frames per second (never below
+  30), computed from elapsed time, and the timer is parked when nothing moves: 0.00 CPU seconds
+  over 60 s idle and 0.2 while pulsing.
 - **The panel grows instead of scrolling.** Its height follows its content up to the display's work
   area, and nothing inside it scrolls by itself; a block over 40 lines is cut with a "Show all"
   button. When the whole panel does overflow, native scrollbars stay hidden and an overlay thumb and
