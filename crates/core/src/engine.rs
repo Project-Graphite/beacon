@@ -11,7 +11,7 @@ use crate::log::{Logger, now_ms};
 use crate::platform::{ProcessWatch, process_alive, process_image_path};
 use crate::preview::input_preview;
 use crate::progress::{LABEL_CHARS, StepKind, step_kind};
-use crate::prompts::{PromptPath, followup, stop_output};
+use crate::prompts::{PromptPath, UNDELIVERED_REASON, followup, stop_output};
 use crate::redact::redact;
 use crate::session::{
     McpRequest, Session, activity_line, display_title, surface_from_image, title_line,
@@ -54,6 +54,11 @@ struct Pending {
     reply: oneshot::Sender<HookReply>,
 }
 
+pub struct PromptDelivery {
+    session_id: String,
+    prompt_id: u64,
+}
+
 struct StopWaiter {
     id: u64,
     reply: oneshot::Sender<HookReply>,
@@ -91,7 +96,7 @@ enum Followup {
     ToolUsed(ToolUse),
     ToolRan(Option<String>),
     BatchFinished(Vec<String>),
-    PromptDelivered(String),
+    PromptDelivered(u64, String),
     PermissionAsked {
         tool_name: String,
         tool_input: Value,
@@ -125,6 +130,7 @@ pub struct Engine {
     waiters: HashMap<String, StopWaiter>,
     next_waiter_id: u64,
     reconcile_wanted: bool,
+    delivery: Option<PromptDelivery>,
 }
 
 impl Engine {
@@ -162,6 +168,7 @@ impl Engine {
             waiters: HashMap::new(),
             next_waiter_id: 1,
             reconcile_wanted: false,
+            delivery: None,
         };
         engine.prune_ended(now_ms());
         engine.settle_snoozes(now_ms());
@@ -375,25 +382,61 @@ impl Engine {
         text: &str,
         now: u64,
     ) -> Result<PromptPath, String> {
-        let path = self
+        let prompt_id = self.next_prompt_id;
+        let session = self
             .sessions
             .get_mut(session_id)
-            .ok_or_else(|| format!("no session {session_id}"))?
-            .queue_prompt(self.next_prompt_id, text, now)?;
+            .ok_or_else(|| format!("no session {session_id}"))?;
+        let path = session.queue_prompt(prompt_id, text, now)?;
+        self.next_prompt_id += 1;
         if path == PromptPath::Wake
             && let Some(waiter) = self.waiters.remove(session_id)
-        {
-            let _ = waiter
+            && waiter
                 .reply
-                .send(HookReply::Rewake(followup(text).into_bytes()));
+                .send(HookReply::Rewake(followup(text).into_bytes()))
+                .is_err()
+        {
+            session.fail_delivered_prompt(prompt_id, UNDELIVERED_REASON);
+            self.changed();
+            return Err(format!(
+                "session {session_id} is no longer waiting for a prompt; the prompt was not delivered"
+            ));
         }
         self.log.info(format_args!(
-            "prompt {} for session {session_id}: {path:?}",
-            self.next_prompt_id
+            "prompt {prompt_id} for session {session_id}: {path:?}"
         ));
-        self.next_prompt_id += 1;
         self.changed();
         Ok(path)
+    }
+
+    pub fn take_delivery(&mut self) -> Option<PromptDelivery> {
+        self.delivery.take()
+    }
+
+    pub fn prompt_undelivered(&mut self, delivery: PromptDelivery) {
+        let PromptDelivery {
+            session_id,
+            prompt_id,
+        } = delivery;
+        let Some(session) = self.sessions.get_mut(&session_id) else {
+            return;
+        };
+        if !session.fail_delivered_prompt(prompt_id, UNDELIVERED_REASON) {
+            return;
+        }
+        self.log.warn(format_args!(
+            "prompt {prompt_id} did not reach the stop hook of session {session_id}"
+        ));
+        let now = now_ms();
+        session.apply(
+            Input::Stopped {
+                background_tasks: 0,
+            },
+            now,
+        );
+        session.add_step(StepKind::Notice, "Follow-up could not be delivered", now);
+        self.record(&session_id, "Stop", "Follow-up could not be delivered", now);
+        self.changed();
     }
 
     fn cancel_prompt(&mut self, id: u64) -> Result<(), String> {
@@ -862,12 +905,12 @@ impl Engine {
                     .then(|| session.deliver_next_prompt())
                     .flatten()
                 {
-                    Some(text) => {
+                    Some((prompt_id, text)) => {
                         label = FOLLOWUP_DELIVERED.to_string();
                         kind = StepKind::Prompt;
                         (
                             Some(Input::ToolActivity(ToolEvent::Tool)),
-                            Followup::PromptDelivered(text),
+                            Followup::PromptDelivered(prompt_id, text),
                         )
                     }
                     None => {
@@ -931,10 +974,14 @@ impl Engine {
         }
         match followup {
             Followup::Nothing | Followup::ToolRan(None) => None,
-            Followup::PromptDelivered(text) => {
+            Followup::PromptDelivered(prompt_id, text) => {
                 self.log.info(format_args!(
-                    "delivered a queued prompt to session {session_id}"
+                    "delivering a queued prompt to session {session_id}"
                 ));
+                self.delivery = Some(PromptDelivery {
+                    session_id,
+                    prompt_id,
+                });
                 Some(HookOutcome::Reply(HookReply::Stdout(stop_output(&text))))
             }
             Followup::ToolUsed(tool_use) => {

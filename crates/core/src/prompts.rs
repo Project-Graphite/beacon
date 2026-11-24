@@ -11,6 +11,7 @@ const PROMPTS_KEPT: usize = 5;
 const VSCODE_ENTRYPOINT: &str = "claude-vscode";
 pub const ENDED_REASON: &str = "The session ended before the turn finished.";
 pub const INTERRUPTED_REASON: &str = "The turn was interrupted before it finished.";
+pub const UNDELIVERED_REASON: &str = "Claude's hook went away before the prompt reached it.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -156,14 +157,27 @@ impl Session {
         })
     }
 
-    pub fn deliver_next_prompt(&mut self) -> Option<String> {
+    pub fn deliver_next_prompt(&mut self) -> Option<(u64, String)> {
         let prompt = self
             .prompts
             .iter_mut()
             .find(|prompt| prompt.status == PromptStatus::Queued)?;
         let text = prompt.text.take()?;
         prompt.status = PromptStatus::Delivered;
-        Some(text)
+        Some((prompt.id, text))
+    }
+
+    pub fn fail_delivered_prompt(&mut self, id: u64, reason: &str) -> bool {
+        let Some(prompt) = self
+            .prompts
+            .iter_mut()
+            .find(|prompt| prompt.id == id && prompt.status == PromptStatus::Delivered)
+        else {
+            return false;
+        };
+        prompt.status = PromptStatus::Failed;
+        prompt.reason = Some(reason.to_string());
+        true
     }
 
     pub fn acknowledge_prompts(&mut self) {

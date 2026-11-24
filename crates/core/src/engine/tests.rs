@@ -2860,6 +2860,68 @@ fn a_waiter_for_a_session_unknown_after_a_reconcile_is_released() {
     assert!(known.can_wake());
 }
 
+#[test]
+fn a_prompt_whose_stop_reply_was_not_written_fails_with_a_reason() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    assert!(fixture.queue("lost").ok);
+    assert!(stdout(fixture.send(STOP)).contains("from Beacon: lost"));
+    assert_eq!(fixture.state(), SessionState::Working);
+    let delivery = fixture.engine.take_delivery().unwrap();
+    assert!(fixture.engine.take_delivery().is_none());
+    fixture.engine.prompt_undelivered(delivery);
+    assert_eq!(
+        fixture.prompt_statuses(),
+        [(
+            PromptStatus::Failed,
+            Some(prompts::UNDELIVERED_REASON.to_string())
+        )]
+    );
+    assert_eq!(fixture.state(), SessionState::Done);
+    assert_eq!(fixture.session().prompts[0].text, None);
+}
+
+#[test]
+fn a_written_stop_reply_or_a_session_that_moved_on_keeps_the_prompt_delivered() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    assert!(fixture.queue("sent").ok);
+    fixture.send(STOP);
+    fixture.engine.take_delivery().unwrap();
+    assert_eq!(fixture.prompt_statuses()[0].0, PromptStatus::Delivered);
+    assert!(fixture.queue("late").ok);
+    fixture.send(STOP);
+    let delivery = fixture.engine.take_delivery().unwrap();
+    fixture.send(PRE_TOOL_USE);
+    fixture.engine.prompt_undelivered(delivery);
+    assert_eq!(fixture.prompt_statuses()[1].0, PromptStatus::Acknowledged);
+    assert_eq!(fixture.state(), SessionState::Working);
+}
+
+#[test]
+fn a_prompt_for_a_waiter_whose_hook_is_gone_fails_instead_of_counting_as_delivered() {
+    let mut fixture = fixture();
+    fixture.send(STOP);
+    let (_, receiver) = fixture.wait();
+    drop(receiver);
+    assert!(fixture.can_wake());
+    let reply = fixture.queue("anyone there?");
+    assert_eq!(
+        reply.error.as_deref(),
+        Some(
+            "session 4c2c3535-edec-4bb7-90b7-38049912db27 is no longer waiting for a prompt; the prompt was not delivered"
+        )
+    );
+    assert_eq!(
+        fixture.prompt_statuses(),
+        [(
+            PromptStatus::Failed,
+            Some(prompts::UNDELIVERED_REASON.to_string())
+        )]
+    );
+    assert!(!fixture.can_wake());
+}
+
 fn running_session(claude_pid_created: Option<u64>) -> Session {
     Session {
         claude_pid: Some(std::process::id()),

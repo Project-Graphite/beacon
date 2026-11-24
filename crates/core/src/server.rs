@@ -370,10 +370,20 @@ async fn serve_hook(shared: &Shared, mut pipe: NamedPipeServer) -> io::Result<()
     })
     .await
     .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "incomplete hook request"))??;
-    let outcome = shared.engine.borrow_mut().handle_hook(&meta, &payload);
+    let (outcome, delivery) = {
+        let mut engine = shared.engine.borrow_mut();
+        let outcome = engine.handle_hook(&meta, &payload);
+        (outcome, engine.take_delivery())
+    };
     match outcome {
         HookOutcome::Done => Ok(()),
-        HookOutcome::Reply(reply) => send_reply(&mut pipe, reply).await,
+        HookOutcome::Reply(reply) => {
+            let sent = send_reply(&mut pipe, reply).await;
+            if let (Err(_), Some(delivery)) = (&sent, delivery) {
+                shared.engine.borrow_mut().prompt_undelivered(delivery);
+            }
+            sent
+        }
         HookOutcome::Wait(id, decided) => {
             if !reply_when_ready(&mut pipe, decided).await? {
                 shared.engine.borrow_mut().helper_gone(id);
