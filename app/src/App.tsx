@@ -505,7 +505,7 @@ export function App() {
       <section
         ref={panel}
         style={{ '--enter-x': `${offset.x}px`, '--enter-y': `${offset.y}px` } as CSSProperties}
-        className={`flex h-screen flex-col overflow-hidden rounded-panel border border-line bg-paper font-sans text-body text-ink ${opened === null ? 'opacity-0' : closing ? 'animate-panel-out' : 'animate-panel-in'}`}
+        className={`flex h-screen flex-col overflow-hidden rounded-panel border border-line bg-paper font-sans text-body text-ink shadow-[inset_0_1px_0_var(--color-sheen)] ${opened === null ? 'opacity-0' : closing ? 'animate-panel-out' : 'animate-panel-in'}`}
       >
         <Header
           sessions={listed}
@@ -524,7 +524,7 @@ export function App() {
           <div ref={scroller} className="scroll-list min-h-0 flex-1 scroll-py-4 overflow-x-hidden overflow-y-auto">
             <div ref={content} className="relative">
               {failure && (
-                <p title={failure} className="truncate border-b border-line-soft px-2.5 py-1.5 text-micro text-danger">
+                <p title={failure} className="origin-top animate-appear truncate border-b border-line-soft px-4 py-2 text-secondary text-danger">
                   {failure}
                 </p>
               )}

@@ -35,11 +35,11 @@ export function Header({
 }: HeaderProps) {
   const parts = summaryParts(sessions, queue);
   return (
-    <header className="relative z-20 flex h-8 shrink-0 items-center gap-1.5 border-b border-line-soft px-2.5">
+    <header className="relative z-20 flex h-11 shrink-0 items-center gap-2 border-b border-line-soft pr-2 pl-4">
       <p
         aria-label={summary(sessions, queue)}
         title={queue && queue.total > 1 ? 'Tab and Shift+Tab move between requests' : undefined}
-        className="min-w-0 truncate text-secondary text-muted"
+        className="min-w-0 truncate text-muted"
       >
         {parts.length === 0
           ? 'All quiet'
@@ -52,7 +52,7 @@ export function Header({
               </Fragment>
             ))}
       </p>
-      <div className="ml-auto flex shrink-0 items-center gap-0.5">
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         {accountUsage && <UsageButton usage={accountUsage} />}
         {pinned && (
           <button
@@ -60,7 +60,7 @@ export function Header({
             aria-label="Hide until Claude is next active"
             title="Pinned while Claude is active. Click to hide until Claude is next active"
             onClick={onUnpin}
-            className="press grid size-6 place-items-center rounded-field text-ink hover:bg-surface"
+            className="press grid size-7 place-items-center rounded-[7px] text-ink hover:bg-surface"
           >
             <Icon name="pin" />
           </button>
@@ -72,7 +72,7 @@ export function Header({
           aria-pressed={settingsOpen}
           title={settingsOpen ? 'Back to sessions' : 'Settings'}
           onClick={onToggleSettings}
-          className={`press grid size-6 place-items-center rounded-field hover:bg-surface hover:text-ink ${settingsOpen ? 'bg-surface text-ink' : 'text-muted'}`}
+          className={`press grid size-7 place-items-center rounded-[7px] transition-[color,background-color,rotate] duration-200 ease-settle hover:bg-surface hover:text-ink ${settingsOpen ? 'rotate-45 ' : ''}${settingsOpen ? 'bg-surface text-ink' : 'text-muted'}`}
         >
           <Icon name="gear" />
         </button>

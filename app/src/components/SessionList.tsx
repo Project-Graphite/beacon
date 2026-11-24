@@ -32,8 +32,8 @@ export function SessionList({
     <ul aria-label="Sessions" className="session-list">
       {groups.flatMap((group) => [
         groups.length > 1 && (
-          <li key={`group-${group.label}`} data-group data-motion={`group:${group.label}`} className="flex h-5 items-center px-2.5">
-            <h2 className="text-micro text-faint">{group.label}</h2>
+          <li key={`group-${group.label}`} data-group data-motion={`group:${group.label}`} className="flex h-8 items-end px-4 pb-1">
+            <h2 className="text-micro font-medium text-faint">{group.label}</h2>
           </li>
         ),
         ...group.sessions.map(renderRow),
@@ -47,7 +47,7 @@ export function SessionList({
         <FoldedGroup
           key="crossed"
           motionId="crossed"
-          label={`Crossed off (${crossed.length})`}
+          label={`Hidden (${crossed.length})`}
           open={crossedOpen}
           onToggle={onToggleCrossed}
         >

@@ -43,7 +43,7 @@ export function RequestCard({ request, marked, currentId, keys, onJump }: Reques
   return (
     <div
       id={keys ? requestId(request.id) : undefined}
-      className={`relative mt-2 scroll-my-2 rounded-field border bg-paper p-2 ${destructive ? 'border-danger' : 'border-line'}`}
+      className={`relative scroll-my-3 animate-appear rounded-card border bg-raised p-3 shadow-card ${destructive ? 'border-danger' : 'border-line'}`}
     >
       {marked && <span aria-hidden="true" className="absolute inset-y-2 -left-px w-0.5 rounded-full bg-wip" />}
       {outcome && (

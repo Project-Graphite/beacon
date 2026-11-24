@@ -99,17 +99,17 @@ export function SessionView({
 
   return (
     <div>
-      <div className="flex h-8 items-center gap-1 border-b border-line-soft px-1.5">
+      <div className="flex h-11 items-center gap-1 border-b border-line-soft px-2">
         <IconButton icon="chevron" iconClassName="rotate-180" title="Back to sessions" onClick={onBack} />
         <SessionTabs tabs={tabs} currentId={session.session_id} onSwitch={onSwitch} />
         <SessionActions requestPending={pending.length > 0} onJump={onJump} onCrossOff={onCrossOff} />
       </div>
-      <div className="space-y-3 px-2.5 pt-2.5 pb-3">
-        <header className="space-y-2">
+      <div className="space-y-5 px-4 pt-4 pb-4">
+        <header className="space-y-3">
           <div className="flex items-center gap-3">
             <Avatar session={session} size="header" />
             <div className="min-w-0 flex-1">
-              <h2 className="truncate text-[15px] leading-snug font-semibold text-ink">{sessionTitle(session)}</h2>
+              <h2 className="truncate text-title font-semibold text-ink">{sessionTitle(session)}</h2>
               <p className="truncate text-secondary text-muted">
                 {facts.map((fact, index) => (
                   <span key={index}>
@@ -123,7 +123,7 @@ export function SessionView({
           {session.tasks_created > 0 && (
             <div>
               <p className="flex items-baseline gap-1.5 text-secondary">
-                <span className="shrink-0 font-mono text-muted tabular-nums">
+                <span className="shrink-0 text-muted tabular-nums">
                   {session.tasks_completed}/{session.tasks_created}
                 </span>
                 <span className="min-w-0 truncate text-ink">{session.task_current}</span>
@@ -136,7 +136,7 @@ export function SessionView({
             </div>
           )}
           {meta.length > 0 && (
-            <p className="truncate font-mono text-micro text-faint">
+            <p className="truncate text-micro text-faint tabular-nums">
               {meta.map((item, index) => (
                 <span key={item.text} title={item.title}>
                   {index > 0 && ' · '}
@@ -163,7 +163,7 @@ export function SessionView({
           />
         ))}
         {session.state === 'needs_mcp_input' && (
-          <div className="rounded-field border border-line p-2">
+          <div className="rounded-card border border-line bg-raised p-3 shadow-card">
             <p className="text-secondary text-ink">{session.mcp_request?.server || 'An MCP server'} is asking for input</p>
             {session.mcp_request?.message && (
               <p className="mt-0.5 text-secondary text-muted [overflow-wrap:anywhere]">{session.mcp_request.message}</p>
@@ -173,7 +173,7 @@ export function SessionView({
         )}
         {session.command_current && (
           <section>
-            <h3 className="text-micro text-faint">Terminal</h3>
+            <h3 className="text-micro font-medium text-faint">Terminal</h3>
             <CommandBlock command={session.command_current} live />
           </section>
         )}

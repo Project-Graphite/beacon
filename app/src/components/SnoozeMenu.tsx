@@ -4,7 +4,7 @@ import { clockTime } from '../lib/format.ts';
 import { Icon } from './Icon';
 import { OutlineButton } from './OutlineButton';
 
-const ITEM = 'flex h-7 w-full items-center rounded-[6px] px-2 text-left text-ink transition-colors duration-120 ease-settle hover:bg-line-soft';
+const ITEM = 'flex h-8 w-full items-center rounded-[7px] px-2.5 text-left text-ink transition-colors duration-120 ease-settle hover:bg-surface';
 
 interface SnoozeMenuProps {
   snoozedUntil: number | null;
@@ -49,29 +49,29 @@ export function SnoozeMenu({ snoozedUntil, soundsEnabled, onToggleSounds, run }:
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className={`press grid size-6 place-items-center rounded-field hover:bg-surface hover:text-ink ${snoozedUntil === null ? 'text-muted' : 'text-ink'}`}
+        className={`press grid size-7 place-items-center rounded-[7px] hover:bg-surface hover:text-ink ${snoozedUntil === null ? 'text-muted' : 'text-ink'}`}
       >
         <Icon name={snoozedUntil === null ? 'bell' : 'bell-off'} />
       </button>
       {open && (
         <div
           role="menu"
-          className="absolute top-full right-0 z-20 mt-1 w-56 origin-top-right animate-appear rounded-field border border-line bg-raised p-1 text-secondary"
+          className="absolute top-full right-0 z-20 mt-1.5 w-60 origin-top-right animate-appear rounded-[10px] border border-line bg-raised p-1.5 text-secondary shadow-popover"
         >
-          {[5, 15].map((minutes) => (
+          {[5, 15, 60].map((minutes) => (
             <button key={minutes} type="button" role="menuitem" onClick={() => choose(snooze(null, minutes))} className={ITEM}>
-              Snooze all for {minutes} minutes
+              Snooze for {minutes === 60 ? '1 hour' : `${minutes} minutes`}
             </button>
           ))}
           {snoozedUntil !== null && (
-            <div className="mt-1 flex items-center justify-between gap-2 border-t border-line-soft px-2 pt-1.5 pb-0.5">
+            <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-line-soft px-2.5 pt-2 pb-1">
               <span className="text-muted">Snoozed until {clockTime(snoozedUntil)}</span>
               <OutlineButton role="menuitem" onClick={() => choose(unsnooze(null))}>
-                Clear
+                End snooze
               </OutlineButton>
             </div>
           )}
-          <div className="mt-1 border-t border-line-soft pt-1">
+          <div className="mt-1.5 border-t border-line-soft pt-1.5">
             <button
               type="button"
               role="menuitemcheckbox"

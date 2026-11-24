@@ -22,16 +22,16 @@ export function SessionDetails({ session, detail, open, onToggle }: SessionDetai
         type="button"
         aria-expanded={open}
         onClick={onToggle}
-        className="press flex items-center gap-1 rounded-field text-micro text-faint hover:text-muted"
+        className="press flex items-center gap-1.5 rounded-[6px] text-secondary text-faint hover:text-muted"
       >
         <Icon name="chevron" className={`size-3 transition-transform duration-200 ease-settle ${open ? 'rotate-90' : ''}`} />
         More
       </button>
       <Collapse open={open}>
-        <div className="space-y-3 pt-1.5">
+        <div className="space-y-4 pt-2.5">
           {detail?.last_message && (
             <div>
-              <h3 className="mb-1 text-micro text-faint">Last message</h3>
+              <h3 className="mb-1.5 text-micro font-medium text-faint">Last message</h3>
               <LineClamp lines={textLines(detail.last_message)}>
                 {(shown) => <Markdown source={shown.join('\n')} />}
               </LineClamp>
@@ -39,8 +39,8 @@ export function SessionDetails({ session, detail, open, onToggle }: SessionDetai
           )}
           {usage?.status === 'ok' && (
             <div>
-              <h3 className="mb-1 text-micro text-faint">Usage</h3>
-              <dl className="grid grid-cols-2 gap-x-4 font-mono text-micro">
+              <h3 className="mb-1.5 text-micro font-medium text-faint">Usage</h3>
+              <dl className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-secondary">
                 {(
                   [
                     ['input', usage.input_tokens],
@@ -58,7 +58,7 @@ export function SessionDetails({ session, detail, open, onToggle }: SessionDetai
                 ))}
               </dl>
               {usage.reported_cost_usd !== null && (
-                <p className="mt-1 font-mono text-micro text-muted">
+                <p className="mt-1.5 text-micro text-muted">
                   reported cost ${usage.reported_cost_usd.toFixed(2)} (list price, from Claude Code)
                 </p>
               )}

@@ -21,7 +21,7 @@ export function CommandBlock({ command, live }: { command: string; live?: boolea
       {(shown) => (
         <pre
           ref={watched}
-          className="mt-1 rounded-field bg-surface px-2 py-1.5 font-mono text-secondary whitespace-pre-wrap [overflow-wrap:anywhere]"
+          className="mt-1.5 rounded-[8px] border border-line-soft bg-surface px-2.5 py-2 font-mono text-secondary whitespace-pre-wrap [overflow-wrap:anywhere]"
         >
           {live && <span className="text-faint">$ </span>}
           {tokenizeCommand(shown.join('\n')).map((token, index) => (

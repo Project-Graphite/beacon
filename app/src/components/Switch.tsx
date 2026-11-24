@@ -17,11 +17,11 @@ export function Switch({ field, checked, disabled, onChange }: SwitchProps) {
       aria-describedby={field.helpId}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative h-4 w-7 shrink-0 rounded-full border disabled:cursor-default ${checked ? 'border-ink bg-ink' : 'border-line bg-line hover:border-muted'}`}
+      className={`relative h-5 w-9 shrink-0 rounded-full border transition-colors duration-200 ease-settle disabled:cursor-default ${checked ? 'border-ink bg-ink' : 'border-line bg-line hover:border-muted'}`}
     >
       <span
         aria-hidden="true"
-        className={`absolute top-px left-px size-3 rounded-full transition-transform duration-150 ease-settle ${checked ? 'translate-x-3 bg-paper' : 'bg-muted'}`}
+        className={`absolute top-px left-px size-4 rounded-full shadow-card transition-[translate,background-color] duration-200 ease-spring ${checked ? 'translate-x-4 bg-paper' : 'bg-muted'}`}
       />
     </button>
   );

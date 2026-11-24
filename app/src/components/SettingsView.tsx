@@ -28,6 +28,7 @@ import {
   displayLabel,
   labelOf,
   OPACITY_RANGE,
+  PILL_BACKGROUND_CHOICES,
   overlaySummary,
   PEEK_RANGE,
   percent,
@@ -47,6 +48,7 @@ import { SegmentedControl } from './SegmentedControl';
 import { Select } from './Select';
 import { SettingsRow } from './SettingsRow';
 import { SettingsSection } from './SettingsSection';
+import { ShortcutRecorder } from './ShortcutRecorder';
 import { Slider } from './Slider';
 import { Switch } from './Switch';
 import { TextButton } from './TextButton';
@@ -54,7 +56,7 @@ import { TextButton } from './TextButton';
 export type SettingsPart = 'overlay' | 'attention' | 'startup' | 'behaviour' | 'hooks' | 'about';
 
 const FIELD =
-  'h-6 rounded-field border border-line bg-paper px-2 font-mono text-secondary text-ink placeholder:text-faint focus:border-muted focus:outline-none disabled:opacity-50';
+  'h-7 rounded-field border border-line bg-raised px-2.5 text-secondary text-ink shadow-card transition-colors duration-150 ease-settle placeholder:text-faint focus:border-faint focus:outline-none disabled:opacity-45';
 
 interface SettingsViewProps {
   config: LiveConfig | null;
@@ -65,7 +67,6 @@ interface SettingsViewProps {
 }
 
 export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: SettingsViewProps) {
-  const [editedHotkey, setEditedHotkey] = useState<string | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(cachedAppInfo);
   const [overlay, setOverlay] = useState<Overlay | null>(cachedOverlay);
   const [stallText, setStallText] = useState<string | null>(null);
@@ -82,7 +83,6 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
 
   const change = (part: SettingsPart, update: Partial<UiSettings>) => attempt(part, onChangeUi(update));
   const changeOverlay = (work: Promise<void>) => attempt('overlay', work.then(getOverlay), setOverlay);
-  const hotkey = editedHotkey ?? ui.hotkey;
   const section = (part: SettingsPart) => ({ open: openParts.includes(part), onToggle: () => onToggle(part), error: errors[part] });
 
   useEffect(() => {
@@ -103,7 +103,6 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
     attempt('behaviour', setConfig({ stall_minutes: minutes }), () => setStallText(null));
   };
 
-  const applyHotkey = () => attempt('behaviour', onChangeUi({ hotkey: hotkey.trim() }), () => setEditedHotkey(null));
   const target = overlay?.displays.find((display) => display.target);
 
   return (
@@ -117,6 +116,69 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
               value={overlay?.style ?? 'tab'}
               disabled={!overlay}
               onChange={(style) => changeOverlay(setStyle(style))}
+            />
+          )}
+        </SettingsRow>
+        {overlay?.style === 'pill' && (
+          <SettingsRow label="Pill background" help="None leaves only the session marks floating on the desktop.">
+            {(field) => (
+              <SegmentedControl
+                field={field}
+                choices={PILL_BACKGROUND_CHOICES}
+                value={ui.pill_background}
+                onChange={(pill_background) => change('overlay', { pill_background })}
+              />
+            )}
+          </SettingsRow>
+        )}
+        <SettingsRow label="Show it" help="When the overlay is on screen.">
+          {(field) => (
+            <Select
+              field={field}
+              choices={VISIBILITY_CHOICES}
+              text={labelOf(VISIBILITY_CHOICES, ui.visibility)}
+              selected={(visibility) => visibility === ui.visibility}
+              onChoose={(visibility) => change('overlay', { visibility })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow
+          label="Reveal on hover"
+          help="While the overlay is hidden, resting the pointer on its spot or its screen edge brings it back."
+          disabled={ui.visibility === 'never'}
+        >
+          {(field) => (
+            <Switch
+              field={field}
+              checked={ui.reveal_on_hover}
+              disabled={ui.visibility === 'never'}
+              onChange={(reveal_on_hover) => change('overlay', { reveal_on_hover })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Open panel on hover" help="Resting the pointer on the overlay opens the panel; otherwise click the tab or the pill's arrow.">
+          {(field) => (
+            <Switch field={field} checked={ui.open_on_hover} onChange={(open_on_hover) => change('overlay', { open_on_hover })} />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Size" help="Size of the edge tab or the pill.">
+          {(field) => (
+            <SegmentedControl
+              field={field}
+              choices={SIZE_CHOICES}
+              value={ui.size}
+              onChange={(size) => change('overlay', { size })}
+            />
+          )}
+        </SettingsRow>
+        <SettingsRow label="Idle opacity" help="Opacity of the overlay while nothing needs you.">
+          {(field) => (
+            <Slider
+              field={field}
+              value={ui.idle_opacity}
+              range={OPACITY_RANGE}
+              format={percent}
+              onCommit={(idle_opacity) => change('overlay', { idle_opacity })}
             />
           )}
         </SettingsRow>
@@ -159,59 +221,8 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
             />
           )}
         </SettingsRow>
-        <SettingsRow label="Show it" help="When the overlay is on screen.">
-          {(field) => (
-            <Select
-              field={field}
-              choices={VISIBILITY_CHOICES}
-              text={labelOf(VISIBILITY_CHOICES, ui.visibility)}
-              selected={(visibility) => visibility === ui.visibility}
-              onChoose={(visibility) => change('overlay', { visibility })}
-            />
-          )}
-        </SettingsRow>
         <SettingsRow
-          label="Reveal on edge hover"
-          help="While the overlay is hidden, hovering its screen edge brings it back."
-          disabled={ui.visibility === 'never'}
-        >
-          {(field) => (
-            <Switch
-              field={field}
-              checked={ui.reveal_on_hover}
-              disabled={ui.visibility === 'never'}
-              onChange={(reveal_on_hover) => change('overlay', { reveal_on_hover })}
-            />
-          )}
-        </SettingsRow>
-        <SettingsRow label="Open on hover" help="Resting the pointer on the overlay opens the panel; otherwise click the tab or the pill's arrow.">
-          {(field) => (
-            <Switch field={field} checked={ui.open_on_hover} onChange={(open_on_hover) => change('overlay', { open_on_hover })} />
-          )}
-        </SettingsRow>
-        <SettingsRow label="Size" help="Size of the edge tab or the pill.">
-          {(field) => (
-            <SegmentedControl
-              field={field}
-              choices={SIZE_CHOICES}
-              value={ui.size}
-              onChange={(size) => change('overlay', { size })}
-            />
-          )}
-        </SettingsRow>
-        <SettingsRow label="Idle opacity" help="Opacity of the overlay while nothing needs you.">
-          {(field) => (
-            <Slider
-              field={field}
-              value={ui.idle_opacity}
-              range={OPACITY_RANGE}
-              format={percent}
-              onCommit={(idle_opacity) => change('overlay', { idle_opacity })}
-            />
-          )}
-        </SettingsRow>
-        <SettingsRow
-          label="Pin while Claude is active"
+          label="Pin panel while Claude is active"
           help="While Claude is working or needs you, the panel opens by itself without taking focus and stays open until 5 s after Claude is done."
         >
           {(field) => (
@@ -378,25 +389,8 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
             />
           )}
         </SettingsRow>
-        <SettingsRow label="Shortcut" help="Opens and closes the panel from anywhere.">
-          {(field) => (
-            <span className="flex min-w-0 items-center gap-1.5">
-              <input
-                id={field.id}
-                aria-describedby={field.helpId}
-                placeholder="Ctrl+Alt+B"
-                value={hotkey}
-                onChange={(event) => setEditedHotkey(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && hotkey.trim()) applyHotkey();
-                }}
-                className={`${FIELD} w-40 min-w-0`}
-              />
-              <OutlineButton compact disabled={!hotkey.trim() || hotkey.trim() === ui.hotkey} onClick={applyHotkey}>
-                Apply
-              </OutlineButton>
-            </span>
-          )}
+        <SettingsRow label="Shortcut" help="Opens and closes the panel from anywhere. Click it, then press the keys.">
+          {(field) => <ShortcutRecorder field={field} value={ui.hotkey} onRecord={(hotkey) => change('behaviour', { hotkey })} />}
         </SettingsRow>
       </SettingsSection>
       <HooksSection open={openParts.includes('hooks')} onToggle={() => onToggle('hooks')} />
@@ -415,7 +409,7 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
             </span>
           )}
         </SettingsRow>
-        <div className="flex h-7 items-center justify-between px-2.5">
+        <div className="flex h-11 items-center justify-between px-4">
           <TextButton onClick={() => attempt('about', openLogsFolder())}>Open logs folder</TextButton>
           <TextButton onClick={() => attempt('about', quitApp())}>Quit Beacon</TextButton>
         </div>

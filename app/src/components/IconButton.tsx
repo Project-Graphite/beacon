@@ -11,10 +11,10 @@ export function IconButton({ icon, iconClassName, ...props }: IconButtonProps) {
     <button
       type="button"
       aria-label={props.title}
-      className="press grid size-5 shrink-0 place-items-center rounded-[5px] text-faint focus-visible:text-ink enabled:hover:bg-line-soft enabled:hover:text-ink disabled:opacity-40"
+      className="press grid size-7 shrink-0 place-items-center rounded-[7px] text-faint focus-visible:text-ink enabled:hover:bg-surface enabled:hover:text-ink disabled:opacity-35"
       {...props}
     >
-      <Icon name={icon} className={`size-3.5 ${iconClassName ?? ''}`} />
+      <Icon name={icon} className={`size-4 ${iconClassName ?? ''}`} />
     </button>
   );
 }

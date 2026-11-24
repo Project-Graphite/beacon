@@ -32,6 +32,7 @@ export const UI_DEFAULTS: UiSettings = {
   quit_when_idle_minutes: 15,
   pin_while_active: false,
   open_on_hover: true,
+  pill_background: 'solid',
 };
 
 export const OPACITY_RANGE = { min: 0.2, max: 1, step: 0.05 };
@@ -53,7 +54,7 @@ export const percent = (fraction: number) => `${Math.round(fraction * 100)}%`;
 export const VISIBILITY_CHOICES: Choice<UiSettings['visibility']>[] = [
   { value: 'always', label: 'Always', help: 'Stays on its screen edge all the time.' },
   { value: 'active', label: 'While Claude is active', help: 'While Claude is working or needs you; hides once every session is idle.' },
-  { value: 'attention', label: 'When Claude needs you', help: 'Appears when a session is waiting on you.' },
+  { value: 'attention', label: 'Only when Claude needs you', help: 'Hidden until a session is waiting on you; with Reveal on hover, resting the pointer on its spot brings it back.' },
   { value: 'never', label: 'Never', help: 'Tray icon only: open the panel from the tray icon or the shortcut.' },
 ];
 
@@ -85,6 +86,11 @@ export function avoidedLabel(displays: OverlayDisplay[]): string {
   if (avoided.length === 0) return 'None';
   return avoided.length === 1 ? avoided[0].name : `${avoided.length} displays`;
 }
+
+export const PILL_BACKGROUND_CHOICES: Choice<UiSettings['pill_background']>[] = [
+  { value: 'solid', label: 'Solid' },
+  { value: 'none', label: 'None', help: 'Only the session marks float on the desktop.' },
+];
 
 export const SIZE_CHOICES: Choice<UiSettings['size']>[] = [
   { value: 'small', label: 'Small' },
@@ -131,6 +137,7 @@ export function uiSettings(raw: Partial<UiSettings>): UiSettings {
     visibility: oneOf(VISIBILITY_CHOICES, raw.visibility, UI_DEFAULTS.visibility),
     reveal_on_hover: raw.reveal_on_hover ?? UI_DEFAULTS.reveal_on_hover,
     size: oneOf(SIZE_CHOICES, raw.size, UI_DEFAULTS.size),
+    pill_background: oneOf(PILL_BACKGROUND_CHOICES, raw.pill_background, UI_DEFAULTS.pill_background),
     idle_opacity: Number(within(OPACITY_RANGE, raw.idle_opacity, UI_DEFAULTS.idle_opacity).toFixed(2)),
     attention_style: oneOf(ATTENTION_CHOICES, raw.attention_style, UI_DEFAULTS.attention_style),
     attention_repeat_seconds: oneOf(REPEAT_CHOICES, raw.attention_repeat_seconds, UI_DEFAULTS.attention_repeat_seconds),

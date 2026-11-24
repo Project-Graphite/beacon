@@ -4,7 +4,7 @@ export function FilledButton({ compact, ...props }: ButtonHTMLAttributes<HTMLBut
   return (
     <button
       type="button"
-      className={`press inline-flex shrink-0 items-center rounded-field border border-ink bg-ink text-secondary font-medium text-paper hover:bg-ink/85 disabled:pointer-events-none disabled:opacity-50 ${compact ? 'h-[22px] px-2' : 'h-6 px-2.5'}`}
+      className={`press inline-flex shrink-0 items-center justify-center rounded-field bg-ink text-secondary font-medium text-paper shadow-card hover:bg-ink/88 disabled:pointer-events-none disabled:opacity-45 ${compact ? 'h-[26px] px-2.5' : 'h-7 px-3'}`}
       {...props}
     />
   );

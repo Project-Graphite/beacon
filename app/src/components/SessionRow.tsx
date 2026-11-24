@@ -49,24 +49,24 @@ export const SessionRow = memo(function SessionRow({
       id={cardId(session.session_id)}
       data-motion={session.session_id}
       aria-current={selected || undefined}
-      className={`relative ${selected ? 'before:absolute before:inset-y-0 before:left-0 before:z-10 before:w-0.5 before:bg-ink' : ''}`}
+      className={`relative ${selected ? 'before:absolute before:inset-y-3 before:left-0 before:z-10 before:w-[3px] before:rounded-r-full before:bg-ink' : ''}`}
     >
       <div
         onClick={open}
-        className={`relative transition-colors duration-120 ease-settle ${crossedOff ? 'opacity-45' : 'hover:bg-surface'} ${selected ? 'bg-surface' : ''} ${alert ? 'outline-1 -outline-offset-1 outline-wip/50' : ''}`}
+        className={`relative transition-colors duration-150 ease-settle ${crossedOff ? 'opacity-45' : alert && !selected ? 'bg-wip/[0.07] hover:bg-wip/[0.11]' : 'hover:bg-surface'} ${selected ? 'bg-surface' : ''}`}
       >
         <span data-flash aria-hidden="true" className="pointer-events-none absolute inset-0 bg-ink/8 opacity-0" />
-        <div className="relative flex h-9 items-center gap-2.5 px-2.5">
+        <div className="relative flex h-[52px] items-center gap-3 pr-2.5 pl-4">
           <Avatar session={session} size="row" />
           <div className="min-w-0 flex-1">
             <p className="flex items-baseline gap-2">
-              <span className="min-w-0 flex-1 truncate font-semibold text-ink">{sessionTitle(session)}</span>
+              <span className="min-w-0 flex-1 truncate font-medium text-ink">{sessionTitle(session)}</span>
               <TurnTime session={session} />
             </p>
-            <p className={`truncate text-micro ${line.kind === 'state' ? TONE_CLASSES[line.tone] : 'text-muted'}`}>
+            <p className={`truncate text-secondary ${line.kind === 'state' ? TONE_CLASSES[line.tone] : 'text-muted'}`}>
               {line.kind === 'tasks' ? (
                 <>
-                  <span className="font-mono tabular-nums">{line.count}</span> {line.text}
+                  <span className="tabular-nums">{line.count}</span> {line.text}
                 </>
               ) : line.kind === 'step' ? (
                 <StepLabel label={line.text} />
@@ -97,7 +97,7 @@ export const SessionRow = memo(function SessionRow({
           />
         ))}
         {notices.map((notice) => (
-          <p key={notice.id} className="origin-top-left animate-appear pr-2.5 pb-1.5 pl-10 text-micro text-muted">
+          <p key={notice.id} className="origin-top-left animate-appear pr-4 pb-2.5 pl-[56px] text-secondary text-muted">
             {notice.text}
           </p>
         ))}

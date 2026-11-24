@@ -63,19 +63,19 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
                   send();
                 }
               }}
-              className="block max-h-[calc(6lh+10px)] min-h-[calc(2lh+10px)] w-full resize-none rounded-field border border-line bg-paper px-2 py-1 text-secondary text-ink field-sizing-content placeholder:text-faint focus:border-muted focus:outline-none"
+              className="block max-h-[calc(6lh+18px)] min-h-[calc(2lh+18px)] w-full resize-none rounded-[10px] border border-line bg-raised px-3 py-2 text-ink shadow-card transition-colors duration-150 ease-settle field-sizing-content placeholder:text-faint focus:border-faint focus:outline-none"
             />
             {sentText && (
               <p
                 key={sentText.id}
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 top-0 animate-sent truncate border border-transparent px-2 py-1 text-secondary text-ink"
+                className="pointer-events-none absolute inset-x-0 top-0 animate-sent truncate border border-transparent px-3 py-2 text-ink"
               >
                 {sentText.text}
               </p>
             )}
           </div>
-          <div className="mt-1.5 flex items-start gap-2">
+          <div className="mt-2 flex items-center gap-3">
             <p className="min-w-0 flex-1 text-micro text-muted">{path.label}</p>
             <FilledButton disabled={sending || !text.trim()} onClick={send}>
               Send
@@ -85,7 +85,7 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
       )}
       {failure && <p className="mt-1 text-micro text-danger [overflow-wrap:anywhere]">{failure}</p>}
       {prompts.length > 0 && (
-        <ol className="mt-2 space-y-1">
+        <ol className="mt-3 space-y-1.5">
           {prompts.map((prompt) => (
             <li
               key={prompt.id}

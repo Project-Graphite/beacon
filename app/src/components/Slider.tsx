@@ -34,9 +34,9 @@ export function Slider({ field, value, range, format, disabled, onCommit }: Slid
         onPointerUp={commit}
         onKeyUp={commit}
         onBlur={commit}
-        className="block h-4 w-24 cursor-pointer appearance-none bg-transparent disabled:cursor-default [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-line [&::-webkit-slider-thumb]:-mt-[5px] [&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-paper [&::-webkit-slider-thumb]:bg-ink"
+        className="block h-5 w-28 cursor-pointer appearance-none bg-transparent disabled:cursor-default [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-line [&::-webkit-slider-thumb]:-mt-[5px] [&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-paper [&::-webkit-slider-thumb]:bg-ink"
       />
-      <output htmlFor={field.id} className="w-8 text-right font-mono text-secondary text-muted tabular-nums">
+      <output htmlFor={field.id} className="w-10 text-right text-secondary text-muted tabular-nums">
         {format(shown)}
       </output>
     </span>

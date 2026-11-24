@@ -19,7 +19,7 @@ export function SessionTabs({ tabs, currentId, onSwitch }: SessionTabsProps) {
           aria-selected={tab.session_id === currentId}
           title={`${sessionTitle(tab)} ([ and ] switch)`}
           onClick={() => onSwitch(tab.session_id)}
-          className="press relative grid size-6 shrink-0 place-items-center rounded-[5px] enabled:hover:bg-line-soft"
+          className="press relative grid size-7 shrink-0 place-items-center rounded-[7px] enabled:hover:bg-surface"
         >
           <Avatar session={tab} size="tab" ringed={tab.session_id === currentId} />
           {needsInput(tab) && (

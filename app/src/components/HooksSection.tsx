@@ -69,7 +69,7 @@ export function HooksSection({ open, onToggle }: HooksSectionProps) {
             )}
           </SettingsRow>
           {status.problems.length + status.warnings.length > 0 && (
-            <ul className="space-y-0.5 px-2.5 pb-1 text-micro">
+            <ul className="space-y-1 px-4 pb-2 text-secondary">
               {status.problems.map((problem) => (
                 <li key={problem} className="break-words text-danger">
                   {problem}
@@ -83,7 +83,7 @@ export function HooksSection({ open, onToggle }: HooksSectionProps) {
             </ul>
           )}
           {plan && shownPlan && (
-            <div className="px-2.5 pb-1.5">
+            <div className="px-4 pb-2.5">
               <div className="space-y-0.5 font-mono text-micro text-muted">
                 {shownPlan.notes.map((note, index) => (
                   <p key={index} className="whitespace-pre-wrap wrap-anywhere">
@@ -92,7 +92,7 @@ export function HooksSection({ open, onToggle }: HooksSectionProps) {
                 ))}
               </div>
               {shownPlan.diff.length > 0 && <DiffBlock lines={shownPlan.diff} />}
-              <div className="mt-1.5 flex items-center gap-1.5">
+              <div className="mt-2.5 flex items-center gap-2">
                 <FilledButton
                   autoFocus
                   disabled={busy}
@@ -113,7 +113,7 @@ export function HooksSection({ open, onToggle }: HooksSectionProps) {
             </div>
           )}
           {applied && (
-            <p className="px-2.5 pb-1 text-micro text-muted">Running Claude sessions pick up the change by themselves</p>
+            <p className="px-4 pb-2 text-secondary text-muted">Running Claude sessions pick up the change by themselves</p>
           )}
         </>
       )}

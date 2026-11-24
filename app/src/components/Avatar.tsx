@@ -4,7 +4,7 @@ import { useOffscreenPause } from '../hooks/useOffscreenPause.ts';
 import { avatarFace, avatarHue, blinkDelay, type AvatarFace } from '../lib/avatar.ts';
 import { StateMark } from './StateMark';
 
-const SIZES = { tab: 14, row: 20, header: 36 } as const;
+const SIZES = { tab: 16, row: 28, header: 40 } as const;
 
 const STROKE = { fill: 'none', stroke: 'var(--color-paper)', strokeWidth: 1.5, strokeLinecap: 'round' } as const;
 

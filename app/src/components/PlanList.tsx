@@ -6,8 +6,8 @@ export function PlanList({ tasks }: { tasks: Task[] }) {
   const currentIndex = tasks.findIndex((task) => !task.done);
   return (
     <section>
-      <h3 className="mb-1 text-micro text-faint">Plan</h3>
-      <ol className="space-y-0.5">
+      <h3 className="mb-1.5 text-micro font-medium text-faint">Plan</h3>
+      <ol className="space-y-1">
         {tasks.map((task, index) => (
           <li key={task.id} className="flex items-center gap-2 text-secondary">
             {task.done ? (

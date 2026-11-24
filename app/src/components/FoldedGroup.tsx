@@ -17,7 +17,7 @@ export function FoldedGroup({ motionId, label, open, onToggle, children }: Folde
         type="button"
         aria-expanded={open}
         onClick={onToggle}
-        className="flex h-6 w-full items-center gap-1.5 px-2.5 text-micro text-faint transition-colors duration-120 ease-settle -outline-offset-2 hover:bg-surface hover:text-muted"
+        className="flex h-10 w-full items-center gap-2 px-4 text-secondary text-faint transition-colors duration-120 ease-settle -outline-offset-2 hover:bg-surface hover:text-muted"
       >
         <Icon name="chevron" className={`size-3 transition-transform duration-200 ease-settle ${open ? 'rotate-90' : ''}`} />
         {label}

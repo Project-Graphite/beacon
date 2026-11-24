@@ -5,8 +5,8 @@ import type { Choice } from '../lib/settings.ts';
 import { Icon } from './Icon';
 import type { Field } from './SettingsRow';
 
-const OPTION_PX = 28;
-const MENU_PADDING_PX = 10;
+const OPTION_PX = 32;
+const MENU_PADDING_PX = 14;
 const GAP_PX = 4;
 
 interface SelectProps<T extends string | number> {
@@ -97,7 +97,7 @@ export function Select<T extends string | number>({
           if (step.choose) choose(step.active);
           else if (!step.open) setOpen(false);
         }}
-        className={`flex h-6 max-w-44 min-w-0 shrink items-center gap-1 rounded-field border bg-paper pr-1 pl-2 text-secondary text-ink disabled:cursor-default ${open ? 'border-muted' : 'border-line hover:border-muted'}`}
+        className={`flex h-7 max-w-48 min-w-0 shrink items-center gap-1.5 rounded-field border bg-raised pr-1.5 pl-2.5 text-secondary text-ink shadow-card transition-colors duration-150 ease-settle disabled:cursor-default ${open ? 'border-faint' : 'border-line hover:border-faint/60'}`}
       >
         <span className="min-w-0 truncate">{text}</span>
         <Icon name="chevron" className="size-3.5 shrink-0 rotate-90 text-muted" />
@@ -111,7 +111,7 @@ export function Select<T extends string | number>({
             aria-labelledby={field.labelId}
             aria-multiselectable={multiple}
             style={place}
-            className={`fixed z-30 max-w-[calc(100vw-16px)] animate-appear rounded-field border border-line bg-raised p-1 text-secondary shadow-popover ${'bottom' in place ? 'origin-bottom-right' : 'origin-top-right'}`}
+            className={`fixed z-30 max-w-[calc(100vw-16px)] animate-appear rounded-[10px] border border-line bg-raised p-1.5 text-secondary shadow-popover ${'bottom' in place ? 'origin-bottom-right' : 'origin-top-right'}`}
           >
             {choices.map((choice, index) => (
               <li
@@ -123,7 +123,7 @@ export function Select<T extends string | number>({
                 onPointerDown={(event) => event.preventDefault()}
                 onPointerEnter={() => setActive(index)}
                 onClick={() => choose(index)}
-                className={`flex h-7 cursor-default items-center justify-between gap-3 rounded-[6px] px-2 text-ink ${index === active ? 'bg-line-soft' : ''}`}
+                className={`flex h-8 cursor-default items-center justify-between gap-4 rounded-[7px] px-2.5 text-ink transition-colors duration-100 ${index === active ? 'bg-surface' : ''}`}
               >
                 <span className="truncate">{choice.label}</span>
                 <Icon

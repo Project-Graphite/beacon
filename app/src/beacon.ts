@@ -254,6 +254,7 @@ export interface UiSettings {
   quit_when_idle_minutes: number;
   pin_while_active: boolean;
   open_on_hover: boolean;
+  pill_background: 'solid' | 'none';
 }
 
 export type OverlayStyle = 'tab' | 'pill';

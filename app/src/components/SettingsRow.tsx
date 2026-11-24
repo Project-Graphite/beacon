@@ -17,8 +17,8 @@ export function SettingsRow({ label, help, disabled, children }: SettingsRowProp
   const id = useId();
   const field = { id, labelId: `${id}label`, helpId: help && `${id}help` };
   return (
-    <div title={help} className={`flex h-7 items-center justify-between gap-3 px-2.5 ${disabled ? 'opacity-50' : ''}`}>
-      <label id={field.labelId} htmlFor={id} className="shrink-0 text-secondary text-ink">
+    <div title={help} className={`flex min-h-10 items-center justify-between gap-4 px-4 transition-opacity duration-150 ease-settle ${disabled ? 'opacity-50' : ''}`}>
+      <label id={field.labelId} htmlFor={id} className="shrink-0 text-ink">
         {label}
       </label>
       {help && (

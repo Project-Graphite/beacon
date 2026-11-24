@@ -20,27 +20,27 @@ export function SettingsSection({ label, summary, open, onToggle, error, childre
         aria-expanded={open}
         aria-controls={body}
         onClick={onToggle}
-        className="flex h-6 w-full items-center gap-1.5 px-2.5 text-left text-secondary hover:bg-line-soft"
+        className="flex h-11 w-full items-center gap-2 px-4 text-left transition-colors duration-150 ease-settle hover:bg-surface"
       >
         <Icon
           name="chevron"
-          className={`size-3 shrink-0 text-faint transition-transform duration-200 ease-settle ${open ? 'rotate-90' : ''}`}
+          className={`size-3.5 shrink-0 text-faint transition-transform duration-200 ease-settle ${open ? 'rotate-90' : ''}`}
         />
-        <span className="shrink-0 text-muted">{label}</span>
+        <span className="shrink-0 font-medium text-ink">{label}</span>
         <span
           aria-hidden={open}
-          className={`min-w-0 truncate text-micro text-faint transition-opacity duration-200 ease-settle ${open ? 'opacity-0' : ''}`}
+          className={`ml-auto min-w-0 truncate text-secondary text-faint transition-opacity duration-200 ease-settle ${open ? 'opacity-0' : ''}`}
         >
           {summary}
         </span>
       </button>
       <div id={body}>
         <Collapse open={open}>
-          <div className="pb-1">{children}</div>
+          <div className="pb-2.5">{children}</div>
         </Collapse>
       </div>
       {error && (
-        <p role="alert" title={error} className="truncate px-2.5 pb-1.5 text-micro text-danger">
+        <p role="alert" title={error} className="truncate px-4 pb-2.5 text-secondary text-danger">
           {error}
         </p>
       )}
