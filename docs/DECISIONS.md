@@ -3,6 +3,31 @@
 Decisions taken while building Beacon, newest phase first. Evidence for the phase 0 entries is in
 [SPIKES.md](SPIKES.md). An entry marked **needs Amr** is a proposal until he answers.
 
+## 0.2.0: refined Graphite, light and dark, an installer (2026-11-24)
+
+- **The look is refined Graphite, not a new world.** Amr chose to keep the Graphite dark identity and
+  make it calmer and roomier rather than adopt Windows Fluent or a new palette. The panel is 376 px
+  wide with 52 px rows, 16 px gutters and Segoe UI Variable; [DESIGN.md](../DESIGN.md) holds the
+  tokens.
+- **Beacon follows the Windows theme.** The panel follows `prefers-color-scheme`, the pill, tab and
+  peek follow `AppsUseLightTheme`, and the tray icon follows `SystemUsesLightTheme`; all redraw on
+  `ImmersiveColorSet`.
+- **Icons carry no colour.** The app icon is a white pulse (a core and two fading rings) on graphite;
+  an earlier amber dot-and-arcs mark read as Wi-Fi. The tray mark uses the taskbar's ink and shows a
+  small badge instead of a colour when a session needs you.
+- **Two invisible options for the pill.** `Pill background: None` drops the capsule and keeps the
+  marks; `Show it: Only when Claude needs you` with `Reveal on hover` keeps the overlay invisible
+  until needed, revealed from a thin strip so it never swallows clicks on what lies beneath. Shadows
+  sit in click-through windows for the same reason.
+- **The tray menu and the settings view use the same names and choices.** The menu covers snooze,
+  the overlay, attention and opens the settings view; the old flat show/hide items are gone.
+- **The shortcut is recorded, not typed.** The recorder pauses the global hotkey while it listens and
+  asks for two modifiers (or one with a function key) so a shortcut cannot steal Ctrl+C or F5.
+- **Releases ship a per-user installer.** Tauri's NSIS bundler installs into
+  `%LOCALAPPDATA%\Beacon\app` without admin rights, stops a running Beacon first, offers to connect
+  the hooks, starts Beacon, and on uninstall removes the hooks, the Run value and optionally the data.
+  A zip of the three executables is kept for people who prefer it. Neither is code-signed yet.
+
 ## Self-approval check and the wake hook's lifetime (2026-11-24)
 
 - **Refusing decisions from inside a Claude session is a speed bump, not a security boundary.** The
@@ -103,7 +128,8 @@ its task list, on every change, and the panel's WebView was built from scratch o
   that long after its turn ended, checked with the stall check every 30 s. `error` and `stalled`
   sessions are left for the user.
 - `core.log` moves to `core.log.1` before it would pass 5 MB, so the log no longer grows without
-  bound.
+  bound. The app's own diagnostics go to `app.log` beside it with the same rotation, since a release
+  build has no console.
 
 ### Fixes
 
@@ -173,8 +199,11 @@ Changed on Amr's feedback after using v1.
   with the state mark as a badge. A row leads with the session's title and shows task progress from
   Claude's own task list. Opening a row replaces the list with a detail view: the plan as a
   checklist, each tool call as one step with its status and duration, and the command running now.
-- **A session can be crossed off.** It leaves the list and stops alerting until its next prompt or
-  request. A session with a pending request cannot be crossed off.
+- **A session can be hidden** (first called "crossed off"). It leaves the list and the overlay and
+  stops alerting until its next prompt or request; Undo, Show in the Hidden group, or
+  `beacon undismiss` brings it back. A session with a pending request cannot be hidden. Hiding never
+  closes the session: Beacon cannot close a VS Code or desktop session, and leaving it in the
+  overlay made the action look like it did nothing.
 - **Sounds are optional and off by default:** Windows' own notification sounds when a session starts
   needing the user or finishes.
 - Before content grows, the page sizes the window to the target height and then animates inside it,
