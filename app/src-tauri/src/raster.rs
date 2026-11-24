@@ -288,36 +288,16 @@ impl Canvas {
         }
     }
 
+    #[cfg(test)]
     pub fn lift_into(&self, target: &mut Canvas, scale: f32, look: Look) {
+        let mut shadow = CastShadow::default();
+        shadow.cast(self, scale, look);
+        *target = shadow.canvas;
         let pad = shadow_pad(scale);
-        let (width, height) = (self.width + 2 * pad, self.height + 2 * pad);
-        let shadow = look.shadow();
-        let offset = (shadow.offset * scale).round() as usize;
-        let mut cast = vec![0.0; width * height];
-        for y in 0..self.height {
-            for x in 0..self.width {
-                cast[(y + pad + offset) * width + x + pad] = self.pixels[y * self.width + x][3];
-            }
-        }
-        let radius = ((shadow.radius * scale / 2.0).ceil() as usize).max(1);
-        let mut scratch = vec![0.0; width * height];
-        for _ in 0..2 {
-            box_blur(&cast, &mut scratch, (width, height), radius, true);
-            box_blur(&scratch, &mut cast, (width, height), radius, false);
-        }
-        target.reset(width, height);
-        let tint = [shadow.colour.0, shadow.colour.1, shadow.colour.2]
-            .map(|channel| f32::from(channel) / 255.0);
-        for (pixel, strength) in target.pixels.iter_mut().zip(&cast) {
-            let alpha = (strength * shadow.alpha).min(1.0);
-            if alpha >= SHADOW_CUTOFF {
-                *pixel = [tint[0] * alpha, tint[1] * alpha, tint[2] * alpha, alpha];
-            }
-        }
         for y in 0..self.height {
             for x in 0..self.width {
                 let above = self.pixels[y * self.width + x];
-                let below = &mut target.pixels[(y + pad) * width + x + pad];
+                let below = &mut target.pixels[(y + pad) * target.width + x + pad];
                 for channel in 0..4 {
                     below[channel] = above[channel] + below[channel] * (1.0 - above[3]);
                 }
@@ -351,6 +331,58 @@ impl Canvas {
     }
 }
 
+#[derive(Default)]
+pub struct CastShadow {
+    pub canvas: Canvas,
+    solid: Option<(usize, usize, u32, Look)>,
+    cast: Vec<f32>,
+    scratch: Vec<f32>,
+}
+
+impl CastShadow {
+    pub fn cast(&mut self, shape: &Canvas, scale: f32, look: Look) {
+        let key = (shape.width, shape.height, scale.to_bits(), look);
+        if self.solid == Some(key) {
+            return;
+        }
+        self.solid = look.solid.then_some(key);
+        let pad = shadow_pad(scale);
+        let (width, height) = (shape.width + 2 * pad, shape.height + 2 * pad);
+        let shadow = look.shadow();
+        let offset = (shadow.offset * scale).round() as usize;
+        self.cast.clear();
+        self.cast.resize(width * height, 0.0);
+        for y in 0..shape.height {
+            for x in 0..shape.width {
+                self.cast[(y + pad + offset) * width + x + pad] =
+                    shape.pixels[y * shape.width + x][3];
+            }
+        }
+        let radius = ((shadow.radius * scale / 2.0).ceil() as usize).max(1);
+        self.scratch.clear();
+        self.scratch.resize(width * height, 0.0);
+        for _ in 0..2 {
+            box_blur(&self.cast, &mut self.scratch, (width, height), radius, true);
+            box_blur(
+                &self.scratch,
+                &mut self.cast,
+                (width, height),
+                radius,
+                false,
+            );
+        }
+        self.canvas.reset(width, height);
+        let tint = [shadow.colour.0, shadow.colour.1, shadow.colour.2]
+            .map(|channel| f32::from(channel) / 255.0);
+        for (pixel, strength) in self.canvas.pixels.iter_mut().zip(&self.cast) {
+            let alpha = (strength * shadow.alpha).min(1.0);
+            if alpha >= SHADOW_CUTOFF {
+                *pixel = [tint[0] * alpha, tint[1] * alpha, tint[2] * alpha, alpha];
+            }
+        }
+    }
+}
+
 pub fn shadow_pad(scale: f32) -> usize {
     (SHADOW_REACH * scale).ceil() as usize
 }
@@ -362,27 +394,26 @@ fn box_blur(
     radius: usize,
     horizontal: bool,
 ) {
-    let (length, lines) = if horizontal {
-        (width, height)
+    let (length, lines, stride) = if horizontal {
+        (width, height, 1)
     } else {
-        (height, width)
-    };
-    let index = |line: usize, along: usize| {
-        if horizontal {
-            line * width + along
-        } else {
-            along * width + line
-        }
+        (height, width, width)
     };
     let window = (2 * radius + 1) as f32;
     for line in 0..lines {
+        let first = if horizontal { line * width } else { line };
+        let at = |along: usize| first + along * stride;
+        let mut sum: f32 = (0..=radius.min(length - 1))
+            .map(|step| source[at(step)])
+            .sum();
         for along in 0..length {
-            let from = along.saturating_sub(radius);
-            let to = (along + radius).min(length - 1);
-            target[index(line, along)] = (from..=to)
-                .map(|step| source[index(line, step)])
-                .sum::<f32>()
-                / window;
+            target[at(along)] = sum / window;
+            if along + radius + 1 < length {
+                sum += source[at(along + radius + 1)];
+            }
+            if along >= radius {
+                sum -= source[at(along - radius)];
+            }
         }
     }
 }
@@ -1364,5 +1395,73 @@ mod tests {
             );
             assert!(under[3] > 0, "the marks cast a shadow");
         }
+    }
+
+    #[test]
+    fn the_sliding_box_blur_matches_a_plain_window_sum() {
+        let (width, height) = (9, 7);
+        let source: Vec<f32> = (0..width * height)
+            .map(|index| ((index * 37) % 11) as f32 / 10.0)
+            .collect();
+        for radius in [1, 2, 5, 12] {
+            for horizontal in [true, false] {
+                let mut blurred = vec![0.0; width * height];
+                box_blur(&source, &mut blurred, (width, height), radius, horizontal);
+                for y in 0..height {
+                    for x in 0..width {
+                        let (along, length) = if horizontal { (x, width) } else { (y, height) };
+                        let expected: f32 = (along.saturating_sub(radius)
+                            ..=(along + radius).min(length - 1))
+                            .map(|step| {
+                                if horizontal {
+                                    source[y * width + step]
+                                } else {
+                                    source[step * width + x]
+                                }
+                            })
+                            .sum::<f32>()
+                            / (2 * radius + 1) as f32;
+                        assert!(
+                            (blurred[y * width + x] - expected).abs() < 1e-5,
+                            "radius {radius} horizontal {horizontal} at {x},{y}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_solid_capsule_shadow_is_reused_for_the_same_size_and_a_clear_one_follows_its_marks() {
+        let solid = Look::default();
+        let clear = Look {
+            theme: Theme::Dark,
+            solid: false,
+        };
+        let capsule = painted(&[MarkKind::Idle], 1.0, solid);
+        let mut emptied = Canvas::default();
+        emptied.reset(capsule.width, capsule.height);
+        let alphas = |shadow: &CastShadow| -> Vec<u8> {
+            shadow
+                .canvas
+                .straight_rgba()
+                .chunks(4)
+                .map(|p| p[3])
+                .collect()
+        };
+        let mut shadow = CastShadow::default();
+        shadow.cast(&capsule, 1.0, solid);
+        let first = alphas(&shadow);
+        assert!(first.iter().any(|&alpha| alpha > 0));
+        shadow.cast(&emptied, 1.0, solid);
+        assert_eq!(alphas(&shadow), first);
+        shadow.cast(&emptied, 1.5, solid);
+        assert_ne!(alphas(&shadow), first);
+        let mut marks = CastShadow::default();
+        marks.cast(&capsule, 1.0, clear);
+        let drawn = alphas(&marks);
+        marks.cast(&emptied, 1.0, clear);
+        assert_ne!(alphas(&marks), drawn);
+        assert!(alphas(&marks).iter().all(|&alpha| alpha == 0));
     }
 }

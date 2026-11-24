@@ -217,6 +217,7 @@ impl Shell {
             },
             Action::Pill(PillEvent::Moved) => self.overlay_changed(),
             Action::Pill(PillEvent::HoverTick) => self.check_hover(),
+            Action::Pill(PillEvent::FullscreenChanged) => {}
             Action::Pill(PillEvent::ForegroundChanged) => {
                 if jump::has_done(self.snapshot.as_ref()) {
                     jump::resolve_focus(

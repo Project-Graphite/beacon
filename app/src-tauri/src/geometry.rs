@@ -8,6 +8,7 @@ const PANEL_MIN_HEIGHT: f64 = 120.0;
 const PANEL_SCREEN_ALLOWANCE: f64 = 24.0;
 const DOCK_DISTANCE: f64 = 80.0;
 const PEEK_GAP: f64 = 6.0;
+const REVEAL_DEPTH: f64 = 4.0;
 const EDGE_ORDER: [Edge; 4] = [Edge::Right, Edge::Left, Edge::Top, Edge::Bottom];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -261,6 +262,14 @@ pub fn pill_edge(pill: Rect, work: &Rect) -> Edge {
         Edge::Top
     } else {
         Edge::Bottom
+    }
+}
+
+pub fn reveal_strip(pill: Rect, work: &Rect, scale: f64) -> Rect {
+    let depth = px(REVEAL_DEPTH, scale).clamp(1, pill.height());
+    match pill_edge(pill, work) {
+        Edge::Top => Rect::sized(pill.left, pill.top, pill.width(), depth),
+        _ => Rect::sized(pill.left, pill.bottom - depth, pill.width(), depth),
     }
 }
 
@@ -867,6 +876,20 @@ pub(crate) mod tests {
             pill_edge(Rect::sized(12, 990, 100, 28), &work),
             Edge::Bottom
         );
+    }
+
+    #[test]
+    fn a_hidden_pill_reveals_from_a_thin_strip_on_the_side_nearest_the_screen_edge() {
+        let work = Rect::sized(0, 0, 1920, 1032);
+        let top = Rect::sized(1800, 12, 100, 28);
+        assert_eq!(reveal_strip(top, &work, 1.0), Rect::sized(1800, 12, 100, 4));
+        assert_eq!(reveal_strip(top, &work, 1.5), Rect::sized(1800, 12, 100, 6));
+        let bottom = Rect::sized(12, 990, 100, 28);
+        assert_eq!(
+            reveal_strip(bottom, &work, 1.0),
+            Rect::sized(12, 1014, 100, 4)
+        );
+        assert_eq!(reveal_strip(top, &work, 100.0).height(), 28);
     }
 
     #[test]

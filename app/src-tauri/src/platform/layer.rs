@@ -12,7 +12,7 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, HWND_TOPMOST, SW_HIDE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
     SetWindowPos, ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
 struct Surface {
@@ -64,9 +64,17 @@ impl Surface {
 
 impl Layer {
     pub fn create(class: &[u16]) -> io::Result<Layer> {
+        Layer::create_with(class, 0)
+    }
+
+    pub fn create_click_through(class: &[u16]) -> io::Result<Layer> {
+        Layer::create_with(class, WS_EX_TRANSPARENT)
+    }
+
+    fn create_with(class: &[u16], extra_style: u32) -> io::Result<Layer> {
         let hwnd = unsafe {
             CreateWindowExW(
-                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | extra_style,
                 class.as_ptr(),
                 class.as_ptr(),
                 WS_POPUP,
@@ -142,13 +150,21 @@ impl Layer {
     }
 
     pub fn show(&mut self, shown: bool) {
+        self.show_after(shown, HWND_TOPMOST);
+    }
+
+    pub fn show_behind(&mut self, shown: bool, front: HWND) {
+        self.show_after(shown, front);
+    }
+
+    fn show_after(&mut self, shown: bool, after: HWND) {
         if shown != self.shown {
             self.shown = shown;
             unsafe {
                 if shown {
                     SetWindowPos(
                         self.hwnd,
-                        HWND_TOPMOST,
+                        after,
                         0,
                         0,
                         0,
