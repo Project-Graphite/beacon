@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 const EDGE_MARGIN: f64 = 12.0;
 const SNAP_DISTANCE: f64 = 16.0;
 const PANEL_GAP: f64 = 8.0;
-const PANEL_WIDTH: f64 = 340.0;
+const PANEL_WIDTH: f64 = 376.0;
 const PANEL_MIN_HEIGHT: f64 = 120.0;
 const PANEL_SCREEN_ALLOWANCE: f64 = 24.0;
 const DOCK_DISTANCE: f64 = 80.0;
@@ -589,19 +589,19 @@ pub(crate) mod tests {
         let place = |pill: Rect| place_panel(Some(pill), &main, 300.0).0;
         assert_eq!(
             place(Rect::sized(1808, 12, 100, 28)),
-            Rect::sized(1568, 48, 340, 300)
+            Rect::sized(1532, 48, 376, 300)
         );
         assert_eq!(
             place(Rect::sized(12, 12, 100, 28)),
-            Rect::sized(12, 48, 340, 300)
+            Rect::sized(12, 48, 376, 300)
         );
         assert_eq!(
             place(Rect::sized(12, 992, 100, 28)),
-            Rect::sized(12, 684, 340, 300)
+            Rect::sized(12, 684, 376, 300)
         );
         assert_eq!(
             place(Rect::sized(1808, 992, 100, 28)),
-            Rect::sized(1568, 684, 340, 300)
+            Rect::sized(1532, 684, 376, 300)
         );
     }
 
@@ -610,18 +610,18 @@ pub(crate) mod tests {
         let bar = monitor("bar", Rect::sized(-3000, 0, 1920, 464), 0, 1.0, false);
         let place =
             |left: i32, top: i32| place_panel(Some(Rect::sized(left, top, 46, 28)), &bar, 120.0).0;
-        assert_eq!(place(-2500, 200), Rect::sized(-2500, 236, 340, 120));
-        assert_eq!(place(-2500, 220), Rect::sized(-2500, 92, 340, 120));
-        assert_eq!(place(-1500, 200), Rect::sized(-1794, 236, 340, 120));
-        assert_eq!(place(-3000, 0), Rect::sized(-3000, 36, 340, 120));
-        assert_eq!(place(-1126, 0), Rect::sized(-1420, 36, 340, 120));
-        assert_eq!(place(-3000, 436), Rect::sized(-3000, 308, 340, 120));
-        assert_eq!(place(-1126, 436), Rect::sized(-1420, 308, 340, 120));
-        assert_eq!(place(-3020, 200), Rect::sized(-3000, 236, 340, 120));
-        assert_eq!(place(-1060, 200), Rect::sized(-1420, 236, 340, 120));
-        assert_eq!(place(-2500, 420), Rect::sized(-2500, 292, 340, 120));
+        assert_eq!(place(-2500, 200), Rect::sized(-2500, 236, 376, 120));
+        assert_eq!(place(-2500, 220), Rect::sized(-2500, 92, 376, 120));
+        assert_eq!(place(-1500, 200), Rect::sized(-1830, 236, 376, 120));
+        assert_eq!(place(-3000, 0), Rect::sized(-3000, 36, 376, 120));
+        assert_eq!(place(-1126, 0), Rect::sized(-1456, 36, 376, 120));
+        assert_eq!(place(-3000, 436), Rect::sized(-3000, 308, 376, 120));
+        assert_eq!(place(-1126, 436), Rect::sized(-1456, 308, 376, 120));
+        assert_eq!(place(-3020, 200), Rect::sized(-3000, 236, 376, 120));
+        assert_eq!(place(-1060, 200), Rect::sized(-1456, 236, 376, 120));
+        assert_eq!(place(-2500, 420), Rect::sized(-2500, 292, 376, 120));
         let tall = place_panel(Some(Rect::sized(-2500, 200, 46, 28)), &bar, 2000.0).0;
-        assert_eq!(tall, Rect::sized(-2500, 24, 340, 440));
+        assert_eq!(tall, Rect::sized(-2500, 24, 376, 440));
     }
 
     #[test]
@@ -629,7 +629,7 @@ pub(crate) mod tests {
         let main = monitor("main", Rect::sized(0, 0, 1920, 1080), 48, 1.5, true);
         let (panel, scale) = place_panel(Some(Rect::sized(1800, 18, 100, 42)), &main, 40.0);
         assert_eq!(scale, 1.5);
-        assert_eq!(panel, Rect::sized(1390, 72, 510, 180));
+        assert_eq!(panel, Rect::sized(1336, 72, 564, 180));
         let (tall, _) = place_panel(Some(Rect::sized(0, 18, 100, 42)), &main, 2000.0);
         assert_eq!(tall.height(), 996);
         let (short, _) = place_panel(
@@ -647,14 +647,14 @@ pub(crate) mod tests {
         assert_eq!(scale, 1.0);
         assert_eq!(
             panel,
-            Rect::sized(1920 - 12 - 340, 1032 - 12 - 200, 340, 200)
+            Rect::sized(1920 - 12 - 376, 1032 - 12 - 200, 376, 200)
         );
     }
 
     #[test]
     fn without_a_pill_the_panel_sits_bottom_right_of_a_portrait_work_area() {
         let (panel, _) = place_panel(None, &portrait_desk()[1], 200.0);
-        assert_eq!(panel, Rect::sized(-12 - 340, 1572 - 12 - 200, 340, 200));
+        assert_eq!(panel, Rect::sized(-12 - 376, 1572 - 12 - 200, 376, 200));
     }
 
     pub fn owner_desk() -> Vec<Monitor> {
@@ -797,21 +797,21 @@ pub(crate) mod tests {
         };
         assert_eq!(
             place(Edge::Right, 0.5),
-            Rect::sized(2560 - 8 - 340, 720 - 150, 340, 300)
+            Rect::sized(2560 - 8 - 376, 720 - 150, 376, 300)
         );
-        assert_eq!(place(Edge::Left, 0.5), Rect::sized(8, 720 - 150, 340, 300));
-        assert_eq!(place(Edge::Top, 0.5), Rect::sized(1280 - 170, 8, 340, 300));
+        assert_eq!(place(Edge::Left, 0.5), Rect::sized(8, 720 - 150, 376, 300));
+        assert_eq!(place(Edge::Top, 0.5), Rect::sized(1280 - 188, 8, 376, 300));
         assert_eq!(
             place(Edge::Bottom, 0.5),
-            Rect::sized(1280 - 170, 1392 - 300, 340, 300)
+            Rect::sized(1280 - 188, 1392 - 300, 376, 300)
         );
         assert_eq!(
             place(Edge::Right, 0.0),
-            Rect::sized(2560 - 8 - 340, 0, 340, 300)
+            Rect::sized(2560 - 8 - 376, 0, 376, 300)
         );
         assert_eq!(
             place(Edge::Bottom, 1.0),
-            Rect::sized(2560 - 340, 1392 - 300, 340, 300)
+            Rect::sized(2560 - 376, 1392 - 300, 376, 300)
         );
     }
 
@@ -830,23 +830,23 @@ pub(crate) mod tests {
         let tallest = 1392 - 24;
         assert_eq!(
             place(Edge::Right, 0.5, 1000.0),
-            Rect::sized(2560 - 8 - 340, 720 - 500, 340, 1000)
+            Rect::sized(2560 - 8 - 376, 720 - 500, 376, 1000)
         );
         assert_eq!(
             place(Edge::Right, 0.1, 1000.0),
-            Rect::sized(2560 - 8 - 340, 0, 340, 1000)
+            Rect::sized(2560 - 8 - 376, 0, 376, 1000)
         );
         assert_eq!(
             place(Edge::Left, 0.5, 3000.0),
-            Rect::sized(8, 1392 - tallest, 340, tallest)
+            Rect::sized(8, 1392 - tallest, 376, tallest)
         );
         assert_eq!(
             place(Edge::Top, 0.5, 3000.0),
-            Rect::sized(1280 - 170, 8, 340, tallest)
+            Rect::sized(1280 - 188, 8, 376, tallest)
         );
         assert_eq!(
             place(Edge::Bottom, 0.5, 3000.0),
-            Rect::sized(1280 - 170, 1392 - tallest, 340, tallest)
+            Rect::sized(1280 - 188, 1392 - tallest, 376, tallest)
         );
         let bar = &owner_desk()[2];
         let on_bar = place_panel_on_edge(
@@ -856,7 +856,7 @@ pub(crate) mod tests {
             3000.0,
         )
         .0;
-        assert_eq!(on_bar, Rect::sized(-3000 + 8, 12, 340, 464 - 24));
+        assert_eq!(on_bar, Rect::sized(-3000 + 8, 12, 376, 464 - 24));
     }
 
     #[test]
@@ -940,7 +940,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_press_is_inside_the_panel_on_an_anchor_or_outside() {
-        let panel = Some(Rect::sized(100, 100, 340, 300));
+        let panel = Some(Rect::sized(100, 100, 376, 300));
         let anchors = [Some(Rect::sized(0, 214, 8, 72)), None];
         assert_eq!(
             press_target((200, 200), panel, &anchors),

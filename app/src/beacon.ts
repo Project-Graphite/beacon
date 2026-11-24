@@ -364,5 +364,7 @@ export const onOpened = (handler: (opened: OpenedEvent) => void): Promise<Unlist
 
 export const onClosing = (handler: () => void): Promise<UnlistenFn> => listen('beacon://closing', handler);
 
+export const onOpenSettings = (handler: () => void): Promise<UnlistenFn> => listen('beacon://open-settings', handler);
+
 export const onSettingsChanged = (handler: () => void): Promise<UnlistenFn> =>
   listen('beacon://settings-changed', handler);

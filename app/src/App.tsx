@@ -18,6 +18,7 @@ import {
   jump,
   onClosing,
   onOpened,
+  onOpenSettings,
   onSnapshot,
   setUiSettings,
   snooze,
@@ -271,14 +272,13 @@ export function App() {
     });
   };
 
-  const toggleSettings = () => {
-    if (settingsOpen) setSettingsOpen(false);
-    else
-      void (cachedHooksStatus() && cachedAppInfo() && cachedOverlay()
-        ? Promise.resolve()
-        : whenLoaded(Promise.all([hooksStatus(), appInfo(), getOverlay()]))
-      ).then(() => flushSync(() => setSettingsOpen(true)));
-  };
+  const openSettings = () =>
+    void (cachedHooksStatus() && cachedAppInfo() && cachedOverlay()
+      ? Promise.resolve()
+      : whenLoaded(Promise.all([hooksStatus(), appInfo(), getOverlay()]))
+    ).then(() => flushSync(() => setSettingsOpen(true)));
+
+  const toggleSettings = () => (settingsOpen ? setSettingsOpen(false) : openSettings());
 
   const closeDetail = () => {
     opening.current = null;
@@ -326,13 +326,18 @@ export function App() {
     run(jump(sessionId).then((outcome) => reportJump(sessionId, jumpReport(outcome))));
   };
 
-  const rowActions = useRef({ openDetail, jumpTo, crossOff });
+  const rowActions = useRef({ openDetail, jumpTo, crossOff, openSettings });
   useLayoutEffect(() => {
-    rowActions.current = { openDetail, jumpTo, crossOff };
+    rowActions.current = { openDetail, jumpTo, crossOff, openSettings };
   });
   const openRow = useCallback((sessionId: string) => rowActions.current.openDetail(sessionId), []);
   const jumpRow = useCallback((sessionId: string) => rowActions.current.jumpTo(sessionId), []);
   const crossOffRow = useCallback((sessionId: string) => rowActions.current.crossOff(sessionId), []);
+
+  useEffect(() => {
+    const subscription = onOpenSettings(() => rowActions.current.openSettings());
+    return () => void subscription.then((unlisten) => unlisten());
+  }, []);
 
   const changeUi = (change: Partial<UiSettings>) =>
     setUiSettings(change).then((saved) => {
