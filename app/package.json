@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "preview:panel": "vite --config preview/vite.config.ts",
     "build": "tsc --noEmit && vite build",
     "test": "node --test src/lib/*.test.ts",
     "tauri": "tauri"

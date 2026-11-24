@@ -1,0 +1,18 @@
+html {
+  background: #1d2430 radial-gradient(120% 90% at 85% 0%, #3b4a63 0%, #1d2430 55%, #12161d 100%) fixed;
+}
+
+@media (prefers-color-scheme: light) {
+  html {
+    background: #c9d3e0 radial-gradient(120% 90% at 85% 0%, #eef2f7 0%, #c9d3e0 60%, #aab6c6 100%) fixed;
+  }
+}
+
+body {
+  width: 340px;
+  margin: 24px;
+}
+
+#root > section {
+  height: auto !important;
+}

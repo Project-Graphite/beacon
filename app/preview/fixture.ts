@@ -1,0 +1,277 @@
+const now = Date.now();
+const minutes = (count: number) => now - count * 60_000;
+
+const usage = (context: number, output: number) => ({
+  input_tokens: 18_400,
+  output_tokens: output,
+  cache_creation_tokens: 42_000,
+  cache_read_tokens: 610_000,
+  context_tokens: context,
+  subagent_tokens: 0,
+  reported_cost_usd: null,
+  model: 'claude-opus-5-5',
+  updated_ms: now,
+  status: 'ok',
+});
+
+const session = (fields: Record<string, unknown>) => ({
+  overlays: { compacting: false, subagents: 0, background_tasks: 0 },
+  attended: true,
+  permission_mode: 'default',
+  model: 'claude-opus-5-5',
+  last_event_ms: minutes(1),
+  event_count: 120,
+  tasks_created: 0,
+  tasks_completed: 0,
+  limited: false,
+  snoozed_until_ms: null,
+  alerting: false,
+  dismissed: false,
+  prompts: [],
+  ...fields,
+});
+
+export const sessions = [
+  session({
+    session_id: '7f3a9c2e-1b44-4d0a-9e61-0c5d2f8a9b10',
+    state: 'needs_permission',
+    attention: true,
+    alerting: true,
+    cwd: 'C:\\code\\graphite-hub',
+    project: 'graphite-hub',
+    branch: 'fix/login-flake',
+    entrypoint: 'claude-vscode',
+    editor: 'vscode',
+    ai_title: 'Fix the flaky login test',
+    turn_started_ms: minutes(6),
+    usage: usage(88_000, 9_200),
+    step_current: { kind: 'permission', label: 'Permission requested: Bash' },
+  }),
+  session({
+    session_id: '2c81d0b7-6e19-4f3b-a2d4-77e0b5c3f912',
+    state: 'needs_answer',
+    attention: true,
+    alerting: true,
+    cwd: 'C:\\code\\atlas',
+    project: 'atlas',
+    branch: 'main',
+    entrypoint: 'claude-desktop',
+    ai_title: 'Choose a cache for the tile server',
+    turn_started_ms: minutes(3),
+    usage: usage(41_000, 3_100),
+  }),
+  session({
+    session_id: '9d0e4a61-3c7b-4e88-b5f2-1a6c8d2e7f34',
+    state: 'working',
+    cwd: 'C:\\code\\atlas',
+    project: 'atlas',
+    branch: 'feat/offline-tiles',
+    entrypoint: 'cli',
+    ai_title: 'Add offline tile packs',
+    turn_started_ms: minutes(12),
+    tasks_created: 7,
+    tasks_completed: 3,
+    task_current: 'Write the pack manifest reader',
+    step_current: { kind: 'edit', label: 'Editing src/packs/manifest.ts' },
+    activity: 'Editing src/packs/manifest.ts',
+    usage: usage(132_000, 21_400),
+  }),
+  session({
+    session_id: '4b6f8e20-9a13-4c57-8d0e-5f2a1b7c9e63',
+    state: 'working',
+    cwd: 'C:\\code\\ledger',
+    project: 'ledger',
+    branch: 'main',
+    entrypoint: 'cli',
+    ai_title: 'Speed up the monthly report query',
+    turn_started_ms: minutes(2),
+    step_current: { kind: 'run', label: 'Running npm run bench' },
+    command_current: 'npm run bench -- --filter monthly',
+    usage: usage(64_000, 5_800),
+  }),
+  session({
+    session_id: 'e5a7c3d1-8b20-4f6e-9c14-2d7b0a5e8f71',
+    state: 'done',
+    attention: true,
+    alerting: true,
+    cwd: 'C:\\code\\beacon',
+    project: 'beacon',
+    branch: 'main',
+    entrypoint: 'claude-desktop',
+    ai_title: 'Draft the 0.2.0 release notes',
+    turn_started_ms: minutes(9),
+    turn_ended_ms: minutes(1),
+    last_message_preview: 'The release notes are in docs/notes/0.2.0.md, grouped by area.',
+    usage: usage(52_000, 7_700),
+    can_wake: true,
+  }),
+  session({
+    session_id: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
+    state: 'idle',
+    cwd: 'C:\\code\\dotfiles',
+    project: 'dotfiles',
+    branch: 'main',
+    entrypoint: 'cli',
+    ai_title: 'Tidy the PowerShell profile',
+    turn_started_ms: minutes(48),
+    turn_ended_ms: minutes(40),
+    last_event_ms: minutes(40),
+    usage: usage(23_000, 2_100),
+    can_wake: true,
+  }),
+];
+
+export const pending = [
+  {
+    id: 1795400000001,
+    session_id: sessions[0].session_id,
+    agent_id: null,
+    tool_name: 'Bash',
+    tool_input: { command: 'npm test -- auth/login.spec.ts --runInBand', description: 'Run the login spec on its own' },
+    permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'localSettings' }],
+    kind: 'tool',
+    created_ms: minutes(1),
+    tool_use_id: null,
+    preview: 'npm test -- auth/login.spec.ts --runInBand',
+    cwd: 'C:\\code\\graphite-hub',
+    permission_mode: 'default',
+    agent_type: null,
+    expires_ms: now + 59 * 60_000,
+    plan: null,
+  },
+  {
+    id: 1795400000002,
+    session_id: sessions[1].session_id,
+    agent_id: null,
+    tool_name: 'AskUserQuestion',
+    tool_input: {
+      questions: [
+        {
+          question: 'Which cache should the tile server use?',
+          header: 'Cache',
+          multiSelect: false,
+          options: [
+            { label: 'Redis', description: 'Shared across instances, needs a running server.' },
+            { label: 'In-process LRU', description: 'No dependency, lost on restart.' },
+            { label: 'Disk', description: 'Survives restarts, slower on cold reads.' },
+          ],
+        },
+      ],
+    },
+    permission_suggestions: null,
+    kind: 'question',
+    created_ms: minutes(2),
+    tool_use_id: null,
+    preview: 'Which cache should the tile server use?',
+    cwd: 'C:\\code\\atlas',
+    permission_mode: 'default',
+    agent_type: null,
+    expires_ms: now + 58 * 60_000,
+    plan: null,
+  },
+];
+
+export const snapshot = {
+  sessions,
+  ended_count: 2,
+  pending,
+  resolved: [],
+  snoozed_until_ms: null,
+  account_usage: {
+    five_hour_percent: 38,
+    five_hour_resets_at: new Date(now + 2.2 * 3_600_000).toISOString(),
+    seven_day_percent: 61,
+    seven_day_resets_at: new Date(now + 3.5 * 86_400_000).toISOString(),
+    fetched_ms: minutes(4),
+    source: 'cache',
+  },
+  config: { stall_minutes: 10, answer_unattended: false, clear_finished_minutes: 10 },
+};
+
+const step = (id: number, kind: string, label: string, ago: number, duration: number | null, status = 'done') => ({
+  id,
+  t_ms: minutes(ago),
+  kind,
+  label,
+  status,
+  duration_ms: duration,
+});
+
+export const detail = (sessionId: string) => ({
+  session_id: sessionId,
+  timeline: [],
+  last_message:
+    sessionId === sessions[4].session_id
+      ? 'The release notes are in `docs/notes/0.2.0.md`, grouped by area:\n\n- **Answering requests**: held keys, off-screen requests\n- **Secrets**: more shapes masked\n- **Reliability**: state files, panics\n\nWant me to open a PR?'
+      : 'Reading the manifest format before writing the reader.',
+  steps: [
+    step(1, 'prompt', 'Prompt submitted', 12, null),
+    step(2, 'read', 'Reading src/packs/index.ts', 11, 400),
+    step(3, 'search', 'Searching', 10, 900),
+    step(4, 'edit', 'Editing src/packs/download.ts', 8, 1_200),
+    step(5, 'run', 'Running npm test -- packs', 6, 18_400),
+    step(6, 'edit', 'Editing src/packs/manifest.ts', 1, null, 'running'),
+  ],
+  tasks: [
+    { id: '1', subject: 'Sketch the pack format', done: true },
+    { id: '2', subject: 'Download packs in the background', done: true },
+    { id: '3', subject: 'Verify pack checksums', done: true },
+    { id: '4', subject: 'Write the pack manifest reader', done: false },
+    { id: '5', subject: 'Serve tiles from packs offline', done: false },
+    { id: '6', subject: 'Show pack sizes in settings', done: false },
+    { id: '7', subject: 'Document offline packs', done: false },
+  ],
+});
+
+export const ended = [
+  session({
+    session_id: 'aa11bb22-cc33-4d44-8e55-ff6677889900',
+    state: 'ended',
+    cwd: 'C:\\code\\atlas',
+    project: 'atlas',
+    ai_title: 'Rename the tile cache module',
+    last_event_ms: minutes(70),
+  }),
+  session({
+    session_id: 'bb22cc33-dd44-4e55-8f66-0077889900aa',
+    state: 'ended',
+    cwd: 'C:\\code\\ledger',
+    project: 'ledger',
+    ai_title: 'Explain the reconciliation job',
+    last_event_ms: minutes(95),
+  }),
+];
+
+export const ui = {
+  hotkey: 'Ctrl+Alt+B',
+  toasts_enabled: true,
+  toast_on_finished: true,
+  sounds_enabled: false,
+  visibility: 'active',
+  reveal_on_hover: true,
+  size: 'medium',
+  idle_opacity: 0.6,
+  attention_style: 'pulse_peek',
+  attention_repeat_seconds: 60,
+  peek_seconds: 4,
+  start_mode: 'claude',
+  quit_when_idle_minutes: 15,
+  pin_while_active: false,
+  open_on_hover: false,
+};
+
+export const overlay = {
+  style: 'pill',
+  position: 'top-right',
+  displays: [
+    { id: 'display-1', name: 'Studio Display', width: 2560, height: 1440, primary: true, target: true, avoided: false },
+    { id: 'display-2', name: 'Laptop', width: 1920, height: 1200, primary: false, target: false, avoided: false },
+  ],
+};
+
+export const hooks = {
+  state: 'installed',
+  settings_path: 'C:\\Users\\you\\.claude\\settings.json',
+  problems: [],
+  warnings: [],
+};
