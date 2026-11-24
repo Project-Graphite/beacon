@@ -221,7 +221,10 @@ impl Engine {
         self.sessions
             .values()
             .filter(|session| session.state != SessionState::Ended)
-            .filter_map(|session| session.claude_pid)
+            .filter_map(|session| {
+                let pid = session.claude_pid?;
+                process_alive(pid, session.claude_pid_created).then_some(pid)
+            })
             .collect()
     }
 
@@ -684,8 +687,8 @@ impl Engine {
         let pid = meta
             .env("CLAUDE_PID")
             .and_then(|pid| pid.parse::<u32>().ok());
-        if pid.is_some() {
-            session.claude_pid = pid;
+        if let Some(pid) = pid {
+            session.set_claude_pid(pid);
         }
         if session.host.is_none() {
             session.host = Host::from_env(&meta.env);
@@ -1237,9 +1240,11 @@ impl Engine {
                 if let Some(cwd) = &entry.cwd {
                     session.set_location(cwd, None);
                 }
-                session.claude_pid = entry.pid.or(session.claude_pid);
-            } else {
-                session.claude_pid = session.claude_pid.or(entry.pid);
+                if let Some(pid) = entry.pid {
+                    session.set_claude_pid(pid);
+                }
+            } else if let (None, Some(pid)) = (session.claude_pid, entry.pid) {
+                session.set_claude_pid(pid);
             }
             if session.entrypoint.is_none()
                 && let Some(pid) = session.claude_pid
@@ -1294,7 +1299,9 @@ impl Engine {
                 !session.limited
                     && session.state != SessionState::Ended
                     && !listed_ids.contains(&session.session_id)
-                    && !session.claude_pid.is_some_and(process_alive)
+                    && !session
+                        .claude_pid
+                        .is_some_and(|pid| process_alive(pid, session.claude_pid_created))
             })
             .map(|session| session.session_id.clone())
             .collect();
@@ -1378,6 +1385,14 @@ impl Engine {
     fn watch_process(&mut self, session_id: &str, pid: u32) {
         let runtime = self.runtime.entry(session_id.to_string()).or_default();
         if runtime.watched_pid == Some(pid) {
+            return;
+        }
+        if let Some(session) = self.sessions.get_mut(session_id)
+            && !session.keep_claude_pid(pid)
+        {
+            self.log.info(format_args!(
+                "process {pid} of session {session_id} was reused by another process and is dropped"
+            ));
             return;
         }
         runtime.watched_pid = Some(pid);

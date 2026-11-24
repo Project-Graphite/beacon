@@ -2779,3 +2779,76 @@ fn each_hook_event_is_logged_on_one_line_without_its_content() {
     );
     assert!(!log.contains("NEVER-LOGGED"));
 }
+
+fn running_session(claude_pid_created: Option<u64>) -> Session {
+    Session {
+        claude_pid: Some(std::process::id()),
+        claude_pid_created,
+        ..persisted(SESSION, SessionState::Working, now_ms())
+    }
+}
+
+#[test]
+fn a_hook_stores_the_creation_time_of_the_claude_process() {
+    let mut fixture = fixture();
+    let own_pid = std::process::id();
+    fixture.send_with_env(USER_PROMPT_SUBMIT, &[("CLAUDE_PID", &own_pid.to_string())]);
+    assert_eq!(fixture.session().claude_pid, Some(own_pid));
+    assert_eq!(
+        fixture.session().claude_pid_created,
+        crate::platform::process_created(own_pid)
+    );
+    assert!(fixture.session().claude_pid_created.is_some());
+}
+
+#[test]
+fn a_restart_drops_a_pid_that_another_process_now_holds() {
+    let own_created = crate::platform::process_created(std::process::id()).unwrap();
+    let reused = fixture_with(
+        Config::default(),
+        vec![running_session(Some(own_created - 1))],
+    );
+    let session = &reused.engine.sessions[SESSION];
+    assert_eq!(
+        (session.claude_pid, session.claude_pid_created),
+        (None, None)
+    );
+    assert!(reused.engine.live_claude_pids().is_empty());
+    assert!(reused.engine.runtime[SESSION].watched_pid.is_none());
+    let same = fixture_with(Config::default(), vec![running_session(Some(own_created))]);
+    assert_eq!(same.engine.live_claude_pids(), [std::process::id()]);
+    assert_eq!(
+        same.engine.runtime[SESSION].watched_pid,
+        Some(std::process::id())
+    );
+}
+
+#[test]
+fn a_state_file_without_creation_times_adopts_the_current_one() {
+    let persisted = serde_json::to_vec(&json!({
+        "sessions": [serde_json::to_value(running_session(None)).unwrap()]
+    }))
+    .unwrap();
+    let sessions = Engine::load_sessions(&persisted).unwrap();
+    assert_eq!(sessions[0].claude_pid_created, None);
+    let restored = fixture_with(Config::default(), sessions);
+    assert_eq!(
+        restored.engine.sessions[SESSION].claude_pid_created,
+        crate::platform::process_created(std::process::id())
+    );
+}
+
+#[test]
+fn a_pid_with_a_changed_creation_time_no_longer_keeps_a_session_alive() {
+    let own_created = crate::platform::process_created(std::process::id()).unwrap();
+    let mut fixture = fixture_with(Config::default(), vec![running_session(Some(own_created))]);
+    fixture
+        .engine
+        .sessions
+        .get_mut(SESSION)
+        .unwrap()
+        .claude_pid_created = Some(own_created - 1);
+    assert!(fixture.engine.live_claude_pids().is_empty());
+    fixture.engine.reconcile(Vec::new(), now_ms());
+    assert_eq!(fixture.state(), SessionState::Ended);
+}

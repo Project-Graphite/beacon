@@ -1,4 +1,5 @@
 use crate::focus::Host;
+use crate::platform::process_created;
 use crate::preview::one_line;
 use crate::progress::{CurrentStep, Step, Task};
 use crate::prompts::Prompt;
@@ -50,6 +51,8 @@ pub struct Session {
     pub entrypoint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_pid_created: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attended: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -133,6 +136,7 @@ impl Session {
             transcript_path: None,
             entrypoint: None,
             claude_pid: None,
+            claude_pid_created: None,
             attended: None,
             permission_mode: None,
             model: None,
@@ -194,6 +198,26 @@ impl Session {
             self.turn_ended_ms = None;
         } else if self.turn_started_ms.is_some() && self.turn_ended_ms.is_none() && turn_ended {
             self.turn_ended_ms = Some(now_ms);
+        }
+    }
+
+    pub fn set_claude_pid(&mut self, pid: u32) {
+        self.claude_pid = Some(pid);
+        self.claude_pid_created = process_created(pid);
+    }
+
+    pub fn keep_claude_pid(&mut self, pid: u32) -> bool {
+        match (self.claude_pid_created, process_created(pid)) {
+            (Some(created), Some(now)) if created != now => {
+                self.claude_pid = None;
+                self.claude_pid_created = None;
+                false
+            }
+            (None, now) => {
+                self.claude_pid_created = now;
+                true
+            }
+            _ => true,
         }
     }
 

@@ -233,7 +233,10 @@ pub fn process_created(pid: u32) -> Option<u64> {
     queried.then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
 }
 
-pub fn process_alive(pid: u32) -> bool {
+pub fn process_alive(pid: u32, created: Option<u64>) -> bool {
+    if created.is_some_and(|created| process_created(pid) != Some(created)) {
+        return false;
+    }
     let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
     if process.is_null() {
         return unsafe { GetLastError() } == ERROR_ACCESS_DENIED;
