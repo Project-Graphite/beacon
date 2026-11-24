@@ -5,7 +5,7 @@ use crate::displays::{
 use crate::feed;
 use crate::geometry::Rect;
 use crate::model::{TrayState, tooltip, tray_state};
-use crate::platform::{self, theme, tray_icon_size};
+use crate::platform::{self, pill, theme, tray_icon_size};
 use crate::positions::{self, OverlaySize, PillBackground, Style, UiSettingsChange, Visibility};
 use crate::raster::render_tray;
 use crate::shell::{self, Action};
@@ -72,6 +72,7 @@ fn display_menu(home: &Path) -> DisplayMenu {
         &positions::display_choice(home),
         positions::style(home),
     )
+    .checking(pill::position())
 }
 
 fn choices<T: Copy + PartialEq>(

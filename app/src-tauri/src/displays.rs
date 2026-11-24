@@ -77,6 +77,16 @@ pub struct Overlay {
     pub displays: Vec<OverlayDisplay>,
 }
 
+impl DisplayMenu {
+    pub fn checking(mut self, current: Option<Position>) -> DisplayMenu {
+        for entry in &mut self.position {
+            let listed = entry.id.split_once(':').and_then(|(_, key)| position(key));
+            entry.checked = Some(listed.is_some() && listed == current);
+        }
+        self
+    }
+}
+
 impl DisplayChoice {
     fn avoids(&self, monitor: &Monitor) -> bool {
         self.avoid_displays.contains(&monitor.id)
@@ -385,6 +395,30 @@ mod tests {
                 entry("corner:bottom-left", "Bottom left", None, true),
                 entry("corner:bottom-right", "Bottom right", None, true),
             ]
+        );
+    }
+
+    #[test]
+    fn the_current_position_is_checked_among_the_edges_or_the_corners() {
+        let checked = |menu: DisplayMenu| -> Vec<Option<bool>> {
+            menu.position.iter().map(|entry| entry.checked).collect()
+        };
+        let pill = menu(&desk(), &choice(None, &[]), Style::Pill);
+        assert_eq!(
+            checked(
+                pill.clone()
+                    .checking(Some(Position::Corner(Corner::BottomLeft)))
+            ),
+            [Some(false), Some(false), Some(true), Some(false)]
+        );
+        assert_eq!(
+            checked(pill.checking(Some(Position::Edge(Edge::Left)))),
+            [Some(false); 4]
+        );
+        let tab = menu(&desk(), &choice(None, &[]), Style::Tab);
+        assert_eq!(
+            checked(tab.checking(Some(Position::Edge(Edge::Top)))),
+            [Some(false), Some(false), Some(true), Some(false)]
         );
     }
 

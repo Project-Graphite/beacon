@@ -12,6 +12,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 
 const FACE: &str = "Segoe UI";
 const WHITE: u32 = 0x00ff_ffff;
+const CACHE_LIMIT: usize = 256;
 
 #[derive(Default)]
 pub struct GdiText {
@@ -21,11 +22,19 @@ pub struct GdiText {
 impl TextRasterizer for GdiText {
     fn rasterize(&self, text: &str, pixel_size: f32) -> TextMask {
         let key = (text.to_string(), pixel_size.round() as u32);
-        self.cache
-            .borrow_mut()
-            .entry(key)
-            .or_insert_with(|| crop(draw(text, pixel_size.round() as i32)))
-            .clone()
+        let mut cache = self.cache.borrow_mut();
+        if let Some(mask) = cache.get(&key) {
+            return mask.clone();
+        }
+        let Some(drawn) = draw(text, pixel_size.round() as i32) else {
+            return empty();
+        };
+        if cache.len() >= CACHE_LIMIT {
+            cache.clear();
+        }
+        let mask = crop(drawn);
+        cache.insert(key, mask.clone());
+        mask
     }
 }
 
@@ -33,7 +42,15 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain([0]).collect()
 }
 
-fn draw(text: &str, pixel_size: i32) -> TextMask {
+fn empty() -> TextMask {
+    TextMask {
+        width: 0,
+        height: 0,
+        coverage: Vec::new(),
+    }
+}
+
+fn draw(text: &str, pixel_size: i32) -> Option<TextMask> {
     let (face, text) = (wide(FACE), wide(text));
     let length = text.len() as i32 - 1;
     unsafe {
@@ -66,23 +83,24 @@ fn draw(text: &str, pixel_size: i32) -> TextMask {
         SetBkMode(dc, OPAQUE as i32);
         TextOutW(dc, margin, 0, text.as_ptr(), length);
         GdiFlush();
-        let pixels = std::slice::from_raw_parts(bits, (width * height * 4) as usize);
-        let coverage = pixels
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|pixel| pixel[1])
-            .collect();
+        let coverage = (!bitmap.is_null() && !bits.is_null()).then(|| {
+            std::slice::from_raw_parts(bits, (width * height * 4) as usize)
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|pixel| pixel[1])
+                .collect()
+        });
         SelectObject(dc, previous_bitmap);
         SelectObject(dc, previous_font);
         DeleteObject(bitmap);
         DeleteObject(font);
         DeleteDC(dc);
-        TextMask {
+        coverage.map(|coverage| TextMask {
             width: width as usize,
             height: height as usize,
             coverage,
-        }
+        })
     }
 }
 
@@ -97,11 +115,7 @@ fn crop(mask: TextMask) -> TextMask {
     let (Some(&left), Some(&right), Some(&top), Some(&bottom)) =
         (columns.first(), columns.last(), rows.first(), rows.last())
     else {
-        return TextMask {
-            width: 0,
-            height: 0,
-            coverage: Vec::new(),
-        };
+        return empty();
     };
     let width = right - left + 1;
     TextMask {
@@ -111,5 +125,20 @@ fn crop(mask: TextMask) -> TextMask {
             .flat_map(|y| (left..=right).map(move |x| (x, y)))
             .map(|(x, y)| mask.coverage[y * mask.width + x])
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_cache_stays_within_its_limit_and_still_answers_every_text() {
+        let text = GdiText::default();
+        for number in 0..CACHE_LIMIT + 10 {
+            assert!(text.rasterize(&number.to_string(), 12.0).width > 0);
+            assert!(text.cache.borrow().len() <= CACHE_LIMIT);
+        }
+        assert!(text.rasterize("0", 12.0).width > 0);
     }
 }

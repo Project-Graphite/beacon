@@ -5,12 +5,16 @@ use windows_sys::Win32::Foundation::LPARAM;
 const KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 const COLOURS_CHANGED: &str = "ImmersiveColorSet";
 
-fn read(name: &str) -> Theme {
-    if registry::read_dword(KEY, name) == Some(1) {
-        Theme::Light
-    } else {
+fn from_value(value: Option<u32>) -> Theme {
+    if value == Some(0) {
         Theme::Dark
+    } else {
+        Theme::Light
     }
+}
+
+fn read(name: &str) -> Theme {
+    from_value(registry::read_dword(KEY, name))
 }
 
 pub fn apps() -> Theme {
@@ -40,6 +44,13 @@ mod tests {
 
     fn wide(text: &str) -> Vec<u16> {
         text.encode_utf16().chain([0]).collect()
+    }
+
+    #[test]
+    fn a_missing_theme_value_is_light_like_the_windows_default() {
+        assert_eq!(from_value(None), Theme::Light);
+        assert_eq!(from_value(Some(1)), Theme::Light);
+        assert_eq!(from_value(Some(0)), Theme::Dark);
     }
 
     #[test]

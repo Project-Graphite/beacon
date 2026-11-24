@@ -27,13 +27,18 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC, SND_NODEFAULT};
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, MONITORINFOF_PRIMARY, SM_CXSMICON, SPI_GETCLIENTAREAANIMATION, SW_HIDE,
-    SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowPos, ShowWindow,
-    SystemParametersInfoW,
+    FindWindowW, GetClassNameW, GetCursorPos, MONITORINFOF_PRIMARY, SM_CXSMICON,
+    SPI_GETCLIENTAREAANIMATION, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER,
+    SetForegroundWindow, SetWindowPos, ShowWindow, SystemParametersInfoW, WindowFromPoint,
 };
 use windows_sys::core::BOOL;
 
 const BASE_DPI: f64 = 96.0;
+const MENU_CLASS: &str = "#32768";
+
+fn wide(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain([0]).collect()
+}
 
 fn rect(rect: RECT) -> Rect {
     Rect {
@@ -245,8 +250,20 @@ fn refresh_rate(window: *mut c_void) -> u32 {
 }
 
 pub fn tray_icon_size() -> usize {
-    let primary = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
-    unsafe { GetSystemMetricsForDpi(SM_CXSMICON, monitor_dpi(primary)) }.max(16) as usize
+    let taskbar = unsafe { FindWindowW(wide("Shell_TrayWnd").as_ptr(), null()) };
+    let monitor = if taskbar.is_null() {
+        unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) }
+    } else {
+        unsafe { MonitorFromWindow(taskbar, MONITOR_DEFAULTTONEAREST) }
+    };
+    unsafe { GetSystemMetricsForDpi(SM_CXSMICON, monitor_dpi(monitor)) }.max(16) as usize
+}
+
+pub fn menu_at((x, y): (i32, i32)) -> bool {
+    let mut class = [0u16; 16];
+    let window = unsafe { WindowFromPoint(POINT { x, y }) };
+    let length = unsafe { GetClassNameW(window, class.as_mut_ptr(), class.len() as i32) }.max(0);
+    !window.is_null() && text_of(&class[..length as usize]) == MENU_CLASS
 }
 
 pub fn focus_window(hwnd: *mut c_void) {
