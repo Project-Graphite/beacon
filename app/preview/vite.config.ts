@@ -27,6 +27,9 @@ export default defineConfig({
       '@tauri-apps/api/event': here('./tauri-event.ts'),
     },
   },
+  build: {
+    rollupOptions: { input: { index: here('../index.html'), demo: here('./demo.html') } },
+  },
   clearScreen: false,
   server: { port: 5174, strictPort: true },
 });

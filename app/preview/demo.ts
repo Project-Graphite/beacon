@@ -14,6 +14,8 @@ const cursor = document.getElementById('cursor') as unknown as SVGSVGElement;
 const ripple = document.getElementById('ripple') as HTMLDivElement;
 const pill = document.getElementById('pill') as HTMLDivElement;
 const endcard = document.getElementById('endcard') as HTMLDivElement;
+const intro = document.getElementById('intro') as HTMLDivElement;
+const chip = document.getElementById('step') as HTMLDivElement;
 
 const MARK: Record<Kind, string> = {
   working:
@@ -41,7 +43,7 @@ function drawPill() {
 
 function place(point: Point) {
   position = point;
-  cursor.style.transform = `translate3d(${point.x - 3}px, ${point.y - 2}px, 0)`;
+  cursor.style.translate = `${point.x - 3}px ${point.y - 2}px`;
 }
 
 const preview = () => (frame.contentWindow as unknown as { __beaconPreview: Preview }).__beaconPreview;
@@ -105,11 +107,34 @@ async function clickPanel(selector: string, text?: string) {
   await clickElement(inPanel(selector, text));
 }
 
+async function still() {
+  const busy = () =>
+    inner()
+      .getAnimations({ subtree: true })
+      .some(
+        (animation) =>
+          animation.playState === 'running' &&
+          animation.effect?.getTiming().iterations !== Infinity &&
+          !(animation instanceof CSSAnimation && /^roll-/.test(animation.animationName)),
+      );
+  const until = performance.now() + 450;
+  await wait(120);
+  while (busy() && performance.now() < until) await wait(60);
+  await wait(200);
+}
+
 async function clickElement(element: HTMLElement) {
   await moveTo(framePoint(element));
-  await wait(420);
+  await wait(320);
   await press(() => element.click());
-  await wait(500);
+  await still();
+}
+
+async function step(number: number, text: string) {
+  chip.classList.remove('on');
+  await wait(chip.textContent ? 280 : 0);
+  chip.innerHTML = `<span class="step-number">${number}</span>${text}`;
+  chip.classList.add('on');
 }
 
 function settle(title: string, fields: Record<string, unknown>) {
@@ -141,13 +166,18 @@ async function ready() {
   );
   const style = inner().createElement('style');
   style.textContent =
-    'html{background:transparent!important}body{margin:0!important;width:376px!important}#root>section{height:100vh!important}*:focus-visible,label:has(:focus-visible){outline:none!important}';
+    'html{background:transparent!important}body{margin:0!important;width:376px!important}#root>section{height:auto!important}*:focus-visible,label:has(:focus-visible){outline:none!important}';
   inner().head.append(style);
   await wait(900);
 }
 
 async function play() {
-  await wait(1000);
+  await wait(1900);
+  intro.classList.add('off');
+  cursor.classList.add('shown');
+  await wait(700);
+  await step(1, 'Open Beacon from the pill');
+  await wait(700);
   const chevron = pill.querySelector('.chevron') as HTMLElement;
   await moveTo(pillPoint(chevron));
   chevron.classList.add('hover');
@@ -166,11 +196,15 @@ async function play() {
   zoom(1.15, { x: 1100, y: 313 });
   await wait(1300);
 
+  await step(2, 'Approve a permission request');
+  await wait(350);
   await clickPanel('button', 'Allow');
   marks = ['working', 'needs', 'working', 'working', 'done', 'idle'];
   drawPill();
   await wait(500);
 
+  await step(3, 'Answer a question');
+  await wait(350);
   await clickPanel('button', 'Answer');
   settle('Fix the flaky login test', { state: 'working', alerting: false, attention: false, step_current: { kind: 'run', label: 'Running npm test -- auth/login.spec.ts' } });
   await wait(500);
@@ -183,6 +217,8 @@ async function play() {
   await clickPanel('button[aria-label="Back to sessions"]');
   await wait(300);
 
+  await step(4, 'Send a session a prompt');
+  await wait(350);
   await clickPanel('span', 'Draft the 0.2.0 release notes');
   await wait(400);
   await clickPanel('textarea');
@@ -191,6 +227,7 @@ async function play() {
   await clickPanel('button', 'Send');
   await wait(1200);
 
+  chip.classList.remove('on');
   zoom(1, { x: 640, y: 360 });
   await moveTo({ x: 560, y: 470 });
   await wait(900);
