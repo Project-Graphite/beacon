@@ -514,6 +514,7 @@ impl Engine {
         let (reply, receiver) = oneshot::channel();
         let id = self.next_waiter_id;
         self.next_waiter_id += 1;
+        self.reconcile_wanted |= !self.sessions.contains_key(&session_id);
         if let Some(older) = self
             .waiters
             .insert(session_id.clone(), StopWaiter { id, reply })
@@ -1331,6 +1332,13 @@ impl Engine {
                 "session {session_id} is no longer listed and its process is gone"
             ));
             self.apply(&session_id, Input::ProcessGone);
+        }
+        let sessions = &self.sessions;
+        for (_, waiter) in self
+            .waiters
+            .extract_if(|session_id, _| !sessions.contains_key(session_id))
+        {
+            waiter.release();
         }
         self.changed();
     }

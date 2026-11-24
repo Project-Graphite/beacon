@@ -6,6 +6,9 @@ use std::ptr::{null, null_mut};
 use std::time::Instant;
 
 const ERROR_PIPE_BUSY: i32 = 231;
+const ERROR_ACCESS_DENIED: u32 = 5;
+const SYNCHRONIZE: u32 = 0x0010_0000;
+const WAIT_TIMEOUT: u32 = 258;
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
@@ -47,6 +50,9 @@ unsafe extern "system" {
         process_information: *mut ProcessInformation,
     ) -> i32;
     fn CloseHandle(handle: *mut c_void) -> i32;
+    fn OpenProcess(access: u32, inherit_handle: i32, pid: u32) -> *mut c_void;
+    fn WaitForSingleObject(handle: *mut c_void, timeout_ms: u32) -> u32;
+    fn GetLastError() -> u32;
 }
 
 fn wide(text: &str) -> Vec<u16> {
@@ -69,6 +75,16 @@ pub fn open_pipe(name: &str, deadline: Instant) -> io::Result<File> {
             opened => return opened,
         }
     }
+}
+
+pub fn process_alive(pid: u32) -> bool {
+    let process = unsafe { OpenProcess(SYNCHRONIZE, 0, pid) };
+    if process.is_null() {
+        return unsafe { GetLastError() } == ERROR_ACCESS_DENIED;
+    }
+    let running = unsafe { WaitForSingleObject(process, 0) } == WAIT_TIMEOUT;
+    unsafe { CloseHandle(process) };
+    running
 }
 
 pub fn start_detached(executable: &Path, argument: &str) {

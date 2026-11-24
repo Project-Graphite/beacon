@@ -16,6 +16,7 @@ const SEND_BUDGET: Duration = Duration::from_secs(2);
 const REPLY_BUDGET: Duration = Duration::from_secs(1);
 const LAUNCH_THROTTLE: Duration = Duration::from_secs(20);
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(2);
+const WAITER_LIFETIME: Duration = Duration::from_secs(24 * 60 * 60);
 
 static STDOUT: Mutex<()> = Mutex::new(());
 
@@ -98,8 +99,16 @@ fn forward(event: &str, started: Instant, sent: Sender<()>) -> Option<HookReply>
 }
 
 fn wait_for_next_core(home: &Path, request: &HookRequest) -> HookReply {
+    let give_up = Instant::now() + WAITER_LIFETIME;
+    let claude_pid = std::env::var("CLAUDE_PID")
+        .ok()
+        .and_then(|pid| pid.parse::<u32>().ok());
     loop {
         std::thread::sleep(RECONNECT_INTERVAL);
+        if Instant::now() >= give_up || claude_pid.is_some_and(|pid| !platform::process_alive(pid))
+        {
+            return HookReply::NoDecision;
+        }
         if let Some(reply) = register_again(home, request) {
             return reply;
         }

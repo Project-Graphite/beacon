@@ -2839,6 +2839,27 @@ fn a_session_moving_on_expires_its_pending_decisions() {
     }
 }
 
+#[test]
+fn a_waiter_for_a_session_unknown_after_a_reconcile_is_released() {
+    let mut fixture = fixture();
+    let (_, mut unknown) = fixture.wait();
+    assert!(fixture.engine.take_reconcile_wanted());
+    fixture
+        .engine
+        .reconcile(vec![listed("other", None, "idle")], now_ms());
+    assert_eq!(unknown.try_recv(), RELEASED);
+    let mut known = fixture_with(Config::default(), Vec::new());
+    known.send(STOP);
+    known.engine.take_reconcile_wanted();
+    let (_, mut waiter) = known.wait();
+    assert!(!known.engine.take_reconcile_wanted());
+    known
+        .engine
+        .reconcile(vec![listed(SESSION, None, "idle")], now_ms());
+    assert_eq!(waiter.try_recv(), Err(oneshot::error::TryRecvError::Empty));
+    assert!(known.can_wake());
+}
+
 fn running_session(claude_pid_created: Option<u64>) -> Session {
     Session {
         claude_pid: Some(std::process::id()),

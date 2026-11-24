@@ -68,7 +68,16 @@ fn spawn_helper(home: &TempHome, event: &str, payload: &[u8]) -> Child {
 }
 
 fn spawn_helper_attended(home: &TempHome, event: &str, payload: &[u8], attended: &str) -> Child {
-    let own_pid = std::process::id().to_string();
+    spawn_helper_for(home, event, payload, attended, std::process::id())
+}
+
+fn spawn_helper_for(
+    home: &TempHome,
+    event: &str,
+    payload: &[u8],
+    attended: &str,
+    claude_pid: u32,
+) -> Child {
     let mut child = Command::new(env!("CARGO_BIN_EXE_beacon-hook"))
         .arg(event)
         .env_clear()
@@ -77,7 +86,7 @@ fn spawn_helper_attended(home: &TempHome, event: &str, payload: &[u8], attended:
             std::env::var_os("SystemRoot").unwrap_or_default(),
         )
         .env("BEACON_HOME", &home.0)
-        .env("CLAUDE_PID", own_pid)
+        .env("CLAUDE_PID", claude_pid.to_string())
         .env("CLAUDE_CODE_ENTRYPOINT", "sdk-cli")
         .env("CLAUDE_CODE_SESSION_ATTENDED", attended)
         .stdin(Stdio::piped())
@@ -439,6 +448,39 @@ fn a_stop_waiter_registers_again_with_a_restarted_core_and_is_woken_by_a_prompt(
     assert!(output.stdout.is_empty());
     core.shutdown().unwrap();
 }
+#[test]
+fn a_reconnecting_stop_waiter_exits_when_its_claude_process_is_gone() {
+    let home = TempHome::new();
+    let core = start_core(&home);
+    for (event, payload) in [("UserPromptSubmit", USER_PROMPT_SUBMIT), ("Stop", STOP)] {
+        assert!(run_helper(&home, event, payload).stdout.is_empty());
+    }
+    let mut claude = Command::new("ping")
+        .args(["-n", "60", "127.0.0.1"])
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut waiter = spawn_helper_for(&home, "StopWaiter", STOP, "1", claude.id());
+    wait_for(&home, |snapshot| {
+        snapshot.sessions.iter().any(|session| session.can_wake)
+    });
+    core.shutdown().unwrap();
+    std::thread::sleep(Duration::from_millis(2500));
+    assert!(waiter.try_wait().unwrap().is_none(), "the waiter exited");
+    claude.kill().unwrap();
+    claude.wait().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(6);
+    while waiter.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            waiter.kill().unwrap();
+            panic!("the waiter outlived its claude process");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let output = finished(waiter);
+    assert!(output.stdout.is_empty());
+}
+
 #[test]
 fn without_a_core_a_stop_waiter_exits_at_once() {
     let home = TempHome::new();
