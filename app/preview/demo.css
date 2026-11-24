@@ -1,0 +1,346 @@
+:root {
+  color-scheme: dark;
+  --wall-a: #1a2130;
+  --wall-b: #3a4862;
+  --wall-c: #0f131a;
+  --window: #16171c;
+  --window-bar: #1d1f25;
+  --window-line: #2a2c33;
+  --code: #2b2e37;
+  --pill-bg: #1d1d22;
+  --pill-line: #2b2b32;
+  --ink: #ececef;
+  --muted: #9b9ba5;
+  --wip: #e0ad52;
+  --live: #4cc283;
+  --caption-bg: rgb(12 12 16 / 0.72);
+  --caption-ink: #f2f2f4;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --wall-a: #c3cedd;
+    --wall-b: #eef2f7;
+    --wall-c: #a6b3c4;
+    --window: #fbfbfc;
+    --window-bar: #f0f0f3;
+    --window-line: #dcdce2;
+    --code: #e2e3e8;
+    --pill-bg: #ffffff;
+    --pill-line: #dcdce2;
+    --ink: #18181b;
+    --muted: #5f5f69;
+    --wip: #a8741c;
+    --live: #1f8a54;
+    --caption-bg: rgb(255 255 255 / 0.82);
+    --caption-ink: #18181b;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: #000;
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
+}
+
+#viewport {
+  position: relative;
+  width: 1280px;
+  height: 720px;
+  overflow: hidden;
+}
+
+#world {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  transition: transform 1100ms cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.wallpaper {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(110% 90% at 82% 0%, var(--wall-b) 0%, var(--wall-a) 55%, var(--wall-c) 100%);
+  transition: background 600ms ease;
+}
+
+.editor {
+  position: absolute;
+  left: 70px;
+  top: 70px;
+  width: 760px;
+  height: 560px;
+  border-radius: 12px;
+  background: var(--window);
+  border: 1px solid var(--window-line);
+  box-shadow: 0 30px 60px -20px rgb(0 0 0 / 0.55);
+  overflow: hidden;
+}
+
+.editor-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  background: var(--window-bar);
+  border-bottom: 1px solid var(--window-line);
+}
+
+.dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--window-line);
+}
+
+.editor-title {
+  margin-left: 12px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.editor-body {
+  display: flex;
+  height: calc(100% - 36px);
+}
+
+.editor-side {
+  width: 180px;
+  border-right: 1px solid var(--window-line);
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 18px, var(--code) 18px 26px, transparent 26px 34px) 18px 22px / 120px 100% no-repeat;
+  opacity: 0.7;
+}
+
+.editor-code {
+  flex: 1;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 14px, var(--code) 14px 22px, transparent 22px 30px) 34px 26px / 70% 100% no-repeat;
+  opacity: 0.85;
+}
+
+.pill {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 8px 0 12px;
+  border-radius: 16px;
+  background: var(--pill-bg);
+  border: 1px solid var(--pill-line);
+  box-shadow: 0 4px 12px -2px rgb(0 0 0 / 0.45);
+  transition: background 300ms ease, border-color 300ms ease, box-shadow 300ms ease;
+}
+
+.pill.clear {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.pill.clear > * {
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.65));
+}
+
+.mark {
+  width: 12px;
+  height: 12px;
+  position: relative;
+}
+
+.mark svg {
+  position: absolute;
+  inset: 0;
+}
+
+.spin {
+  animation: spin 1.2s linear infinite;
+}
+
+.halo {
+  position: absolute;
+  inset: 1px;
+  border-radius: 50%;
+  border: 1.5px solid var(--wip);
+  animation: halo 1.6s ease-out infinite;
+}
+
+.count {
+  margin-left: 2px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--wip);
+  font-variant-numeric: tabular-nums;
+}
+
+.chevron {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  color: var(--muted);
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1), background 160ms ease;
+}
+
+.chevron.up {
+  transform: rotate(180deg);
+}
+
+.chevron.hover {
+  background: rgb(127 127 140 / 0.18);
+}
+
+#panel {
+  position: absolute;
+  top: 54px;
+  right: 18px;
+  width: 376px;
+  height: 560px;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+  translate: 0 -10px;
+  transition: opacity 180ms ease, translate 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  pointer-events: none;
+}
+
+#panel.open {
+  opacity: 1;
+  translate: 0 0;
+}
+
+#cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 10;
+  transform-origin: 3px 2px;
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.45));
+  transition: scale 120ms ease;
+}
+
+#cursor.pressed {
+  scale: 0.84;
+}
+
+#ripple {
+  position: absolute;
+  z-index: 9;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.35);
+  border: 2px solid rgb(255 255 255 / 0.85);
+  opacity: 0;
+  pointer-events: none;
+}
+
+#ripple.go {
+  animation: ripple 520ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#caption {
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  translate: -50% 0;
+  padding: 12px 22px;
+  border-radius: 14px;
+  background: var(--caption-bg);
+  color: var(--caption-ink);
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 10px 30px -10px rgb(0 0 0 / 0.5);
+  opacity: 0;
+  transition: opacity 260ms ease, translate 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#caption.on {
+  opacity: 1;
+}
+
+#endcard {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: #0e0e11;
+  color: #ececef;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 700ms ease;
+}
+
+#endcard.on {
+  opacity: 1;
+}
+
+#endcard img {
+  border-radius: 26px;
+  margin-bottom: 14px;
+}
+
+.end-name {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.end-line {
+  margin: 0;
+  font-size: 19px;
+  color: #a6a6b0;
+}
+
+.end-url {
+  margin: 18px 0 0;
+  font-size: 15px;
+  color: #82828c;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes halo {
+  from {
+    scale: 1;
+    opacity: 0.9;
+  }
+  to {
+    scale: 1.9;
+    opacity: 0;
+  }
+}
+
+@keyframes ripple {
+  0% {
+    opacity: 1;
+    scale: 0.3;
+  }
+  100% {
+    opacity: 0;
+    scale: 1.25;
+  }
+}

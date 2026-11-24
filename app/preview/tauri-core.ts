@@ -3,6 +3,8 @@ import { emit } from './tauri-event';
 
 const settings = { ...ui };
 
+Object.assign(window, { __beaconPreview: { emit, snapshot, ui: settings } });
+
 function hide(sessionId: string, dismissed: boolean) {
   snapshot.sessions = snapshot.sessions.map((session) => (session.session_id === sessionId ? { ...session, dismissed } : session));
   emit('beacon://snapshot', snapshot);
