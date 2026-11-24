@@ -6,7 +6,9 @@ use crate::feed;
 use crate::geometry::Rect;
 use crate::model::{TrayState, tooltip, tray_state};
 use crate::platform::{self, pill, theme, tray_icon_size};
-use crate::positions::{self, OverlaySize, PillBackground, Style, UiSettingsChange, Visibility};
+use crate::positions::{
+    self, OverlaySize, PillBackground, Style, UiSettings, UiSettingsChange, Visibility,
+};
 use crate::raster::render_tray;
 use crate::shell::{self, Action};
 use beacon_core::{Request, Snapshot};
@@ -244,6 +246,22 @@ pub fn build(app: &AppHandle, home: PathBuf) -> tauri::Result<Tray> {
     })
 }
 
+pub fn menu_settings_changed(before: &UiSettings, after: &UiSettings) -> bool {
+    let shown = |settings: &UiSettings| {
+        (
+            settings.pill_background,
+            settings.visibility,
+            settings.size,
+            settings.reveal_on_hover,
+            settings.open_on_hover,
+            settings.toasts_enabled,
+            settings.toast_on_finished,
+            settings.sounds_enabled,
+        )
+    };
+    shown(before) != shown(after)
+}
+
 fn flipped(home: &Path, id: &str) -> Option<UiSettingsChange> {
     let current = positions::ui_settings(home);
     let change = UiSettingsChange::default();
@@ -347,8 +365,11 @@ impl Tray {
     pub fn show(&mut self, snapshot: Option<&Snapshot>) {
         let state = tray_state(snapshot);
         if state != self.state {
+            let redraw = std::mem::discriminant(&state) != std::mem::discriminant(&self.state);
             self.state = state;
-            self.retheme();
+            if redraw {
+                self.retheme();
+            }
         }
         let tooltip = tooltip(snapshot);
         if tooltip != self.tooltip {
@@ -423,6 +444,26 @@ mod tests {
         );
         assert!(flipped(&home, "quit").is_none());
         std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn only_the_settings_the_menu_shows_rebuild_it() {
+        let before = UiSettings::default();
+        let changed = |edit: fn(&mut UiSettings)| {
+            let mut after = before.clone();
+            edit(&mut after);
+            menu_settings_changed(&before, &after)
+        };
+        assert!(changed(
+            |settings| settings.sounds_enabled = !settings.sounds_enabled
+        ));
+        assert!(changed(|settings| settings.visibility = Visibility::Never));
+        assert!(changed(|settings| settings.size = OverlaySize::Large));
+        assert!(!changed(|settings| settings.idle_opacity = 0.2));
+        assert!(!changed(
+            |settings| settings.hotkey = "Ctrl+Alt+K".to_string()
+        ));
+        assert!(!changed(|settings| settings.quit_when_idle_minutes = 99));
     }
 
     #[test]

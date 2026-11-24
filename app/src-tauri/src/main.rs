@@ -17,6 +17,7 @@ mod shell;
 mod sounds;
 mod toasts;
 mod tray;
+mod wakes;
 
 use beacon_core::BACKGROUND_ARG;
 use feed::Feed;

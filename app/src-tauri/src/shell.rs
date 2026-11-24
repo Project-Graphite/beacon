@@ -18,7 +18,8 @@ use crate::positions::{
 };
 use crate::sounds::sound_for;
 use crate::toasts::Toaster;
-use crate::tray::Tray;
+use crate::tray::{self, Tray};
+use crate::wakes::Wakes;
 use beacon_core::{Request, Snapshot};
 use serde::Serialize;
 use std::cell::RefCell;
@@ -125,6 +126,7 @@ pub struct Shell {
     pin_released: Option<Instant>,
     revealed: Option<Instant>,
     settings_requested: bool,
+    wakes: Wakes,
 }
 
 thread_local! {
@@ -160,6 +162,7 @@ pub fn post(app: &AppHandle, action: Action) {
 impl Shell {
     pub fn new(app: AppHandle, feed: Arc<Feed>, tray: Tray) -> Shell {
         Shell {
+            wakes: Wakes::start(app.clone()),
             app,
             tray,
             snapshot: None,
@@ -260,6 +263,7 @@ impl Shell {
                     log_error!("cannot save the style: {error}");
                 }
                 pill::set_style(style);
+                self.apply_settings();
                 self.overlay_changed();
             }
             Action::ShowOn(display) => {
@@ -277,8 +281,11 @@ impl Shell {
                 self.overlay_changed();
             }
             Action::SettingsChanged => {
+                let before = self.settings.clone();
                 self.apply_settings();
-                self.tray.refresh_menu();
+                if tray::menu_settings_changed(&before, &self.settings) {
+                    self.tray.refresh_menu();
+                }
             }
             Action::ChangeSettings(change) => {
                 if let Err(error) = positions::save_ui_settings(&self.feed.home, change) {
@@ -288,8 +295,8 @@ impl Shell {
                 self.overlay_changed();
             }
             Action::OpenSettings => {
-                self.settings_requested = true;
                 self.open(Mode::Sticky, true);
+                self.settings_requested = self.mode().is_some();
             }
             Action::PreviewAttention => self.preview(),
             Action::Recheck => {}
@@ -352,7 +359,9 @@ impl Shell {
         self.place();
         self.tray.refresh_menu();
         if self.panel.is_some()
-            && let Err(error) = self.app.emit_to(PANEL, "beacon://settings-changed", ())
+            && let Err(error) = self
+                .app
+                .emit_to(PANEL, "beacon://settings-changed", &self.settings)
         {
             log_error!("cannot tell the panel the settings changed: {error}");
         }
@@ -365,11 +374,7 @@ impl Shell {
     }
 
     fn recheck_after(&self, delay: Duration) {
-        let app = self.app.clone();
-        thread::spawn(move || {
-            thread::sleep(delay);
-            post(&app, Action::Recheck);
-        });
+        self.wakes.after(delay);
     }
 
     fn preview_length(&self) -> Duration {
@@ -401,6 +406,9 @@ impl Shell {
             self.show_tab();
         }
         let never = self.settings.visibility == Visibility::Never;
+        if never {
+            self.presence = Presence::Hidden;
+        }
         let needed = !never
             && (self.mode().is_some()
                 || self.preview.is_some()
@@ -586,6 +594,7 @@ impl Shell {
     }
 
     fn hide(&mut self) {
+        self.settings_requested = false;
         let Some(panel) = &mut self.panel else {
             return;
         };
@@ -623,6 +632,7 @@ impl Shell {
     }
 
     fn destroy(&mut self) {
+        self.settings_requested = false;
         if let Some(panel) = self.panel.take()
             && let Err(error) = panel.window.destroy()
         {
@@ -631,7 +641,10 @@ impl Shell {
     }
 
     fn place(&self) {
-        let (Some(panel), Some((rect, _))) = (&self.panel, self.placement()) else {
+        let Some(panel) = &self.panel else {
+            return;
+        };
+        let Some((rect, _)) = self.placement() else {
             return;
         };
         let placed = panel
@@ -698,7 +711,11 @@ impl Shell {
             &[pill::shown_rect(), self.tray.rect()],
         ) {
             PressTarget::Panel => self.open(Mode::Sticky, false),
-            PressTarget::Outside if self.mode() != Some(Mode::Pinned) => self.close(),
+            PressTarget::Outside
+                if self.mode() != Some(Mode::Pinned) && !platform::menu_at(point) =>
+            {
+                self.close()
+            }
             PressTarget::Anchor | PressTarget::Outside => {}
         }
     }
