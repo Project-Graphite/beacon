@@ -9,10 +9,8 @@ const BODY_CHARS: usize = 120;
 
 pub fn register_identity(home: &Path, identifier: &str) -> io::Result<()> {
     let icon = home.join("icon.png");
-    if !icon.is_file() {
-        std::fs::create_dir_all(home)?;
-        std::fs::write(&icon, include_bytes!("../icons/128x128.png"))?;
-    }
+    std::fs::create_dir_all(home)?;
+    std::fs::write(&icon, include_bytes!("../icons/128x128.png"))?;
     let key = format!(r"Software\Classes\AppUserModelId\{identifier}");
     registry::write_string(&key, "DisplayName", "Beacon")?;
     registry::write_string(&key, "IconUri", &icon.to_string_lossy())
