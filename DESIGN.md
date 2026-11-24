@@ -7,7 +7,7 @@ icon follows the taskbar theme.
 The panel is an operating surface. People glance at it, answer, and leave, so it favours familiar
 controls, steady layout and short motion over expression. Colour carries state, never decoration.
 
-## Tokens
+## Colors
 
 Defined once in `app/src/index.css` (`@theme`, light values under `prefers-color-scheme: light`) and
 mirrored for the native overlay in `app/src-tauri/src/raster.rs` (`Palette`). Light-theme accents are text-grade
@@ -27,9 +27,22 @@ mirrored for the native overlay in `app/src-tauri/src/raster.rs` (`Palette`). Li
 | `live` | `#4cc283` | `#187045` | Done |
 | `danger` | `#f2a09a` | `#ad3a31` | Error, destructive |
 
-Text sizes: `title` 14 px, `body` 13 px, `secondary` 12 px, `micro` 11.5 px, all in Segoe UI
-Variable. Numbers that change (times, counts, tokens) use tabular figures, not a monospace face;
-monospace is only for commands, paths in code and diffs.
+## Typography
+
+One family, Segoe UI Variable Text, with Cascadia Mono for code.
+
+| Token | Size | Line height | Use |
+|---|---|---|---|
+| `title` | 14 px | 1.35 | Session title in its detail view |
+| `body` | 13 px | 1.5 | Row titles, labels, prompt text |
+| `secondary` | 12 px | 1.5 | Second lines, buttons, menus, cards |
+| `micro` | 11.5 px | 1.45 | Group headings, times, meta lines |
+
+Titles are medium (500) in rows and semibold (600) in the detail view. Numbers that change (times,
+counts, tokens) use tabular figures, not a monospace face; monospace is only for commands, paths in
+code and diffs.
+
+## Shape and depth
 
 Radii: fields and buttons 8 px, cards 12 px, the panel 14 px. Depth comes from a soft offset shadow
 (`shadow-card`, `shadow-popover`) and a 1 px top sheen on the panel, never a zero-offset glow.
