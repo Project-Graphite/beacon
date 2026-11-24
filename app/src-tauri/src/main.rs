@@ -110,6 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings::hooks_plan,
             settings::hooks_apply,
             settings::set_ui_settings,
+            settings::set_hotkey_paused,
             settings::preview_attention,
             settings::open_logs_folder,
             settings::app_info,

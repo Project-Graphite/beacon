@@ -20,6 +20,7 @@ fn main() {
             "hooks_plan",
             "hooks_apply",
             "set_ui_settings",
+            "set_hotkey_paused",
             "preview_attention",
             "open_logs_folder",
             "app_info",

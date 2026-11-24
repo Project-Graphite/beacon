@@ -23,6 +23,7 @@
     "allow-hooks-plan",
     "allow-hooks-apply",
     "allow-set-ui-settings",
+    "allow-set-hotkey-paused",
     "allow-preview-attention",
     "allow-open-logs-folder",
     "allow-app-info",

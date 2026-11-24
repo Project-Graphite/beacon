@@ -62,18 +62,39 @@ pub fn register_hotkey(app: &AppHandle, hotkey: &str) -> Result<(), String> {
         .map_err(|error| format!("cannot register {hotkey}: {error}"))
 }
 
+fn releases_old_hotkey(current: &str, wanted: &str, current_registered: bool) -> bool {
+    current != wanted && current_registered
+}
+
 fn change_hotkey(app: &AppHandle, current: &str, wanted: &str) -> Result<(), String> {
     let shortcuts = app.global_shortcut();
     if shortcuts.is_registered(wanted) {
         return Ok(());
     }
     register_hotkey(app, wanted)?;
-    if shortcuts.is_registered(current) {
+    if releases_old_hotkey(current, wanted, shortcuts.is_registered(current)) {
         shortcuts
             .unregister(current)
             .map_err(|error| format!("cannot release {current}: {error}"))?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn set_hotkey_paused(
+    app: AppHandle,
+    feed: State<'_, Arc<Feed>>,
+    paused: bool,
+) -> Result<(), String> {
+    let hotkey = positions::hotkey(&feed.home);
+    let shortcuts = app.global_shortcut();
+    match (paused, shortcuts.is_registered(hotkey.as_str())) {
+        (true, true) => shortcuts
+            .unregister(hotkey.as_str())
+            .map_err(|error| format!("cannot release {hotkey}: {error}")),
+        (false, false) => register_hotkey(&app, &hotkey),
+        _ => Ok(()),
+    }
 }
 
 #[tauri::command]
@@ -232,6 +253,13 @@ mod tests {
             login_command(Path::new(r"C:\Program Files\Beacon\beacon-app.exe")),
             r#""C:\Program Files\Beacon\beacon-app.exe""#
         );
+    }
+
+    #[test]
+    fn changing_the_hotkey_releases_the_old_one_only_when_it_is_held_and_different() {
+        assert!(releases_old_hotkey("Ctrl+B", "Ctrl+N", true));
+        assert!(!releases_old_hotkey("Ctrl+B", "Ctrl+N", false));
+        assert!(!releases_old_hotkey("Ctrl+B", "Ctrl+B", true));
     }
 
     #[test]
