@@ -2780,6 +2780,65 @@ fn each_hook_event_is_logged_on_one_line_without_its_content() {
     assert!(!log.contains("NEVER-LOGGED"));
 }
 
+#[test]
+fn a_session_moving_on_expires_its_pending_decisions() {
+    type Move = fn(&mut Fixture);
+    let moves: [(Move, SessionState); 4] = [
+        (
+            |fixture| {
+                fixture.send(USER_PROMPT_SUBMIT);
+            },
+            SessionState::Working,
+        ),
+        (
+            |fixture| {
+                fixture.send(STOP);
+            },
+            SessionState::Done,
+        ),
+        (
+            |fixture| {
+                fixture.send(SESSION_END);
+            },
+            SessionState::Ended,
+        ),
+        (
+            |fixture| fixture.engine.process_exited(SESSION, 4242),
+            SessionState::Ended,
+        ),
+    ];
+    for (moves_on, expected) in moves {
+        let mut fixture = fixture();
+        fixture.send_with_env(USER_PROMPT_SUBMIT, &[("CLAUDE_PID", "4242")]);
+        let (id, mut receiver) = fixture.ask(PERMISSION_REQUEST);
+        let (other_id, _other) = fixture.ask(PERMISSION_REQUEST);
+        assert_eq!(fixture.state(), SessionState::NeedsPermission);
+        moves_on(&mut fixture);
+        assert_eq!(receiver.try_recv(), RELEASED);
+        assert!(fixture.engine.snapshot().pending.is_empty());
+        assert!(
+            fixture
+                .engine
+                .needs_user()
+                .iter()
+                .all(|need| !need.starts_with("decision"))
+        );
+        assert_eq!(fixture.state(), expected);
+        let resolved: Vec<_> = fixture
+            .engine
+            .snapshot()
+            .resolved
+            .into_iter()
+            .map(|resolved| (resolved.id, resolved.resolution))
+            .collect();
+        assert_eq!(
+            resolved,
+            [(id, Resolution::Expired), (other_id, Resolution::Expired)]
+        );
+        assert!(fixture.engine.decide(id, Decision::Allow).is_err());
+    }
+}
+
 fn running_session(claude_pid_created: Option<u64>) -> Session {
     Session {
         claude_pid: Some(std::process::id()),

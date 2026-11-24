@@ -653,6 +653,12 @@ impl Engine {
     fn apply_event(&mut self, meta: &Meta, common: Common, event: Event) -> Option<HookOutcome> {
         let now = now_ms();
         let session_id = common.session_id;
+        if matches!(
+            event,
+            Event::UserPromptSubmit { .. } | Event::Stop { .. } | Event::SessionEnd { .. }
+        ) {
+            self.expire_pending(&session_id);
+        }
         self.reconcile_wanted |= !self.sessions.contains_key(&session_id);
         let session = self
             .sessions
@@ -1097,6 +1103,18 @@ impl Engine {
         Ok(())
     }
 
+    fn expire_pending(&mut self, session_id: &str) {
+        let stale: Vec<u64> = self
+            .pending
+            .iter()
+            .filter(|(_, pending)| pending.view.session_id == session_id)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in stale {
+            self.finish(id, Resolution::Expired, Some(HookReply::NoDecision), None);
+        }
+    }
+
     pub fn helper_gone(&mut self, id: u64) {
         self.finish(id, Resolution::Expired, None, None);
         self.changed();
@@ -1209,13 +1227,16 @@ impl Engine {
     }
 
     pub fn process_exited(&mut self, session_id: &str, pid: u32) {
-        if let Some(session) = self.sessions.get_mut(session_id)
-            && session.claude_pid == Some(pid)
+        if self
+            .sessions
+            .get(session_id)
+            .is_some_and(|session| session.claude_pid == Some(pid))
         {
             self.log.info(format_args!(
                 "process {pid} of session {session_id} is gone"
             ));
-            session.apply(Input::ProcessGone, now_ms());
+            self.expire_pending(session_id);
+            self.apply(session_id, Input::ProcessGone);
             self.reconcile_wanted = true;
             self.changed();
         }
