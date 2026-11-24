@@ -52,7 +52,10 @@ pub async fn send_prompt_to_window(
     with_session(feed.home.clone(), session_id, move |session| {
         check_text(&text)?;
         let (path, outcome) = match prompt_path(&session) {
-            Some(path @ PromptPath::Prefill) => (path, focus::jump_with_prompt(&session, &text)),
+            Some(path @ PromptPath::Prefill) => (
+                path,
+                clipboard::set_text(&text).and_then(|()| focus::jump_with_prompt(&session, &text)),
+            ),
             Some(path @ PromptPath::CopyAndJump) => (
                 path,
                 clipboard::set_text(&text).and_then(|()| focus::jump(&session)),

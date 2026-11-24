@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { JumpOutcome } from '../beacon';
-import { jumpReport } from './jump.ts';
+import { jumpReport, prefillReport } from './jump.ts';
 
 const outcome = (fields: Partial<JumpOutcome>): JumpOutcome => ({
   result: 'focused',
@@ -38,6 +38,16 @@ test('a flash, a missing window or an ambiguous match is reported and is no succ
 test('a prefill succeeds only when the session link opened', () => {
   assert.deepEqual(jumpReport(outcome({}), true), {
     notice: 'The window is focused but the session did not open with the text; it is still in the box.',
+    succeeded: false,
+  });
+});
+
+test('a prefill always says the text is on the clipboard and leaves the box filled', () => {
+  const onClipboard =
+    'The text is on your clipboard. If VS Code says the session is already open, paste it into the session.';
+  assert.deepEqual(prefillReport(outcome({ link_opened: true })), { notice: onClipboard, succeeded: false });
+  assert.deepEqual(prefillReport(outcome({})), {
+    notice: `The window is focused but the session did not open with the text; it is still in the box. ${onClipboard}`,
     succeeded: false,
   });
 });

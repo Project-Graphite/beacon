@@ -13,7 +13,7 @@ const TURN_STATES: SessionState[] = [
 const PATH_LABELS: Record<PromptPath, string> = {
   at_turn_end: 'Sends when the current turn finishes.',
   wake: 'Sends now. Claude sees it as a follow-up from Beacon, not as a typed message.',
-  prefill: 'Opens the session in VS Code with the text in its prompt box. VS Code will ask you to send it.',
+  prefill: 'Opens the session in VS Code with the text in its prompt box and on your clipboard. If VS Code says the session is already open, paste it.',
   copy_and_jump: "Copies the text and jumps to the session's window. Paste it there.",
 };
 

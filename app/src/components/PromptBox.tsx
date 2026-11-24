@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { cancelPrompt, queuePrompt, sendPromptToWindow, type Session } from '../beacon';
 import { errorText } from '../lib/format.ts';
-import { jumpReport, type JumpReport } from '../lib/jump.ts';
+import { jumpReport, prefillReport, type JumpReport } from '../lib/jump.ts';
 import { promptBoxId, promptPath, promptStatus, recentPrompts } from '../lib/prompts.ts';
 import { FilledButton } from './FilledButton';
 import { TextButton } from './TextButton';
@@ -29,7 +29,7 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
       path.path === 'at_turn_end' || path.path === 'wake'
         ? queuePrompt(session.session_id, text).then(() => true)
         : sendPromptToWindow(session.session_id, text).then((result) => {
-            const report = jumpReport(result.outcome, result.path === 'prefill');
+            const report = result.path === 'prefill' ? prefillReport(result.outcome) : jumpReport(result.outcome);
             onJumpReport(report);
             return report.succeeded;
           });

@@ -45,7 +45,7 @@ test('each path states what will happen', () => {
   );
   assert.equal(
     promptPath(session('idle', 'claude-vscode'))?.label,
-    'Opens the session in VS Code with the text in its prompt box. VS Code will ask you to send it.',
+    'Opens the session in VS Code with the text in its prompt box and on your clipboard. If VS Code says the session is already open, paste it.',
   );
   assert.equal(promptPath(session('done'))?.label, "Copies the text and jumps to the session's window. Paste it there.");
 });
