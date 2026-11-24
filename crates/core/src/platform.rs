@@ -326,6 +326,14 @@ fn text_until_nul(units: &[u16]) -> String {
 }
 
 pub fn processes() -> io::Result<Vec<Process>> {
+    process_snapshot(true)
+}
+
+pub fn process_parents() -> io::Result<Vec<Process>> {
+    process_snapshot(false)
+}
+
+fn process_snapshot(with_image_paths: bool) -> io::Result<Vec<Process>> {
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     if snapshot == INVALID_HANDLE_VALUE {
         return Err(io::Error::last_os_error());
@@ -341,7 +349,11 @@ pub fn processes() -> io::Result<Vec<Process>> {
             pid: entry.th32ProcessID,
             parent_pid: entry.th32ParentProcessID,
             image_name: text_until_nul(&entry.szExeFile),
-            image_path: process_image_path(entry.th32ProcessID).unwrap_or_default(),
+            image_path: if with_image_paths {
+                process_image_path(entry.th32ProcessID).unwrap_or_default()
+            } else {
+                String::new()
+            },
         });
         listed = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
     }
@@ -469,5 +481,30 @@ pub mod clipboard {
             return Err(error);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_parent_snapshot_has_the_same_tree_without_image_paths() {
+        let own_pid = std::process::id();
+        let find = |processes: &[Process]| {
+            processes
+                .iter()
+                .find(|process| process.pid == own_pid)
+                .cloned()
+                .unwrap()
+        };
+        let full = find(&processes().unwrap());
+        let parents = find(&process_parents().unwrap());
+        assert!(!full.image_path.is_empty());
+        assert!(parents.image_path.is_empty());
+        assert_eq!(
+            (parents.parent_pid, parents.image_name),
+            (full.parent_pid, full.image_name)
+        );
     }
 }

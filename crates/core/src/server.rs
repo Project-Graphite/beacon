@@ -428,7 +428,7 @@ fn decide_refusal(shared: &Shared, client_pid: &io::Result<u32>) -> Option<Strin
         Err(error) => return Some(format!("cannot identify the control client: {error}")),
     };
     let sessions = shared.engine.borrow().live_claude_pids();
-    match platform::processes() {
+    match platform::process_parents() {
         Ok(processes) => {
             focus::descends_from(pid, &sessions, &processes, platform::process_created)
                 .then(|| "decisions cannot come from inside a Claude session".to_string())
