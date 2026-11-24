@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { snooze, unsnooze } from '../beacon';
+import { useExit } from '../hooks/useExit.ts';
 import { clockTime } from '../lib/format.ts';
 import { Icon } from './Icon';
 import { OutlineButton } from './OutlineButton';
@@ -16,6 +17,7 @@ interface SnoozeMenuProps {
 export function SnoozeMenu({ snoozedUntil, soundsEnabled, onToggleSounds, run }: SnoozeMenuProps) {
   const [open, setOpen] = useState(false);
   const menu = useRef<HTMLDivElement>(null);
+  const shown = useExit(open);
 
   useEffect(() => {
     if (!open) return;
@@ -53,10 +55,10 @@ export function SnoozeMenu({ snoozedUntil, soundsEnabled, onToggleSounds, run }:
       >
         <Icon name={snoozedUntil === null ? 'bell' : 'bell-off'} />
       </button>
-      {open && (
+      {shown.mounted && (
         <div
           role="menu"
-          className="absolute top-full right-0 z-20 mt-1.5 w-60 origin-top-right animate-appear rounded-[10px] border border-line bg-raised p-1.5 text-secondary shadow-popover"
+          className={`absolute top-full right-0 z-20 mt-1.5 w-60 origin-top-right rounded-[10px] border border-line bg-raised p-1.5 text-secondary shadow-popover ${shown.leaving ? 'pointer-events-none animate-dismiss' : 'animate-appear'}`}
         >
           {[5, 15, 60].map((minutes) => (
             <button key={minutes} type="button" role="menuitem" onClick={() => choose(snooze(null, minutes))} className={ITEM}>

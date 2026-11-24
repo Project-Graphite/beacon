@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
+import { useExit } from '../hooks/useExit.ts';
 import { menuOpensUp, selectKey } from '../lib/select.ts';
 import type { Choice } from '../lib/settings.ts';
 import { Icon } from './Icon';
@@ -31,6 +32,7 @@ export function Select<T extends string | number>({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [place, setPlace] = useState<CSSProperties>({});
+  const shown = useExit(open);
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLUListElement>(null);
   const listId = `${field.id}list`;
@@ -102,7 +104,7 @@ export function Select<T extends string | number>({
         <span className="min-w-0 truncate">{text}</span>
         <Icon name="chevron" className="size-3.5 shrink-0 rotate-90 text-muted" />
       </button>
-      {open &&
+      {shown.mounted &&
         createPortal(
           <ul
             ref={menu}
@@ -111,7 +113,7 @@ export function Select<T extends string | number>({
             aria-labelledby={field.labelId}
             aria-multiselectable={multiple}
             style={place}
-            className={`fixed z-30 max-w-[calc(100vw-16px)] animate-appear rounded-[10px] border border-line bg-raised p-1.5 text-secondary shadow-popover ${'bottom' in place ? 'origin-bottom-right' : 'origin-top-right'}`}
+            className={`fixed z-30 max-w-[calc(100vw-16px)] rounded-[10px] ${shown.leaving ? 'pointer-events-none animate-dismiss' : 'animate-appear'} border border-line bg-raised p-1.5 text-secondary shadow-popover ${'bottom' in place ? 'origin-bottom-right' : 'origin-top-right'}`}
           >
             {choices.map((choice, index) => (
               <li

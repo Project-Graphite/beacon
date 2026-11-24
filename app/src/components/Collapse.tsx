@@ -20,12 +20,12 @@ export function Collapse({ open, children }: { open: boolean; children: ReactNod
   return (
     <div
       inert={!shown}
-      className={`grid transition-[grid-template-rows] duration-200 ease-settle ${shown ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
+      className={`grid transition-[grid-template-rows] ${shown ? 'grid-rows-[1fr] duration-[240ms] ease-settle' : 'grid-rows-[0fr] duration-[280ms] ease-fold'}`}
     >
       <div className="min-h-0 overflow-hidden">
         <div
           ref={inner}
-          className={`transition-[opacity,translate] duration-200 ease-settle ${shown ? '' : '-translate-y-1 opacity-0'}`}
+          className={`transition-[opacity,translate] ${shown ? 'duration-[240ms] ease-settle' : '-translate-y-2 opacity-0 delay-[60ms] duration-[200ms] ease-fold'}`}
         >
           {children}
         </div>
