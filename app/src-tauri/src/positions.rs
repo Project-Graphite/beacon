@@ -44,6 +44,15 @@ pub enum OverlaySize {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PillBackground {
+    #[default]
+    #[serde(rename = "solid")]
+    Solid,
+    #[serde(rename = "none")]
+    Clear,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttentionStyle {
     Colour,
@@ -146,6 +155,12 @@ struct UiFile {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "lenient"
     )]
+    pill_background: Option<PillBackground>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
     idle_opacity: Option<f64>,
     #[serde(
         default,
@@ -202,6 +217,7 @@ pub struct UiSettings {
     pub visibility: Visibility,
     pub reveal_on_hover: bool,
     pub size: OverlaySize,
+    pub pill_background: PillBackground,
     pub idle_opacity: f64,
     pub attention_style: AttentionStyle,
     pub attention_repeat_seconds: u64,
@@ -221,6 +237,7 @@ pub struct UiSettingsChange {
     pub visibility: Option<Visibility>,
     pub reveal_on_hover: Option<bool>,
     pub size: Option<OverlaySize>,
+    pub pill_background: Option<PillBackground>,
     pub idle_opacity: Option<f64>,
     pub attention_style: Option<AttentionStyle>,
     pub attention_repeat_seconds: Option<u64>,
@@ -281,6 +298,7 @@ fn settings_of(file: UiFile) -> UiSettings {
         visibility: file.visibility.unwrap_or_default(),
         reveal_on_hover: file.reveal_on_hover.unwrap_or(true),
         size: file.size.unwrap_or_default(),
+        pill_background: file.pill_background.unwrap_or_default(),
         idle_opacity: clamped(file.idle_opacity, IDLE_OPACITY),
         attention_style: file.attention_style.unwrap_or_default(),
         attention_repeat_seconds: one_of(
@@ -315,6 +333,7 @@ pub fn save_ui_settings(home: &Path, change: UiSettingsChange) -> io::Result<()>
         file.visibility = change.visibility.or(file.visibility);
         file.reveal_on_hover = change.reveal_on_hover.or(file.reveal_on_hover);
         file.size = change.size.or(file.size);
+        file.pill_background = change.pill_background.or(file.pill_background);
         file.idle_opacity = change.idle_opacity.or(file.idle_opacity);
         file.attention_style = change.attention_style.or(file.attention_style);
         file.attention_repeat_seconds = change
@@ -623,6 +642,7 @@ mod tests {
                 visibility: Visibility::Attention,
                 reveal_on_hover: false,
                 size: OverlaySize::Large,
+                pill_background: PillBackground::Solid,
                 idle_opacity: 0.35,
                 attention_style: AttentionStyle::Pulse,
                 attention_repeat_seconds: 120,
@@ -765,6 +785,42 @@ mod tests {
             .unwrap(),
             expected
         );
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn the_pill_background_is_solid_by_default_and_round_trips_beside_every_existing_key() {
+        let home = std::env::temp_dir().join(format!("beacon-background-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let existing = r#"{"pill_positions":{"a":{"left":1,"top":2,"right":4,"bottom":6}},"style":"pill","hotkey":"Ctrl+Shift+B","visibility":"attention","size":"large","display":"philips","avoid_displays":["oled"]}"#;
+        std::fs::write(home.join(UI_FILE), existing).unwrap();
+        let before = ui_settings(&home);
+        assert_eq!(before.pill_background, PillBackground::Solid);
+        let change: UiSettingsChange =
+            serde_json::from_str(r#"{"pill_background":"none"}"#).unwrap();
+        save_ui_settings(&home, change).unwrap();
+        save(&home, "a", Rect::sized(1, 2, 3, 4)).unwrap();
+        assert_eq!(
+            ui_settings(&home),
+            UiSettings {
+                pill_background: PillBackground::Clear,
+                ..before
+            }
+        );
+        let mut expected: serde_json::Value = serde_json::from_str(existing).unwrap();
+        expected["pill_background"] = "none".into();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(home.join(UI_FILE)).unwrap()).unwrap();
+        assert_eq!(written, expected);
+        assert_eq!(
+            serde_json::to_value(ui_settings(&home)).unwrap()["pill_background"],
+            "none"
+        );
+        expected["pill_background"] = "glass".into();
+        std::fs::write(home.join(UI_FILE), expected.to_string()).unwrap();
+        assert_eq!(ui_settings(&home).pill_background, PillBackground::Solid);
+        assert_eq!(ui_settings(&home).hotkey, "Ctrl+Shift+B");
         std::fs::remove_dir_all(&home).unwrap();
     }
 }

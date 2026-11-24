@@ -64,6 +64,15 @@ impl Rect {
         self.bottom - self.top
     }
 
+    pub fn inflated(&self, by: i32) -> Rect {
+        Rect {
+            left: self.left - by,
+            top: self.top - by,
+            right: self.right + by,
+            bottom: self.bottom + by,
+        }
+    }
+
     fn centre(&self) -> (i32, i32) {
         ((self.left + self.right) / 2, (self.top + self.bottom) / 2)
     }
@@ -311,31 +320,6 @@ pub fn tab_rect(
         Edge::Right => Rect::sized(bounds.right - depth, along, depth, length),
         Edge::Top => Rect::sized(along, bounds.top, length, depth),
         Edge::Bottom => Rect::sized(along, bounds.bottom - depth, length, depth),
-    }
-}
-
-pub fn pill_reveal_strip(pill: Rect, work: &Rect, depth: f64, scale: f64) -> Option<Rect> {
-    let (margin, depth) = (px(EDGE_MARGIN, scale), px(depth, scale));
-    if pill.top - work.top == margin {
-        Some(Rect::sized(pill.left, work.top, pill.width(), depth))
-    } else if work.bottom - pill.bottom == margin {
-        Some(Rect::sized(
-            pill.left,
-            work.bottom - depth,
-            pill.width(),
-            depth,
-        ))
-    } else if pill.left - work.left == margin {
-        Some(Rect::sized(work.left, pill.top, depth, pill.height()))
-    } else if work.right - pill.right == margin {
-        Some(Rect::sized(
-            work.right - depth,
-            pill.top,
-            depth,
-            pill.height(),
-        ))
-    } else {
-        None
     }
 }
 
@@ -910,33 +894,6 @@ pub(crate) mod tests {
         assert_eq!(
             tab_rect(&bar, at(Edge::Top, 0.5), 96.0, 6.0, 1.5),
             Rect::sized(-2112, 0, 144, 9)
-        );
-    }
-
-    #[test]
-    fn a_pill_has_a_reveal_strip_only_when_snapped_to_a_work_area_edge() {
-        let work = Rect::sized(0, 0, 1920, 1032);
-        let pill = |left, top| Rect::sized(left, top, 100, 28);
-        assert_eq!(
-            pill_reveal_strip(pill(1808, 12), &work, 2.0, 1.0),
-            Some(Rect::sized(1808, 0, 100, 2))
-        );
-        assert_eq!(
-            pill_reveal_strip(pill(400, 992), &work, 2.0, 1.0),
-            Some(Rect::sized(400, 1030, 100, 2))
-        );
-        assert_eq!(
-            pill_reveal_strip(pill(12, 500), &work, 2.0, 1.0),
-            Some(Rect::sized(0, 500, 2, 28))
-        );
-        assert_eq!(
-            pill_reveal_strip(pill(1808, 500), &work, 2.0, 1.0),
-            Some(Rect::sized(1918, 500, 2, 28))
-        );
-        assert_eq!(pill_reveal_strip(pill(800, 500), &work, 2.0, 1.0), None);
-        assert_eq!(
-            pill_reveal_strip(Rect::sized(18, 18, 150, 42), &work, 2.0, 1.5),
-            Some(Rect::sized(18, 0, 150, 3))
         );
     }
 

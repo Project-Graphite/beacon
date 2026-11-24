@@ -16,6 +16,108 @@ pub const LIVE: Rgb = Rgb(0x46, 0xb9, 0x7a);
 pub const WIP: Rgb = Rgb(0xd7, 0xa5, 0x4a);
 pub const DANGER: Rgb = Rgb(0xf2, 0xa0, 0x9a);
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Theme {
+    #[default]
+    Dark,
+    Light,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Palette {
+    pub paper: Rgb,
+    pub surface: Rgb,
+    pub line: Rgb,
+    pub ink: Rgb,
+    pub muted: Rgb,
+    pub dormant: Rgb,
+    pub live: Rgb,
+    pub wip: Rgb,
+    pub danger: Rgb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Look {
+    pub theme: Theme,
+    pub solid: bool,
+}
+
+impl Default for Look {
+    fn default() -> Look {
+        Look {
+            theme: Theme::Dark,
+            solid: true,
+        }
+    }
+}
+
+struct Shadow {
+    colour: Rgb,
+    alpha: f32,
+    offset: f32,
+    radius: f32,
+}
+
+impl Theme {
+    pub fn palette(self) -> Palette {
+        match self {
+            Theme::Dark => Palette {
+                paper: PAPER,
+                surface: SURFACE,
+                line: LINE,
+                ink: INK,
+                muted: MUTED,
+                dormant: DORMANT,
+                live: LIVE,
+                wip: WIP,
+                danger: DANGER,
+            },
+            Theme::Light => Palette {
+                paper: Rgb(0xf6, 0xf6, 0xf8),
+                surface: Rgb(0xff, 0xff, 0xff),
+                line: Rgb(0xdc, 0xdc, 0xe2),
+                ink: Rgb(0x18, 0x18, 0x1b),
+                muted: Rgb(0x62, 0x62, 0x6c),
+                dormant: Rgb(0x8e, 0x8e, 0x98),
+                live: Rgb(0x1f, 0x8a, 0x54),
+                wip: Rgb(0xa8, 0x74, 0x1c),
+                danger: Rgb(0xc2, 0x45, 0x3b),
+            },
+        }
+    }
+}
+
+impl Look {
+    fn shadow(self) -> Shadow {
+        match (self.theme, self.solid) {
+            (Theme::Dark, true) => Shadow {
+                colour: Rgb(0, 0, 0),
+                alpha: 0.55,
+                offset: 2.0,
+                radius: SHADOW_RADIUS,
+            },
+            (Theme::Light, true) => Shadow {
+                colour: Rgb(0x18, 0x18, 0x1b),
+                alpha: 0.22,
+                offset: 2.0,
+                radius: SHADOW_RADIUS,
+            },
+            (Theme::Dark, false) => Shadow {
+                colour: Rgb(0, 0, 0),
+                alpha: 1.6,
+                offset: 1.0,
+                radius: FLOAT_SHADOW_RADIUS,
+            },
+            (Theme::Light, false) => Shadow {
+                colour: Rgb(0xff, 0xff, 0xff),
+                alpha: 1.6,
+                offset: 1.0,
+                radius: FLOAT_SHADOW_RADIUS,
+            },
+        }
+    }
+}
+
 const BAR_HEIGHT: f32 = 28.0;
 const PADDING: f32 = 10.0;
 const MARK_SIZE: f32 = 10.0;
@@ -44,11 +146,17 @@ const PEEK_DOT: f32 = 6.0;
 const PEEK_DOT_GAP: f32 = 8.0;
 const PEEK_RADIUS: f32 = 8.0;
 const PEEK_FONT_SIZE: f32 = 12.0;
+const SHADOW_REACH: f32 = 9.0;
+const SHADOW_RADIUS: f32 = 5.0;
+const FLOAT_SHADOW_RADIUS: f32 = 3.0;
+const SHADOW_CUTOFF: f32 = 2.0 / 255.0;
+const TAB_HALO: f32 = 0.35;
 
 pub struct PillMotion<'a> {
     pub growths: &'a [f32],
     pub width: Option<usize>,
     pub chevron: Chevron,
+    pub look: Look,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -133,7 +241,7 @@ impl Canvas {
         }
     }
 
-    fn paint_bar(&mut self, scale: f32, radius: f32) {
+    fn paint_bar(&mut self, scale: f32, radius: f32, palette: &Palette) {
         let (width, height) = (self.width as f32, self.height as f32);
         for y in 0..self.height {
             for x in 0..self.width {
@@ -147,9 +255,9 @@ impl Canvas {
                 let inner = (0.5 - distance - scale).clamp(0.0, 1.0);
                 let pixel = &mut self.pixels[y * self.width + x];
                 for (channel, (line, surface)) in [
-                    (LINE.0, SURFACE.0),
-                    (LINE.1, SURFACE.1),
-                    (LINE.2, SURFACE.2),
+                    (palette.line.0, palette.surface.0),
+                    (palette.line.1, palette.surface.1),
+                    (palette.line.2, palette.surface.2),
                 ]
                 .into_iter()
                 .enumerate()
@@ -159,6 +267,60 @@ impl Canvas {
                             * BAR_OPACITY;
                 }
                 pixel[3] = outer * BAR_OPACITY;
+            }
+        }
+    }
+
+    fn paint_hit_bar(&mut self, radius: f32) {
+        let (width, height) = (self.width as f32, self.height as f32);
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let distance = rounded_box(
+                    x as f32 + 0.5,
+                    y as f32 + 0.5,
+                    [width / 2.0, height / 2.0, width / 2.0, height / 2.0],
+                    radius,
+                );
+                if distance < 0.0 {
+                    self.pixels[y * self.width + x] = [0.0, 0.0, 0.0, TAB_HIT_ALPHA];
+                }
+            }
+        }
+    }
+
+    pub fn lift_into(&self, target: &mut Canvas, scale: f32, look: Look) {
+        let pad = shadow_pad(scale);
+        let (width, height) = (self.width + 2 * pad, self.height + 2 * pad);
+        let shadow = look.shadow();
+        let offset = (shadow.offset * scale).round() as usize;
+        let mut cast = vec![0.0; width * height];
+        for y in 0..self.height {
+            for x in 0..self.width {
+                cast[(y + pad + offset) * width + x + pad] = self.pixels[y * self.width + x][3];
+            }
+        }
+        let radius = ((shadow.radius * scale / 2.0).ceil() as usize).max(1);
+        let mut scratch = vec![0.0; width * height];
+        for _ in 0..2 {
+            box_blur(&cast, &mut scratch, (width, height), radius, true);
+            box_blur(&scratch, &mut cast, (width, height), radius, false);
+        }
+        target.reset(width, height);
+        let tint = [shadow.colour.0, shadow.colour.1, shadow.colour.2]
+            .map(|channel| f32::from(channel) / 255.0);
+        for (pixel, strength) in target.pixels.iter_mut().zip(&cast) {
+            let alpha = (strength * shadow.alpha).min(1.0);
+            if alpha >= SHADOW_CUTOFF {
+                *pixel = [tint[0] * alpha, tint[1] * alpha, tint[2] * alpha, alpha];
+            }
+        }
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let above = self.pixels[y * self.width + x];
+                let below = &mut target.pixels[(y + pad) * width + x + pad];
+                for channel in 0..4 {
+                    below[channel] = above[channel] + below[channel] * (1.0 - above[3]);
+                }
             }
         }
     }
@@ -186,6 +348,42 @@ impl Canvas {
                 .map(to_byte)
             })
             .collect()
+    }
+}
+
+pub fn shadow_pad(scale: f32) -> usize {
+    (SHADOW_REACH * scale).ceil() as usize
+}
+
+fn box_blur(
+    source: &[f32],
+    target: &mut [f32],
+    (width, height): (usize, usize),
+    radius: usize,
+    horizontal: bool,
+) {
+    let (length, lines) = if horizontal {
+        (width, height)
+    } else {
+        (height, width)
+    };
+    let index = |line: usize, along: usize| {
+        if horizontal {
+            line * width + along
+        } else {
+            along * width + line
+        }
+    };
+    let window = (2 * radius + 1) as f32;
+    for line in 0..lines {
+        for along in 0..length {
+            let from = along.saturating_sub(radius);
+            let to = (along + radius).min(length - 1);
+            target[index(line, along)] = (from..=to)
+                .map(|step| source[index(line, step)])
+                .sum::<f32>()
+                / window;
+        }
     }
 }
 
@@ -291,6 +489,7 @@ fn paint_mark(
     scale: f32,
     phase: f32,
     reduced_motion: bool,
+    palette: &Palette,
 ) {
     const CENTRE: [f32; 2] = [5.0, 5.0];
     let opacity = if mark.snoozed { SNOOZED_OPACITY } else { 1.0 };
@@ -299,24 +498,24 @@ fn paint_mark(
         paint_shape(canvas, origin, MARK_SIZE, scale, colour, opacity, distance)
     };
     match mark.kind {
-        MarkKind::Starting => shape(DORMANT, opacity, &|x, y| circle(x, y, CENTRE, 2.0)),
+        MarkKind::Starting => shape(palette.dormant, opacity, &|x, y| circle(x, y, CENTRE, 2.0)),
         MarkKind::Working if animated => {
             let start = phase / WORKING_PERIOD * TAU;
-            shape(INK, opacity, &|x, y| {
+            shape(palette.ink, opacity, &|x, y| {
                 arc(x, y, CENTRE, 4.0, 1.5, start, 0.75 * TAU)
             })
         }
-        MarkKind::Working => shape(INK, opacity, &|x, y| ring(x, y, CENTRE, 4.0, 1.5)),
+        MarkKind::Working => shape(palette.ink, opacity, &|x, y| ring(x, y, CENTRE, 4.0, 1.5)),
         MarkKind::NeedsInput => {
             if animated {
                 let progress = Curve::Settle.at(f64::from((phase / HALO_PERIOD).fract())) as f32;
-                shape(WIP, 1.0 - progress, &|x, y| {
+                shape(palette.wip, 1.0 - progress, &|x, y| {
                     ring(x, y, CENTRE, 4.5 + 2.5 * progress, 1.25)
                 });
             }
-            shape(WIP, opacity, &|x, y| circle(x, y, CENTRE, 4.5))
+            shape(palette.wip, opacity, &|x, y| circle(x, y, CENTRE, 4.5))
         }
-        MarkKind::Stalled => shape(WIP, opacity, &|x, y| {
+        MarkKind::Stalled => shape(palette.wip, opacity, &|x, y| {
             rounded_box(x, y, [2.75, 5.0, 1.25, 4.0], 0.0).min(rounded_box(
                 x,
                 y,
@@ -324,7 +523,7 @@ fn paint_mark(
                 0.0,
             ))
         }),
-        MarkKind::Done => shape(LIVE, opacity, &|x, y| {
+        MarkKind::Done => shape(palette.live, opacity, &|x, y| {
             segment(x, y, [1.5, 5.2], [4.0, 7.6], 1.75).min(segment(
                 x,
                 y,
@@ -333,10 +532,12 @@ fn paint_mark(
                 1.75,
             ))
         }),
-        MarkKind::Error => shape(DANGER, opacity, &|x, y| {
+        MarkKind::Error => shape(palette.danger, opacity, &|x, y| {
             triangle(x, y, [[0.5, 9.0], [9.5, 9.0], [5.0, 1.0]])
         }),
-        MarkKind::Idle => shape(MUTED, opacity, &|x, y| ring(x, y, CENTRE, 3.5, 1.25)),
+        MarkKind::Idle => shape(palette.muted, opacity, &|x, y| {
+            ring(x, y, CENTRE, 3.5, 1.25)
+        }),
     }
 }
 
@@ -359,6 +560,7 @@ pub fn render_pill(
             growths: &[],
             width: None,
             chevron: Chevron::default(),
+            look: Look::default(),
         },
     );
     canvas
@@ -373,6 +575,7 @@ pub fn paint_pill(
     text: &dyn TextRasterizer,
     motion: &PillMotion,
 ) {
+    let palette = motion.look.theme.palette();
     let font = FONT_SIZE * scale;
     let overflow =
         (model.overflow > 0).then(|| text.rasterize(&format!("+{}", model.overflow), font));
@@ -393,7 +596,12 @@ pub fn paint_pill(
         ),
         (BAR_HEIGHT * scale).round() as usize,
     );
-    canvas.paint_bar(scale, canvas.height as f32 / 2.0);
+    let radius = canvas.height as f32 / 2.0;
+    if motion.look.solid {
+        canvas.paint_bar(scale, radius, &palette);
+    } else {
+        canvas.paint_hit_bar(radius);
+    }
     let top = (BAR_HEIGHT - MARK_SIZE) / 2.0 * scale;
     if model.marks.is_empty() {
         paint_shape(
@@ -401,7 +609,7 @@ pub fn paint_pill(
             [PADDING * scale, top],
             MARK_SIZE,
             scale,
-            DORMANT,
+            palette.dormant,
             1.0,
             |x, y| ring(x, y, [5.0, 5.0], 3.5, 1.25),
         );
@@ -420,13 +628,14 @@ pub fn paint_pill(
             scale * growth,
             phase,
             reduced_motion,
+            &palette,
         );
     }
     if let Some(mask) = &overflow {
-        canvas.paint_mask(mask, overflow_left, MUTED);
+        canvas.paint_mask(mask, overflow_left, palette.muted);
     }
     if let Some(mask) = &count {
-        canvas.paint_mask(mask, count_left, WIP);
+        canvas.paint_mask(mask, count_left, palette.wip);
     }
     let [left, top, ..] = chevron_box(canvas.width, scale);
     let angle = motion.chevron.turn * PI;
@@ -436,7 +645,11 @@ pub fn paint_pill(
         [left, top],
         CHEVRON_SIZE,
         scale,
-        if motion.chevron.hot { INK } else { MUTED },
+        if motion.chevron.hot {
+            palette.ink
+        } else {
+            palette.muted
+        },
         1.0,
         |x, y| {
             let (dx, dy) = (x - MARK_CENTRE, y - MARK_CENTRE);
@@ -471,13 +684,14 @@ pub fn on_chevron((x, y): (f32, f32), width: usize, scale: f32) -> bool {
     x >= left - CHEVRON_GAP / 2.0 * scale && x < width as f32 && y >= 0.0 && y < BAR_HEIGHT * scale
 }
 
-pub fn tone_paint(tone: TabTone) -> Rgb {
+pub fn tone_paint(tone: TabTone, theme: Theme) -> Rgb {
+    let palette = theme.palette();
     match tone {
-        TabTone::NeedsYou => WIP,
-        TabTone::Failed => DANGER,
-        TabTone::Finished => LIVE,
-        TabTone::Working => INK,
-        TabTone::Dormant => DORMANT,
+        TabTone::NeedsYou => palette.wip,
+        TabTone::Failed => palette.danger,
+        TabTone::Finished => palette.live,
+        TabTone::Working => palette.ink,
+        TabTone::Dormant => palette.dormant,
     }
 }
 
@@ -496,11 +710,16 @@ pub fn paint_tab(
     (width, height): (usize, usize),
     edge: Edge,
     colour: Rgb,
-    thickness: f32,
-    glow: f32,
+    (thickness, glow): (f32, f32),
     scale: f32,
+    theme: Theme,
 ) {
     canvas.reset(width, height);
+    let halo = if theme == Theme::Dark {
+        Rgb(0, 0, 0)
+    } else {
+        Rgb(0xff, 0xff, 0xff)
+    };
     let length = match edge {
         Edge::Left | Edge::Right => height,
         Edge::Top | Edge::Bottom => width,
@@ -537,7 +756,12 @@ pub fn paint_tab(
                     canvas.blend(x, y, colour, coverage);
                 }
             }
-            let coverage = (0.5 - rounded_box(along, depth, strip, radius)).clamp(0.0, 1.0);
+            let distance = rounded_box(along, depth, strip, radius);
+            let outline = (0.5 - distance + scale).clamp(0.0, 1.0);
+            if outline > 0.0 {
+                canvas.blend(x, y, halo, outline * TAB_HALO);
+            }
+            let coverage = (0.5 - distance).clamp(0.0, 1.0);
             if coverage > 0.0 {
                 canvas.blend(x, y, colour, coverage);
             }
@@ -556,14 +780,16 @@ pub fn paint_peek(
     colour: Rgb,
     scale: f32,
     text: &dyn TextRasterizer,
+    theme: Theme,
 ) {
+    let palette = theme.palette();
     let mask = text.rasterize(label, PEEK_FONT_SIZE * scale);
     let text_left = (PEEK_PADDING + PEEK_DOT + PEEK_DOT_GAP) * scale;
     canvas.reset(
         (text_left + mask.width as f32 + PEEK_PADDING * scale).round() as usize,
         (PEEK_HEIGHT * scale).round() as usize,
     );
-    canvas.paint_bar(scale, PEEK_RADIUS * scale);
+    canvas.paint_bar(scale, PEEK_RADIUS * scale, &palette);
     let (centre, radius) = (
         [
             (PEEK_PADDING + PEEK_DOT / 2.0) * scale,
@@ -582,11 +808,17 @@ pub fn paint_peek(
         1.0,
         |x, y| circle(x, y, centre, radius),
     );
-    canvas.paint_mask(&mask, text_left, INK);
+    canvas.paint_mask(&mask, text_left, palette.ink);
 }
 
-pub fn render_tray(state: TrayState, size: usize, text: &dyn TextRasterizer) -> Canvas {
+pub fn render_tray(
+    state: TrayState,
+    size: usize,
+    text: &dyn TextRasterizer,
+    theme: Theme,
+) -> Canvas {
     const CENTRE: [f32; 2] = [8.0, 8.0];
+    let palette = theme.palette();
     let mut canvas = Canvas::new(size, size);
     let unit = size as f32 / TRAY_UNITS;
     let mut shape = |colour: Rgb, distance: &dyn Fn(f32, f32) -> f32| {
@@ -601,13 +833,13 @@ pub fn render_tray(state: TrayState, size: usize, text: &dyn TextRasterizer) -> 
         )
     };
     match state {
-        TrayState::Quiet => shape(MUTED, &|x, y| ring(x, y, CENTRE, 5.5, 2.0)),
-        TrayState::Working => shape(INK, &|x, y| ring(x, y, CENTRE, 5.5, 2.0)),
-        TrayState::Error => shape(DANGER, &|x, y| {
+        TrayState::Quiet => shape(palette.muted, &|x, y| ring(x, y, CENTRE, 5.5, 2.0)),
+        TrayState::Working => shape(palette.ink, &|x, y| ring(x, y, CENTRE, 5.5, 2.0)),
+        TrayState::Error => shape(palette.danger, &|x, y| {
             triangle(x, y, [[1.0, 14.5], [15.0, 14.5], [8.0, 1.5]])
         }),
         TrayState::Alerting(count) => {
-            shape(WIP, &|x, y| circle(x, y, CENTRE, 7.5));
+            shape(palette.wip, &|x, y| circle(x, y, CENTRE, 7.5));
             let label = if count > 9 {
                 "9+".to_string()
             } else {
@@ -615,7 +847,7 @@ pub fn render_tray(state: TrayState, size: usize, text: &dyn TextRasterizer) -> 
             };
             let mask = text.rasterize(&label, 10.0 * unit);
             let left = size.saturating_sub(mask.width) as f32 / 2.0;
-            canvas.paint_mask(&mask, left, PAPER);
+            canvas.paint_mask(&mask, left, palette.paper);
         }
     }
     canvas
@@ -830,6 +1062,7 @@ mod tests {
                         growths: &[],
                         width: None,
                         chevron,
+                        look: Look::default(),
                     },
                 );
                 canvas
@@ -884,9 +1117,9 @@ mod tests {
                 (lp(18.0), lp(72.0)),
                 Edge::Left,
                 WIP,
-                4.0,
-                0.0,
+                (4.0, 0.0),
                 scale,
+                Theme::Dark,
             );
             let middle = lp(36.0);
             assert!(
@@ -905,9 +1138,9 @@ mod tests {
                 (lp(72.0), lp(8.0)),
                 Edge::Bottom,
                 DORMANT,
-                4.0,
-                0.0,
+                (4.0, 0.0),
                 scale,
+                Theme::Dark,
             );
             let bottom = straight(&canvas, middle, lp(8.0) - 1);
             assert!(close_to(bottom, DORMANT, 1) && bottom[3] == to_byte(1.0));
@@ -917,9 +1150,9 @@ mod tests {
                 (lp(18.0), lp(72.0)),
                 Edge::Right,
                 LIVE,
-                6.0,
-                1.0,
+                (6.0, 1.0),
                 scale,
+                Theme::Dark,
             );
             assert!(close_to(straight(&canvas, lp(18.0) - 1, middle), LIVE, 1));
             assert!(straight(&canvas, lp(8.0), middle)[3] > 1);
@@ -929,9 +1162,17 @@ mod tests {
 
     #[test]
     fn tones_follow_the_palette_and_mix_smoothly() {
-        assert_eq!(tone_paint(TabTone::NeedsYou), WIP);
-        assert_eq!(tone_paint(TabTone::Working), INK);
-        assert_eq!(tone_paint(TabTone::Dormant), DORMANT);
+        assert_eq!(tone_paint(TabTone::NeedsYou, Theme::Dark), WIP);
+        assert_eq!(tone_paint(TabTone::Working, Theme::Dark), INK);
+        assert_eq!(tone_paint(TabTone::Dormant, Theme::Dark), DORMANT);
+        assert_eq!(
+            tone_paint(TabTone::NeedsYou, Theme::Light),
+            Rgb(0xa8, 0x74, 0x1c)
+        );
+        assert_eq!(
+            tone_paint(TabTone::Working, Theme::Light),
+            Rgb(0x18, 0x18, 0x1b)
+        );
         assert_eq!(mix(WIP, LIVE, 0.0), WIP);
         assert_eq!(mix(WIP, LIVE, 1.0), LIVE);
         assert_eq!(mix(Rgb(0, 0, 0), Rgb(200, 100, 50), 0.5), Rgb(100, 50, 25));
@@ -945,6 +1186,7 @@ mod tests {
             growths,
             width,
             chevron: Chevron::default(),
+            look: Look::default(),
         };
         paint_pill(
             &mut canvas,
@@ -976,7 +1218,7 @@ mod tests {
         for scale in SCALES {
             let lp = |value: f32| (value * scale) as usize;
             let mut canvas = Canvas::default();
-            paint_peek(&mut canvas, "abcd", LIVE, scale, &BlockText);
+            paint_peek(&mut canvas, "abcd", LIVE, scale, &BlockText, Theme::Dark);
             let text_width = (4.0 * 12.0 * scale * 0.6).round();
             assert_eq!(canvas.height, lp(26.0));
             assert_eq!(
@@ -1002,7 +1244,7 @@ mod tests {
             let unit = size as f32 / 16.0;
             let at = |state: TrayState, x: f32, y: f32| {
                 straight(
-                    &render_tray(state, size, &BlockText),
+                    &render_tray(state, size, &BlockText, Theme::Dark),
                     (x * unit) as usize,
                     (y * unit) as usize,
                 )
@@ -1028,6 +1270,95 @@ mod tests {
                 close_to(at(TrayState::Error, 8.0, 10.0), DANGER, 3),
                 "{size}"
             );
+        }
+    }
+
+    fn painted(kinds: &[MarkKind], scale: f32, look: Look) -> Canvas {
+        let mut canvas = Canvas::default();
+        paint_pill(
+            &mut canvas,
+            &model(kinds, 0),
+            scale,
+            0.0,
+            true,
+            &BlockText,
+            &PillMotion {
+                growths: &[],
+                width: None,
+                chevron: Chevron::default(),
+                look,
+            },
+        );
+        canvas
+    }
+
+    #[test]
+    fn the_light_theme_draws_a_white_capsule_with_ink_marks_and_a_light_border() {
+        let light = Look {
+            theme: Theme::Light,
+            solid: true,
+        };
+        for scale in SCALES {
+            let canvas = painted(&[MarkKind::Working, MarkKind::Idle], scale, light);
+            let inside = straight(&canvas, (24.0 * scale) as usize, canvas.height / 2);
+            assert!(close_to(inside, Rgb(0xff, 0xff, 0xff), 1), "{inside:?}");
+            assert_eq!(inside[3], 245);
+            let border = straight(&canvas, (24.0 * scale) as usize, 0);
+            assert!(close_to(border, Rgb(0xdc, 0xdc, 0xe2), 2), "{border:?}");
+            let ring = straight(
+                &canvas,
+                ((10.0 + 8.5) * scale) as usize,
+                ((9.0 + 6.5) * scale) as usize,
+            );
+            assert!(close_to(ring, Rgb(0x18, 0x18, 0x1b), 2), "{ring:?}");
+        }
+    }
+
+    #[test]
+    fn a_lifted_capsule_keeps_its_pixels_and_gains_a_soft_shadow_that_sits_lower() {
+        for scale in SCALES {
+            let capsule = painted(&[MarkKind::Idle], scale, Look::default());
+            let mut lifted = Canvas::default();
+            capsule.lift_into(&mut lifted, scale, Look::default());
+            let pad = shadow_pad(scale);
+            assert_eq!(lifted.width, capsule.width + 2 * pad);
+            assert_eq!(lifted.height, capsule.height + 2 * pad);
+            let middle = capsule.width / 2;
+            let kept = straight(&lifted, middle + pad, capsule.height / 2 + pad);
+            let original = straight(&capsule, middle, capsule.height / 2);
+            assert!(close_to(kept, SURFACE, 1) && kept[3].abs_diff(original[3]) <= 6);
+            let (above, below) = (
+                straight(&lifted, middle + pad, pad - 2)[3],
+                straight(&lifted, middle + pad, pad + capsule.height + 1)[3],
+            );
+            assert!(below > above && below > 10, "{above} {below}");
+            assert_eq!(straight(&lifted, 0, 0)[3], 0);
+            assert_eq!(straight(&lifted, middle + pad, 0)[3], 0);
+        }
+    }
+
+    #[test]
+    fn without_a_background_only_a_hit_area_and_the_marks_are_drawn() {
+        let clear = Look {
+            theme: Theme::Dark,
+            solid: false,
+        };
+        for scale in SCALES {
+            let canvas = painted(&[MarkKind::NeedsInput, MarkKind::Idle], scale, clear);
+            let gap = straight(&canvas, (23.0 * scale) as usize, canvas.height / 2);
+            assert_eq!(gap[3], 1, "scale {scale}");
+            assert_eq!(straight(&canvas, 0, 0)[3], 0);
+            let dot = straight(&canvas, (15.0 * scale) as usize, (14.0 * scale) as usize);
+            assert!(close_to(dot, WIP, 2) && dot[3] == 255);
+            let mut lifted = Canvas::default();
+            canvas.lift_into(&mut lifted, scale, clear);
+            let pad = shadow_pad(scale);
+            let under = straight(
+                &lifted,
+                (15.0 * scale) as usize + pad,
+                pad + (21.0 * scale) as usize,
+            );
+            assert!(under[3] > 0, "the marks cast a shadow");
         }
     }
 }

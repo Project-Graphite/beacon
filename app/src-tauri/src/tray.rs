@@ -4,7 +4,7 @@ use crate::displays::{
 use crate::feed;
 use crate::geometry::Rect;
 use crate::model::{TrayState, tooltip, tray_state};
-use crate::platform::{self, GdiText, tray_icon_size};
+use crate::platform::{self, GdiText, theme, tray_icon_size};
 use crate::positions::{self, Style};
 use crate::raster::render_tray;
 use crate::shell::{self, Action};
@@ -36,7 +36,7 @@ fn pill_label(shown: bool, style: Style) -> &'static str {
 fn image(state: TrayState, text: &GdiText) -> Image<'static> {
     let size = tray_icon_size();
     Image::new_owned(
-        render_tray(state, size, text).straight_rgba(),
+        render_tray(state, size, text, theme::taskbar()).straight_rgba(),
         size as u32,
         size as u32,
     )
@@ -204,6 +204,12 @@ impl Tray {
                 log_error!("cannot update the tray tooltip: {error}");
             }
             self.tooltip = tooltip;
+        }
+    }
+
+    pub fn retheme(&self) {
+        if let Err(error) = self.icon.set_icon(Some(image(self.state, &self.text))) {
+            log_error!("cannot update the tray icon: {error}");
         }
     }
 

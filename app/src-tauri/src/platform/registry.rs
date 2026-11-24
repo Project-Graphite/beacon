@@ -1,7 +1,8 @@
 use std::io;
+use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, WIN32_ERROR};
 use windows_sys::Win32::System::Registry::{
-    HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW,
+    HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_DWORD, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
 };
 
 fn wide(text: &str) -> Vec<u16> {
@@ -30,6 +31,22 @@ pub fn write_string(key: &str, name: &str, value: &str) -> io::Result<()> {
     })
 }
 
+pub fn read_dword(key: &str, name: &str) -> Option<u32> {
+    let (mut value, mut size) = (0u32, size_of::<u32>() as u32);
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            wide(key).as_ptr(),
+            wide(name).as_ptr(),
+            RRF_RT_REG_DWORD,
+            null_mut(),
+            (&mut value as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    (status == ERROR_SUCCESS).then_some(value)
+}
+
 pub fn delete_value(key: &str, name: &str) -> io::Result<()> {
     match unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, wide(key).as_ptr(), wide(name).as_ptr()) }
     {
@@ -41,8 +58,7 @@ pub fn delete_value(key: &str, name: &str) -> io::Result<()> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use std::ptr::null_mut;
-    use windows_sys::Win32::System::Registry::{RRF_RT_REG_SZ, RegGetValueW};
+    use windows_sys::Win32::System::Registry::RRF_RT_REG_SZ;
 
     pub fn has_value(key: &str, name: &str) -> io::Result<bool> {
         let mut size = 0;

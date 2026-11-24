@@ -3,6 +3,7 @@ mod layer;
 pub mod pill;
 pub mod registry;
 mod text;
+pub mod theme;
 
 pub use text::GdiText;
 

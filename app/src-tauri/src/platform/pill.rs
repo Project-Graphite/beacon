@@ -1,21 +1,22 @@
 use super::frames::{self, WM_FRAME};
 use super::layer::Layer;
+use super::theme;
 use super::{GdiText, monitor_info, monitors, reduced_motion, refresh_rate};
 use crate::displays::{Position, dock, landing, target};
 use crate::geometry::{
     Corner, Edge, Monitor, Rect, TabPlacement, corner_rect, default_placement, layout_signature,
-    monitor_for, nearest_corner, peek_rect, pill_edge, pill_reveal_strip, resize_anchored,
-    restored_pill_rect, slide, snap, tab_rect,
+    monitor_for, nearest_corner, peek_rect, pill_edge, resize_anchored, restored_pill_rect, slide,
+    snap, tab_rect,
 };
 use crate::model::{Peek, PillModel, TabTone};
 use crate::motion::{
     Attention, Curve, Strip, Tween, next_burst, peek_extent, peek_moving, peek_next_change,
     unseen_moving, unseen_strip,
 };
-use crate::positions::{self, AttentionStyle, Style, UiSettings};
+use crate::positions::{self, AttentionStyle, PillBackground, Style, UiSettings};
 use crate::raster::{
-    Canvas, Chevron, PillMotion, Rgb, mix, on_chevron, paint_hit_area, paint_peek, paint_pill,
-    paint_tab, render_pill, tone_paint,
+    Canvas, Chevron, Look, PillMotion, Rgb, Theme, mix, on_chevron, paint_hit_area, paint_peek,
+    paint_pill, paint_tab, render_pill, shadow_pad, tone_paint,
 };
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -68,7 +69,6 @@ const RESTING_STRIP: f64 = 4.0;
 const HOVERED_STRIP: f64 = 6.0;
 const STILL_DEPTH: f64 = 8.0;
 const PULSING_DEPTH: f64 = 18.0;
-const REVEAL_DEPTH: f64 = 2.0;
 const PEEK_SLIDE: f64 = 12.0;
 const CHEVRON_TURN: f64 = 0.18;
 
@@ -82,6 +82,8 @@ pub enum PillEvent {
     ChevronPressed,
     Dragged,
     Moved,
+    Left,
+    ThemeChanged,
     HoverTick,
     ForegroundChanged,
     Pressed((i32, i32)),
@@ -111,6 +113,7 @@ struct Glide {
 
 struct ShownPeek {
     canvas: Canvas,
+    lifted: Canvas,
     started: f64,
 }
 
@@ -119,6 +122,8 @@ struct Pill {
     home: PathBuf,
     style: Style,
     settings: UiSettings,
+    theme: Theme,
+    inset: i32,
     model: PillModel,
     tab: TabModel,
     scale: f64,
@@ -155,6 +160,7 @@ struct Pill {
     growths: Vec<f32>,
     width: Tween,
     canvas: Canvas,
+    lifted: Canvas,
     layer: Layer,
     reveal: Layer,
     reveal_rect: Option<Rect>,
@@ -212,11 +218,14 @@ pub fn create(
         )
     };
     let settings = positions::ui_settings(&home);
+    let theme = theme::apps();
     let mut pill = Pill {
         hwnd,
         style: positions::style(&home),
         opacity: Tween::rest(settings.idle_opacity),
         settings,
+        theme,
+        inset: 0,
         home,
         model: PillModel::default(),
         tab: TabModel::default(),
@@ -248,7 +257,7 @@ pub fn create(
         refresh_rate: 0,
         framing: false,
         fade: Tween::rest(0.0),
-        paint_from: tone_paint(TabTone::default()),
+        paint_from: tone_paint(TabTone::default(), theme),
         tone_fade: Tween::rest(1.0),
         strip: Tween::rest(RESTING_STRIP),
         glide: None,
@@ -256,6 +265,7 @@ pub fn create(
         growths: Vec::new(),
         width: Tween::rest(0.0),
         canvas: Canvas::default(),
+        lifted: Canvas::default(),
         layer,
         reveal: Layer::create(&class)?,
         reveal_rect: None,
@@ -354,16 +364,26 @@ pub fn peek(peek: Peek) {
         if !pill.may_show() {
             return;
         }
-        let mut canvas = Canvas::default();
+        let (mut canvas, mut lifted) = (Canvas::default(), Canvas::default());
         paint_peek(
             &mut canvas,
             &peek.text,
-            tone_paint(peek.tone),
+            tone_paint(peek.tone, pill.theme),
             pill.scale as f32,
             &pill.text,
+            pill.theme,
+        );
+        canvas.lift_into(
+            &mut lifted,
+            pill.scale as f32,
+            Look {
+                theme: pill.theme,
+                solid: true,
+            },
         );
         pill.peek = Some(ShownPeek {
             canvas,
+            lifted,
             started: pill.now(),
         });
         pill.present();
@@ -441,6 +461,10 @@ pub fn move_to_edge(edge: Edge) {
 
 pub fn window() -> HWND {
     WINDOW.load(Ordering::Relaxed)
+}
+
+pub fn hovered() -> bool {
+    with_pill(|pill| pill.hovering).unwrap_or(false)
 }
 
 pub fn shown_rect() -> Option<Rect> {
@@ -572,7 +596,7 @@ impl Pill {
     fn tone_paint(&self, now: f64) -> Rgb {
         mix(
             self.paint_from,
-            tone_paint(self.tab.tone),
+            tone_paint(self.tab.tone, self.theme),
             self.tone_fade.value(now) as f32,
         )
     }
@@ -595,6 +619,13 @@ impl Pill {
                 since_gain: now - self.at(since),
                 repeat: self.settings.attention_repeat_seconds as f64,
             })
+    }
+
+    fn look(&self) -> Look {
+        Look {
+            theme: self.theme,
+            solid: self.settings.pill_background == PillBackground::Solid,
+        }
     }
 
     fn pill_scale(&self) -> f64 {
@@ -662,6 +693,7 @@ impl Pill {
                 .map(|start| Curve::Pop.at((now - start) / MARK_POP) as f32),
         );
         let scale = self.pill_scale() as f32;
+        let look = self.look();
         paint_pill(
             &mut self.canvas,
             &self.model,
@@ -676,6 +708,7 @@ impl Pill {
                     turn: self.chevron.value(now) as f32,
                     hot: self.chevron_hot,
                 },
+                look,
             },
         );
         resize_anchored(
@@ -722,9 +755,9 @@ impl Pill {
             (rect.width() as usize, rect.height() as usize),
             self.placement.edge,
             paint,
-            strip.thickness as f32,
-            strip.glow as f32,
+            (strip.thickness as f32, strip.glow as f32),
             (self.scale * self.settings.size.tab_factor()) as f32,
+            self.theme,
         );
         rect
     }
@@ -739,19 +772,27 @@ impl Pill {
             * self.opacity.value(now).clamp(0.0, 1.0)
             * 255.0)
             .round() as u8;
-        self.layer.update(rect, &self.canvas, alpha);
+        if self.style == Style::Pill {
+            let scale = self.pill_scale() as f32;
+            let look = self.look();
+            self.canvas.lift_into(&mut self.lifted, scale, look);
+            self.inset = shadow_pad(scale) as i32;
+            self.layer
+                .update(rect.inflated(self.inset), &self.lifted, alpha);
+        } else {
+            self.inset = 0;
+            self.layer.update(rect, &self.canvas, alpha);
+        }
         self.rect = rect;
         self.present_reveal();
         self.present_peek(now);
     }
 
     fn present_reveal(&mut self) {
-        let strip = (self.reveal_wanted && self.may_show())
-            .then(|| match self.style {
-                Style::Tab => Some(self.tab_rect(REVEAL_DEPTH / self.settings.size.tab_factor())),
-                Style::Pill => pill_reveal_strip(self.rect, &self.work, REVEAL_DEPTH, self.scale),
-            })
-            .flatten();
+        let strip = (self.reveal_wanted && self.may_show()).then(|| match self.style {
+            Style::Tab => self.tab_rect(STILL_DEPTH),
+            Style::Pill => self.rect,
+        });
         if let Some(rect) = strip {
             paint_hit_area(
                 &mut self.hit_canvas,
@@ -773,6 +814,7 @@ impl Pill {
             self.peek_layer.show(false);
             return;
         };
+        let pad = shadow_pad(self.scale as f32) as i32;
         let (anchor, edge) = match self.style {
             Style::Tab => (self.tab_rect(STILL_DEPTH), self.placement.edge),
             Style::Pill => (
@@ -793,8 +835,11 @@ impl Pill {
             &self.work,
             self.scale,
         );
-        self.peek_layer
-            .update(rect, &peek.canvas, (extent * 255.0).round() as u8);
+        self.peek_layer.update(
+            rect.inflated(pad),
+            &peek.lifted,
+            (extent * 255.0).round() as u8,
+        );
         self.peek_layer.show(true);
     }
 
@@ -928,8 +973,8 @@ impl Pill {
             SetWindowPos(
                 self.hwnd,
                 null_mut(),
-                left,
-                top,
+                left - self.inset,
+                top - self.inset,
                 0,
                 0,
                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
@@ -1020,7 +1065,7 @@ impl Pill {
     fn on_chevron(&self, (x, y): (i32, i32)) -> bool {
         self.style == Style::Pill
             && on_chevron(
-                (x as f32 + 0.5, y as f32 + 0.5),
+                ((x - self.inset) as f32 + 0.5, (y - self.inset) as f32 + 0.5),
                 self.canvas.width,
                 self.pill_scale() as f32,
             )
@@ -1075,7 +1120,10 @@ impl Pill {
                 }
                 self.hover(true);
                 let point = pointer(lparam);
-                let screen = (self.rect.left + point.0, self.rect.top + point.1);
+                let screen = (
+                    self.rect.left - self.inset + point.0,
+                    self.rect.top - self.inset + point.1,
+                );
                 let slop = (CLICK_SLOP * self.scale) as i32;
                 let dragged = self.press.as_mut().and_then(|press| {
                     press.last = screen;
@@ -1100,7 +1148,7 @@ impl Pill {
                 if self.press.is_none() {
                     self.hover(false);
                 }
-                Some(None)
+                Some(Some(PillEvent::Left))
             }
             WM_LBUTTONDOWN => {
                 let point = pointer(lparam);
@@ -1109,7 +1157,10 @@ impl Pill {
                     return Some(Some(PillEvent::ChevronPressed));
                 }
                 unsafe { SetCapture(self.hwnd) };
-                let screen = (self.rect.left + point.0, self.rect.top + point.1);
+                let screen = (
+                    self.rect.left - self.inset + point.0,
+                    self.rect.top - self.inset + point.1,
+                );
                 self.press = Some(Press {
                     cursor: screen,
                     last: screen,
@@ -1174,6 +1225,16 @@ impl Pill {
                 self.relocate();
                 self.sync();
                 Some((before != (self.rect, self.placement, self.work)).then_some(PillEvent::Moved))
+            }
+            WM_SETTINGCHANGE if wparam == 0 && theme::colours_changed(lparam) => {
+                let apps = theme::apps();
+                if apps != self.theme {
+                    self.theme = apps;
+                    self.paint_from = tone_paint(self.tab.tone, apps);
+                    self.tone_fade = Tween::rest(1.0);
+                    self.present();
+                }
+                Some(Some(PillEvent::ThemeChanged))
             }
             WM_SETTINGCHANGE if wparam == SPI_SETCLIENTAREAANIMATION as WPARAM => {
                 self.reduced_motion = reduced_motion();

@@ -192,6 +192,11 @@ impl Shell {
                 self.recheck_after(LINGER);
             }
             Action::Pill(PillEvent::Hovered | PillEvent::RevealHovered) => {}
+            Action::Pill(PillEvent::Left) => {
+                self.revealed = Some(Instant::now());
+                self.recheck_after(LINGER);
+            }
+            Action::Pill(PillEvent::ThemeChanged) => self.tray.retheme(),
             Action::Pill(PillEvent::ChevronPressed) => match self.mode() {
                 Some(Mode::Sticky | Mode::Pinned) => self.put_away(),
                 _ => self.open(Mode::Sticky, false),
@@ -385,6 +390,7 @@ impl Shell {
         let needed = !never
             && (self.mode().is_some()
                 || self.preview.is_some()
+                || pill::hovered()
                 || self
                     .revealed
                     .is_some_and(|revealed| now.duration_since(revealed) < LINGER)
