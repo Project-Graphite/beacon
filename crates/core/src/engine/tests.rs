@@ -1987,6 +1987,12 @@ impl Fixture {
             session_id: SESSION.to_string(),
         })
     }
+
+    fn undismiss(&mut self) -> Reply {
+        self.engine.control(Request::Undismiss {
+            session_id: SESSION.to_string(),
+        })
+    }
 }
 
 #[test]
@@ -2420,7 +2426,7 @@ fn a_session_waiting_for_a_decision_cannot_be_dismissed() {
     assert_eq!(
         fixture.dismiss().error.as_deref(),
         Some(
-            "session 4c2c3535-edec-4bb7-90b7-38049912db27 is waiting for a decision; answer it before crossing the session off"
+            "session 4c2c3535-edec-4bb7-90b7-38049912db27 is waiting for a decision; answer it before hiding the session"
         )
     );
     assert!(!fixture.session().dismissed);
@@ -2428,6 +2434,25 @@ fn a_session_waiting_for_a_decision_cannot_be_dismissed() {
     assert!(fixture.dismiss().ok);
     assert_eq!(
         fixture.engine.control(Request::Dismiss {
+            session_id: "missing".to_string()
+        }),
+        Reply::failed("no session missing")
+    );
+}
+
+#[test]
+fn undismissing_returns_a_hidden_session_to_the_list() {
+    let mut fixture = fixture();
+    fixture.send(STOP);
+    assert!(fixture.dismiss().ok);
+    assert!(fixture.session().dismissed);
+    assert!(fixture.undismiss().ok);
+    let session = fixture.session();
+    assert!(!session.dismissed);
+    assert_eq!(session.state, SessionState::Idle);
+    assert!(fixture.undismiss().ok);
+    assert_eq!(
+        fixture.engine.control(Request::Undismiss {
             session_id: "missing".to_string()
         }),
         Reply::failed("no session missing")

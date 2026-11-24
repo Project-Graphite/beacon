@@ -177,7 +177,7 @@ fn dismiss(home: &Path, prefix: &str) -> Result<ExitCode, String> {
             session_id: session_id.clone(),
         },
     )?;
-    println!("Session {session_id} crossed off until it does something again.");
+    println!("Session {session_id} hidden until it does something again.");
     Ok(ExitCode::SUCCESS)
 }
 

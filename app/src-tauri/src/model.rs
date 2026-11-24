@@ -113,7 +113,7 @@ pub fn ordered_sessions(snapshot: &Snapshot) -> Vec<&Session> {
     let mut sessions: Vec<&Session> = snapshot
         .sessions
         .iter()
-        .filter(|session| session.state != SessionState::Ended)
+        .filter(|session| session.state != SessionState::Ended && !session.dismissed)
         .collect();
     sessions.sort_by(|a, b| (group(a), &a.session_id).cmp(&(group(b), &b.session_id)));
     sessions
@@ -163,7 +163,11 @@ impl PillModel {
 pub fn tray_state(snapshot: Option<&Snapshot>) -> TrayState {
     let sessions = snapshot.map_or(&[][..], |snapshot| &snapshot.sessions[..]);
     let alerting = alerting_count(snapshot);
-    let any = |state: SessionState| sessions.iter().any(|session| session.state == state);
+    let any = |state: SessionState| {
+        sessions
+            .iter()
+            .any(|session| session.state == state && !session.dismissed)
+    };
     if alerting > 0 {
         TrayState::Alerting(alerting)
     } else if any(SessionState::Error) {
@@ -190,7 +194,7 @@ pub fn tab_tone(snapshot: Option<&Snapshot>) -> TabTone {
         TabTone::Finished
     } else if sessions
         .iter()
-        .any(|session| session.state == SessionState::Working)
+        .any(|session| session.state == SessionState::Working && !session.dismissed)
     {
         TabTone::Working
     } else {
@@ -202,15 +206,16 @@ pub fn claude_active(snapshot: Option<&Snapshot>) -> bool {
     snapshot.is_some_and(|snapshot| {
         snapshot.sessions.iter().any(|session| {
             session.alerting
-                || matches!(
-                    mark_kind(session.state),
-                    Some(
-                        MarkKind::Starting
-                            | MarkKind::Working
-                            | MarkKind::NeedsInput
-                            | MarkKind::Stalled
+                || !session.dismissed
+                    && matches!(
+                        mark_kind(session.state),
+                        Some(
+                            MarkKind::Starting
+                                | MarkKind::Working
+                                | MarkKind::NeedsInput
+                                | MarkKind::Stalled
+                        )
                     )
-                )
         })
     })
 }
@@ -442,6 +447,28 @@ pub mod tests {
         session.alerting = false;
         session.snoozed_until_ms = Some(1);
         session
+    }
+
+    fn hidden(mut session: Session) -> Session {
+        session.alerting = false;
+        session.attention = false;
+        session.dismissed = true;
+        session
+    }
+
+    #[test]
+    fn a_hidden_session_leaves_the_marks_the_tab_the_tray_and_the_activity() {
+        let snapshot = snapshot(vec![
+            hidden(session("w", SessionState::Working)),
+            hidden(session("e", SessionState::Error)),
+            session("i", SessionState::Idle),
+        ]);
+        let model = PillModel::from_snapshot(Some(&snapshot));
+        assert_eq!(model.marks.len(), 1);
+        assert_eq!(model.overflow, 0);
+        assert_eq!(tab_tone(Some(&snapshot)), TabTone::Dormant);
+        assert_eq!(tray_state(Some(&snapshot)), TrayState::Quiet);
+        assert!(!claude_active(Some(&snapshot)));
     }
 
     #[test]

@@ -73,6 +73,13 @@ pub async fn dismiss(feed: State<'_, Arc<Feed>>, session_id: String) -> Result<(
 }
 
 #[tauri::command]
+pub async fn undismiss(feed: State<'_, Arc<Feed>>, session_id: String) -> Result<(), String> {
+    ask(feed.home.clone(), Request::Undismiss { session_id })
+        .await
+        .map(drop)
+}
+
+#[tauri::command]
 pub async fn decide(feed: State<'_, Arc<Feed>>, id: u64, decision: Decision) -> Result<(), String> {
     ask(feed.home.clone(), Request::Decide { id, decision })
         .await

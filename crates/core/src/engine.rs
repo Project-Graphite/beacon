@@ -321,6 +321,7 @@ impl Engine {
             Request::Decide { id, decision } => self.decide(id, decision),
             Request::Acknowledge { session_id } => self.acknowledge(&session_id, now_ms()),
             Request::Dismiss { session_id } => self.dismiss(&session_id, now_ms()),
+            Request::Undismiss { session_id } => self.undismiss(&session_id),
             Request::Snooze { minutes: 0, .. } => {
                 Err("a snooze needs at least one minute".to_string())
             }
@@ -1185,7 +1186,7 @@ impl Engine {
             .any(|pending| pending.view.session_id == session_id)
         {
             return Err(format!(
-                "session {session_id} is waiting for a decision; answer it before crossing the session off"
+                "session {session_id} is waiting for a decision; answer it before hiding the session"
             ));
         }
         self.sessions
@@ -1193,6 +1194,15 @@ impl Engine {
             .ok_or_else(|| format!("no session {session_id}"))?
             .dismissed = true;
         self.acknowledge(session_id, now)
+    }
+
+    pub fn undismiss(&mut self, session_id: &str) -> Result<(), String> {
+        self.sessions
+            .get_mut(session_id)
+            .ok_or_else(|| format!("no session {session_id}"))?
+            .dismissed = false;
+        self.changed();
+        Ok(())
     }
 
     pub fn process_exited(&mut self, session_id: &str, pid: u32) {

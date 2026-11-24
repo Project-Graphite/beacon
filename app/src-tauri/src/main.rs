@@ -83,6 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             panel::get_ended,
             panel::acknowledge,
             panel::dismiss,
+            panel::undismiss,
             panel::decide,
             panel::snooze,
             panel::unsnooze,

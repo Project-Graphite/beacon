@@ -311,6 +311,7 @@ export const getEnded = () => invoke<WireSession[]>('get_ended').then((ended) =>
 export const cachedDetail = (sessionId: string) => details.get(sessionId) ?? null;
 export const acknowledge = (sessionId: string) => invoke<void>('acknowledge', { sessionId });
 export const dismiss = (sessionId: string) => invoke<void>('dismiss', { sessionId });
+export const undismiss = (sessionId: string) => invoke<void>('undismiss', { sessionId });
 export const decide = (id: number, decision: Decision) => invoke<void>('decide', { id, decision });
 export const snooze = (sessionId: string | null, minutes: number) =>
   invoke<void>('snooze', { sessionId, minutes });

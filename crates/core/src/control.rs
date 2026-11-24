@@ -30,6 +30,9 @@ pub enum Request {
     Dismiss {
         session_id: String,
     },
+    Undismiss {
+        session_id: String,
+    },
     Snooze {
         session_id: Option<String>,
         minutes: u64,
@@ -336,6 +339,12 @@ mod tests {
                     session_id: "s".to_string(),
                 },
                 r#"{"op":"dismiss","session_id":"s"}"#,
+            ),
+            (
+                Request::Undismiss {
+                    session_id: "s".to_string(),
+                },
+                r#"{"op":"undismiss","session_id":"s"}"#,
             ),
             (Request::RefreshUsage, r#"{"op":"refresh_usage"}"#),
             (
