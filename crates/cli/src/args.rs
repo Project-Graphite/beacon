@@ -13,6 +13,7 @@ Usage:
   beacon decide <id> always \"<Tool(specifier)>\" [--scope session|local|project|user]
   beacon ack <session-id-or-unique-prefix>
   beacon dismiss <session-id-or-unique-prefix>
+  beacon undismiss <session-id-or-unique-prefix>
   beacon jump <session-id-or-unique-prefix>
   beacon where <session-id-or-unique-prefix>
   beacon prompt <session-id-or-unique-prefix> \"<text>\"
@@ -43,6 +44,9 @@ pub enum Command {
         session: String,
     },
     Dismiss {
+        session: String,
+    },
+    Undismiss {
         session: String,
     },
     Jump {
@@ -140,6 +144,9 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             session: session.clone(),
         }),
         ("dismiss", [session]) => Ok(Command::Dismiss {
+            session: session.clone(),
+        }),
+        ("undismiss", [session]) => Ok(Command::Undismiss {
             session: session.clone(),
         }),
         ("jump", [session]) => Ok(Command::Jump {
@@ -329,6 +336,20 @@ mod tests {
         }
         assert!(USAGE.contains("beacon dismiss <session-id-or-unique-prefix>"));
         assert!(USAGE.contains("beacon status [--watch] [--json] [--all]"));
+    }
+
+    #[test]
+    fn undismiss_parses_and_is_in_the_usage() {
+        assert_eq!(
+            parsed(&["undismiss", "4c2c"]),
+            Ok(Command::Undismiss {
+                session: "4c2c".to_string()
+            })
+        );
+        for line in [&["undismiss"][..], &["undismiss", "a", "b"]] {
+            assert!(parsed(line).is_err(), "{line:?}");
+        }
+        assert!(USAGE.contains("beacon undismiss <session-id-or-unique-prefix>"));
     }
 
     #[test]

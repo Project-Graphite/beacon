@@ -65,6 +65,7 @@ fn run(command: Command) -> Result<ExitCode, String> {
         }
         Command::Ack { session } => acknowledge(&beacon_home()?, &session),
         Command::Dismiss { session } => dismiss(&beacon_home()?, &session),
+        Command::Undismiss { session } => undismiss(&beacon_home()?, &session),
         Command::Jump { session } => jump::jump(&beacon_home()?, &session),
         Command::Where { session } => jump::locate(&beacon_home()?, &session),
         Command::Prompt { session, text } => queue_prompt(&beacon_home()?, &session, text),
@@ -178,6 +179,18 @@ fn dismiss(home: &Path, prefix: &str) -> Result<ExitCode, String> {
         },
     )?;
     println!("Session {session_id} hidden until it does something again.");
+    Ok(ExitCode::SUCCESS)
+}
+
+fn undismiss(home: &Path, prefix: &str) -> Result<ExitCode, String> {
+    let session_id = resolve_session(home, prefix)?;
+    request(
+        home,
+        &Request::Undismiss {
+            session_id: session_id.clone(),
+        },
+    )?;
+    println!("Session {session_id} is shown again.");
     Ok(ExitCode::SUCCESS)
 }
 
