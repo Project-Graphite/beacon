@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const STEPS_KEPT: usize = 60;
+const TASKS_KEPT: usize = 100;
 pub const LABEL_CHARS: usize = 200;
 const SUBJECT_CHARS: usize = 120;
 const COMMAND_CHARS: usize = 2_000;
@@ -107,7 +108,7 @@ fn shown_subject(subject: &str) -> String {
 impl Session {
     pub fn create_task(&mut self, id: String, subject: &str) {
         self.tasks.push(Task {
-            id,
+            id: self.task_key(id),
             subject: shown_subject(subject),
             done: false,
         });
@@ -115,15 +116,36 @@ impl Session {
     }
 
     pub fn complete_task(&mut self, id: String, subject: &str) {
-        match self.tasks.iter_mut().find(|task| task.id == id) {
+        let subject = shown_subject(subject);
+        let found = self.tasks.iter_mut().find(|task| {
+            if id.is_empty() {
+                !task.done && task.subject == subject
+            } else {
+                task.id == id
+            }
+        });
+        match found {
             Some(task) => task.done = true,
             None => self.tasks.push(Task {
-                id,
-                subject: shown_subject(subject),
+                id: self.task_key(id),
+                subject,
                 done: true,
             }),
         }
         self.settle_tasks();
+    }
+
+    fn task_key(&self, id: String) -> String {
+        if !id.is_empty() {
+            return id;
+        }
+        let last = self
+            .tasks
+            .iter()
+            .filter_map(|task| task.id.strip_prefix('#')?.parse::<u64>().ok())
+            .max()
+            .unwrap_or(0);
+        format!("#{}", last + 1)
     }
 
     pub fn clear_tasks(&mut self) {
@@ -132,6 +154,10 @@ impl Session {
     }
 
     fn settle_tasks(&mut self) {
+        while self.tasks.len() > TASKS_KEPT {
+            let oldest = self.tasks.iter().position(|task| task.done).unwrap_or(0);
+            self.tasks.remove(oldest);
+        }
         self.tasks_created = self.tasks.len() as u32;
         self.tasks_completed = self.tasks.iter().filter(|task| task.done).count() as u32;
         self.task_current = self

@@ -247,6 +247,7 @@ impl Engine {
         let ended = self.ended_newest_first();
         let shown_ended: HashSet<&str> = ended
             .iter()
+            .filter(|session| !session.dismissed)
             .take(ENDED_IN_SNAPSHOT)
             .map(|session| session.session_id.as_str())
             .collect();

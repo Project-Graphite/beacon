@@ -2956,6 +2956,74 @@ fn a_limited_session_without_a_pid_ends_after_two_listings_without_it() {
     assert_eq!(state(&fixture, "watched"), SessionState::Idle);
 }
 
+#[test]
+fn dismissed_ended_sessions_do_not_take_one_of_the_five_snapshot_places() {
+    let now = now_ms();
+    let ended = (0..7u64).map(|index| Session {
+        dismissed: index >= 5,
+        ..persisted(
+            &format!("ended-{index}"),
+            SessionState::Ended,
+            now - 60_000 + index,
+        )
+    });
+    let fixture = fixture_with(Config::default(), ended.collect());
+    let snapshot = fixture.engine.snapshot();
+    let mut shown: Vec<String> = snapshot
+        .sessions
+        .iter()
+        .map(|session| session.session_id.clone())
+        .collect();
+    shown.sort();
+    assert_eq!(
+        shown,
+        ["ended-0", "ended-1", "ended-2", "ended-3", "ended-4"]
+    );
+    assert_eq!(snapshot.ended_count, 5);
+}
+
+#[test]
+fn tasks_without_an_id_are_told_apart_and_complete_one_each() {
+    let mut fixture = fixture();
+    fixture.send(&custom("TaskCreated", json!({"task_subject": "First"})));
+    fixture.send(&custom("TaskCreated", json!({"task_subject": "Second"})));
+    fixture.send(&custom("TaskCreated", json!({"task_subject": "Second"})));
+    let ids: Vec<String> = fixture.tasks().into_iter().map(|task| task.0).collect();
+    assert_eq!(ids, ["#1", "#2", "#3"]);
+    fixture.send(&custom("TaskCompleted", json!({"task_subject": "Second"})));
+    assert_eq!(
+        fixture
+            .tasks()
+            .into_iter()
+            .map(|task| task.2)
+            .collect::<Vec<_>>(),
+        [false, true, false]
+    );
+    fixture.send(&custom("TaskCompleted", json!({"task_subject": "Second"})));
+    fixture.send(&custom("TaskCompleted", json!({"task_subject": "First"})));
+    let session = fixture.session();
+    assert_eq!((session.tasks_created, session.tasks_completed), (3, 3));
+    fixture.send(&custom("TaskCompleted", json!({"task_subject": "Late"})));
+    assert_eq!(fixture.tasks().last().unwrap().0, "#4");
+}
+
+#[test]
+fn the_task_list_is_capped_and_drops_finished_tasks_first() {
+    let mut fixture = fixture();
+    fixture.send(&task_event("TaskCreated", "keep", "Still open"));
+    for index in 0..150 {
+        let id = index.to_string();
+        fixture.send(&task_event("TaskCreated", &id, "Filler"));
+        fixture.send(&task_event("TaskCompleted", &id, "Filler"));
+    }
+    let tasks = fixture.tasks();
+    assert_eq!(tasks.len(), 100);
+    assert_eq!(tasks[0].0, "keep");
+    assert!(!tasks[0].2);
+    assert_eq!(tasks.last().unwrap().0, "149");
+    assert_eq!(fixture.session().tasks_created, 100);
+}
+
 fn running_session(claude_pid_created: Option<u64>) -> Session {
     Session {
         claude_pid: Some(std::process::id()),
