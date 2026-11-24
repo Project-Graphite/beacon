@@ -15,6 +15,7 @@ const CONNECT_BUDGET: Duration = Duration::from_millis(150);
 const SEND_BUDGET: Duration = Duration::from_secs(2);
 const REPLY_BUDGET: Duration = Duration::from_secs(1);
 const LAUNCH_THROTTLE: Duration = Duration::from_secs(20);
+const RECONNECT_INTERVAL: Duration = Duration::from_secs(2);
 
 static STDOUT: Mutex<()> = Mutex::new(());
 
@@ -89,6 +90,28 @@ fn forward(event: &str, started: Instant, sent: Sender<()>) -> Option<HookReply>
     if !is_waiting_event(event) {
         return None;
     }
+    match HookReply::read_from(&mut pipe) {
+        Ok(reply) => Some(reply),
+        Err(_) if event == STOP_WAITER_EVENT => Some(wait_for_next_core(&home, &request)),
+        Err(_) => None,
+    }
+}
+
+fn wait_for_next_core(home: &Path, request: &HookRequest) -> HookReply {
+    loop {
+        std::thread::sleep(RECONNECT_INTERVAL);
+        if let Some(reply) = register_again(home, request) {
+            return reply;
+        }
+    }
+}
+
+fn register_again(home: &Path, request: &HookRequest) -> Option<HookReply> {
+    let endpoint = Endpoint::read(home)?;
+    let mut pipe =
+        platform::open_pipe(&endpoint.pipe_name, Instant::now() + CONNECT_BUDGET).ok()?;
+    pipe.write_all(&request.encode(&endpoint.token).ok()?)
+        .ok()?;
     HookReply::read_from(&mut pipe).ok()
 }
 

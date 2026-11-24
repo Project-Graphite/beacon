@@ -398,14 +398,47 @@ fn a_new_turn_releases_the_stop_waiter_silently() {
 }
 
 #[test]
-fn a_core_shutdown_releases_the_stop_waiter_silently() {
+fn a_core_shutdown_keeps_the_stop_waiter_waiting_for_the_next_core() {
+    let home = TempHome::new();
+    let core = start_core(&home);
+    let mut waiter = idle_with_a_stop_waiter(&home);
+    core.shutdown().unwrap();
+    std::thread::sleep(Duration::from_millis(2500));
+    assert!(waiter.try_wait().unwrap().is_none(), "the waiter exited");
+    waiter.kill().unwrap();
+    waiter.wait().unwrap();
+}
+
+#[test]
+fn a_stop_waiter_registers_again_with_a_restarted_core_and_is_woken_by_a_prompt() {
     let home = TempHome::new();
     let core = start_core(&home);
     let waiter = idle_with_a_stop_waiter(&home);
     core.shutdown().unwrap();
-    assert!(finished(waiter).stdout.is_empty());
+    let core = start_core(&home);
+    wait_for(&home, |snapshot| {
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.session_id == SESSION && session.can_wake)
+    });
+    let reply = ControlClient::connect(&home.0)
+        .unwrap()
+        .request(&Request::QueuePrompt {
+            session_id: SESSION.to_string(),
+            text: "Reply with \"MANGO\".".to_string(),
+        })
+        .unwrap();
+    assert_eq!(reply.prompt_path, Some(PromptPath::Wake), "{reply:?}");
+    let output = waiter.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "The user sent this follow-up from Beacon: Reply with \"MANGO\"."
+    );
+    assert!(output.stdout.is_empty());
+    core.shutdown().unwrap();
 }
-
 #[test]
 fn without_a_core_a_stop_waiter_exits_at_once() {
     let home = TempHome::new();
