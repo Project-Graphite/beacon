@@ -275,7 +275,7 @@ pub fn in_use(snapshot: Option<&Snapshot>, panel_open: bool) -> bool {
                 || snapshot
                     .sessions
                     .iter()
-                    .any(|session| session.state != SessionState::Ended)
+                    .any(|session| session.state != SessionState::Ended && !session.dismissed)
         })
 }
 
@@ -809,6 +809,10 @@ pub mod tests {
         assert!(in_use(Some(&waiting), false));
         assert!(in_use(
             Some(&snapshot(vec![session("a", SessionState::Idle)])),
+            false
+        ));
+        assert!(!in_use(
+            Some(&snapshot(vec![hidden(session("a", SessionState::Idle))])),
             false
         ));
         let mut unused = Unused::default();
