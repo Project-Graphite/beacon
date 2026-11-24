@@ -138,7 +138,7 @@ pub fn dock<'a>(
     ))
 }
 
-fn find_key<T: Copy>(entries: &[(T, &str, &str)], key: &str) -> Option<T> {
+pub fn find_key<T: Copy>(entries: &[(T, &str, &str)], key: &str) -> Option<T> {
     entries
         .iter()
         .find(|(_, name, _)| *name == key)

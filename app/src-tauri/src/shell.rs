@@ -13,7 +13,9 @@ use crate::platform::{
     self, pill,
     pill::{PillEvent, TabModel},
 };
-use crate::positions::{self, AttentionStyle, StartMode, Style, UiSettings, Visibility};
+use crate::positions::{
+    self, AttentionStyle, StartMode, Style, UiSettings, UiSettingsChange, Visibility,
+};
 use crate::sounds::sound_for;
 use crate::toasts::Toaster;
 use crate::tray::Tray;
@@ -49,13 +51,14 @@ pub enum Action {
     ToastFocus(Option<String>),
     AcknowledgeFocus(Option<String>),
     PeekGains(Vec<String>, Option<String>),
-    TogglePill,
     SetStyle(Style),
     ShowOn(String),
     ToggleAvoided(String),
     MoveToCorner(Corner),
     MoveToEdge(Edge),
     SettingsChanged,
+    ChangeSettings(UiSettingsChange),
+    OpenSettings,
     PreviewAttention,
     Recheck,
     Quit,
@@ -121,6 +124,7 @@ pub struct Shell {
     pin_dismissed: bool,
     pin_released: Option<Instant>,
     revealed: Option<Instant>,
+    settings_requested: bool,
 }
 
 thread_local! {
@@ -174,6 +178,7 @@ impl Shell {
             pin_dismissed: false,
             pin_released: None,
             revealed: None,
+            settings_requested: false,
             feed,
         }
     }
@@ -250,18 +255,11 @@ impl Shell {
                 focused.as_deref(),
             ),
             Action::PeekGains(gained, focused) => self.peek_gains(&gained, focused.as_deref()),
-            Action::TogglePill => {
-                let shown = !pill::user_visible();
-                pill::set_user_visible(shown);
-                self.tray.show_pill_state(shown);
-                self.place();
-            }
             Action::SetStyle(style) => {
                 if let Err(error) = positions::save_style(&self.feed.home, style) {
                     log_error!("cannot save the style: {error}");
                 }
                 pill::set_style(style);
-                self.tray.show_pill_state(pill::user_visible());
                 self.overlay_changed();
             }
             Action::ShowOn(display) => {
@@ -279,9 +277,19 @@ impl Shell {
                 self.overlay_changed();
             }
             Action::SettingsChanged => {
-                self.settings = positions::ui_settings(&self.feed.home);
-                pill::configure(self.settings.clone());
-                self.show_tab();
+                self.apply_settings();
+                self.tray.refresh_menu();
+            }
+            Action::ChangeSettings(change) => {
+                if let Err(error) = positions::save_ui_settings(&self.feed.home, change) {
+                    log_error!("cannot save the settings: {error}");
+                }
+                self.apply_settings();
+                self.overlay_changed();
+            }
+            Action::OpenSettings => {
+                self.settings_requested = true;
+                self.open(Mode::Sticky, true);
             }
             Action::PreviewAttention => self.preview(),
             Action::Recheck => {}
@@ -334,9 +342,15 @@ impl Shell {
         }
     }
 
+    fn apply_settings(&mut self) {
+        self.settings = positions::ui_settings(&self.feed.home);
+        pill::configure(self.settings.clone());
+        self.show_tab();
+    }
+
     fn overlay_changed(&self) {
         self.place();
-        self.tray.refresh_displays();
+        self.tray.refresh_menu();
         if self.panel.is_some()
             && let Err(error) = self.app.emit_to(PANEL, "beacon://settings-changed", ())
         {
@@ -655,6 +669,11 @@ impl Shell {
             if let Err(error) = self.app.emit_to(PANEL, "beacon://opened", payload) {
                 log_error!("cannot tell the panel it opened: {error}");
             }
+        }
+        if std::mem::take(&mut self.settings_requested)
+            && let Err(error) = self.app.emit_to(PANEL, "beacon://open-settings", ())
+        {
+            log_error!("cannot tell the panel to show its settings: {error}");
         }
     }
 

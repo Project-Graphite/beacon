@@ -129,7 +129,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .setup(move |app| {
             let handle = app.handle().clone();
             let pill_shown = !options.tray_only;
-            let tray = tray::build(&handle, feed.home.clone(), pill_shown)?;
+            let tray = tray::build(&handle, feed.home.clone())?;
             platform::pill::create(feed.home.clone(), pill_shown, |event| {
                 shell::dispatch(Action::Pill(event))
             })?;

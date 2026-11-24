@@ -412,17 +412,6 @@ pub fn set_panel_open(open: bool) {
     });
 }
 
-pub fn set_user_visible(visible: bool) {
-    with_pill(|pill| {
-        pill.user_visible = visible;
-        pill.sync();
-    });
-}
-
-pub fn user_visible() -> bool {
-    with_pill(|pill| pill.user_visible).unwrap_or(false)
-}
-
 pub fn set_style(style: Style) {
     with_pill(|pill| {
         pill.style = style;
@@ -884,6 +873,8 @@ impl Pill {
         let fading_out = self.fade.target() == 0.0;
         if self.shown && fading_out && !self.fade.moving(now) {
             self.shown = false;
+            self.hovering = false;
+            self.tracking = false;
             self.layer.show(false);
         }
         let framing = (self.shown && (self.fade.moving(now) || (!fading_out && self.moving(now))))

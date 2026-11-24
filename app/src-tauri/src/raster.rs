@@ -1,7 +1,7 @@
 use crate::geometry::Edge;
 use crate::model::{Mark, MarkKind, PillModel, TabTone, TrayState};
 use crate::motion::Curve;
-use std::f32::consts::{PI, TAU};
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
@@ -811,13 +811,9 @@ pub fn paint_peek(
     canvas.paint_mask(&mask, text_left, palette.ink);
 }
 
-pub fn render_tray(
-    state: TrayState,
-    size: usize,
-    text: &dyn TextRasterizer,
-    theme: Theme,
-) -> Canvas {
-    const CENTRE: [f32; 2] = [8.0, 8.0];
+pub fn render_tray(state: TrayState, size: usize, theme: Theme) -> Canvas {
+    const PLATE: [f32; 4] = [8.0, 8.0, 8.0, 8.0];
+    const CORE: [f32; 2] = [4.5, 11.5];
     let palette = theme.palette();
     let mut canvas = Canvas::new(size, size);
     let unit = size as f32 / TRAY_UNITS;
@@ -832,23 +828,21 @@ pub fn render_tray(
             distance,
         )
     };
-    match state {
-        TrayState::Quiet => shape(palette.muted, &|x, y| ring(x, y, CENTRE, 5.5, 2.0)),
-        TrayState::Working => shape(palette.ink, &|x, y| ring(x, y, CENTRE, 5.5, 2.0)),
-        TrayState::Error => shape(palette.danger, &|x, y| {
-            triangle(x, y, [[1.0, 14.5], [15.0, 14.5], [8.0, 1.5]])
-        }),
-        TrayState::Alerting(count) => {
-            shape(palette.wip, &|x, y| circle(x, y, CENTRE, 7.5));
-            let label = if count > 9 {
-                "9+".to_string()
-            } else {
-                count.to_string()
-            };
-            let mask = text.rasterize(&label, 10.0 * unit);
-            let left = size.saturating_sub(mask.width) as f32 / 2.0;
-            canvas.paint_mask(&mask, left, palette.paper);
-        }
+    let tint = match state {
+        TrayState::Quiet => palette.muted,
+        TrayState::Working => palette.ink,
+        TrayState::Error => palette.danger,
+        TrayState::Alerting(_) => palette.wip,
+    };
+    shape(palette.line, &|x, y| rounded_box(x, y, PLATE, 3.5));
+    shape(palette.surface, &|x, y| {
+        rounded_box(x, y, [8.0, 8.0, 7.25, 7.25], 2.75)
+    });
+    shape(tint, &|x, y| circle(x, y, CORE, 1.7));
+    for radius in [4.6, 8.0] {
+        shape(tint, &|x, y| {
+            arc(x, y, CORE, radius, 1.5, -FRAC_PI_2, FRAC_PI_2)
+        });
     }
     canvas
 }
@@ -1239,37 +1233,47 @@ mod tests {
     }
 
     #[test]
-    fn tray_icons_follow_the_tray_state() {
+    fn tray_icons_are_a_core_with_two_arcs_on_a_plate_tinted_by_state_and_theme() {
+        let light = Theme::Light.palette();
         for size in [16, 24, 32] {
             let unit = size as f32 / 16.0;
-            let at = |state: TrayState, x: f32, y: f32| {
+            let at = |state: TrayState, theme: Theme, x: f32, y: f32| {
                 straight(
-                    &render_tray(state, size, &BlockText, Theme::Dark),
+                    &render_tray(state, size, theme),
                     (x * unit) as usize,
                     (y * unit) as usize,
                 )
             };
-            assert!(
-                close_to(at(TrayState::Quiet, 13.5, 8.0), MUTED, 3),
-                "{size}"
-            );
-            assert_eq!(at(TrayState::Quiet, 8.0, 8.0)[3], 0);
-            assert!(
-                close_to(at(TrayState::Working, 13.5, 8.0), INK, 3),
-                "{size}"
-            );
-            assert!(
-                close_to(at(TrayState::Alerting(3), 8.0, 1.5), WIP, 3),
-                "{size}"
-            );
-            assert!(
-                close_to(at(TrayState::Alerting(12), 8.0, 8.0), PAPER, 3),
-                "{size}"
-            );
-            assert!(
-                close_to(at(TrayState::Error, 8.0, 10.0), DANGER, 3),
-                "{size}"
-            );
+            let core = |state: TrayState, theme: Theme| at(state, theme, 4.5, 11.5);
+            assert!(close_to(core(TrayState::Quiet, Theme::Dark), MUTED, 3));
+            assert!(close_to(core(TrayState::Working, Theme::Dark), INK, 3));
+            assert!(close_to(core(TrayState::Alerting(3), Theme::Dark), WIP, 3));
+            assert!(close_to(core(TrayState::Alerting(12), Theme::Dark), WIP, 3));
+            assert!(close_to(core(TrayState::Error, Theme::Dark), DANGER, 3));
+            assert!(close_to(
+                core(TrayState::Working, Theme::Light),
+                light.ink,
+                3
+            ));
+            assert!(close_to(
+                core(TrayState::Alerting(1), Theme::Light),
+                light.wip,
+                3
+            ));
+            for (x, y) in [(4.5, 3.5), (12.5, 11.5)] {
+                assert!(
+                    close_to(at(TrayState::Alerting(1), Theme::Dark, x, y), WIP, 3),
+                    "{size} at {x},{y}"
+                );
+            }
+            let plate = at(TrayState::Working, Theme::Dark, 9.5, 14.0);
+            assert!(close_to(plate, SURFACE, 2) && plate[3] == 255, "{size}");
+            assert!(close_to(
+                at(TrayState::Working, Theme::Light, 9.5, 14.0),
+                light.surface,
+                2
+            ));
+            assert_eq!(at(TrayState::Quiet, Theme::Dark, 0.0, 0.0)[3], 0);
         }
     }
 
