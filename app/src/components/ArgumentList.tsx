@@ -4,7 +4,7 @@ export function ArgumentList({ entries }: { entries: [string, string][] }) {
     <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 rounded-field bg-surface px-2 py-1.5 font-mono text-micro">
       {entries.map(([key, value]) => (
         <div key={key} className="contents">
-          <dt className="text-muted">{key}</dt>
+          <dt className="text-muted [overflow-wrap:anywhere]">{key}</dt>
           <dd className="text-ink [overflow-wrap:anywhere]">{value}</dd>
         </div>
       ))}

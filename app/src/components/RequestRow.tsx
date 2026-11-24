@@ -21,7 +21,7 @@ interface RequestRowProps {
 export function RequestRow({ request, marked, currentId, keys, onOpen }: RequestRowProps) {
   const [outcome, setOutcome] = useState<'check' | 'cross' | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  const [armed, setArmed] = useArmed(currentId);
+  const [armed, setArmed, ready] = useArmed(currentId);
   const destructive = request.kind === 'tool' ? destructiveReason(request.tool_name, request.tool_input, request.cwd) : null;
   const line = failure ?? redact(requestLine(request));
   const send = (decision: Decision) => {
@@ -34,7 +34,7 @@ export function RequestRow({ request, marked, currentId, keys, onOpen }: Request
   };
   const allow = () => {
     if (destructive && !armed) setArmed(true);
-    else send({ type: 'allow' });
+    else if (!destructive || ready) send({ type: 'allow' });
   };
 
   useEffect(() => {

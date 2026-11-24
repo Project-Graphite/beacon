@@ -353,6 +353,7 @@ export const setDisplay = (id: string) => invoke<void>('set_display', { id });
 export const setDisplayAvoided = (id: string, avoided: boolean) => invoke<void>('set_display_avoided', { id, avoided });
 export const setOverlayPosition = (position: OverlayPosition) => invoke<void>('set_overlay_position', { position });
 export const quitApp = () => invoke<void>('quit_app');
+export const setHotkeyPaused = (paused: boolean) => invoke<void>('set_hotkey_paused', { paused });
 
 export const onSnapshot = (handler: (snapshot: Snapshot | null) => void): Promise<UnlistenFn> =>
   listen<WireSnapshot | null>('beacon://snapshot', (event) => handler(event.payload && snapshotFrom(event.payload)));
@@ -366,5 +367,5 @@ export const onClosing = (handler: () => void): Promise<UnlistenFn> => listen('b
 
 export const onOpenSettings = (handler: () => void): Promise<UnlistenFn> => listen('beacon://open-settings', handler);
 
-export const onSettingsChanged = (handler: () => void): Promise<UnlistenFn> =>
-  listen('beacon://settings-changed', handler);
+export const onSettingsChanged = (handler: (settings: UiSettings | null) => void): Promise<UnlistenFn> =>
+  listen<Partial<UiSettings> | null>('beacon://settings-changed', ({ payload }) => handler(payload ? uiSettings(payload) : null));

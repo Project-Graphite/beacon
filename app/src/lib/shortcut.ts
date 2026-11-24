@@ -55,10 +55,34 @@ export function recordShortcut(press: KeyPress): Recorded {
   const key = keyName(press.code);
   if (key === null) return { kind: 'invalid', reason: 'That key cannot be used in a shortcut' };
   const functionKey = /^F\d+$/.test(key);
-  if (!functionKey && !press.ctrlKey && !press.altKey && !press.metaKey) {
-    return { kind: 'invalid', reason: 'Hold Ctrl, Alt or Win with the key' };
+  const anchored = press.ctrlKey || press.altKey || press.metaKey;
+  if (!anchored || (!functionKey && modifiers.length < 2)) {
+    return { kind: 'invalid', reason: functionKey ? 'Hold Ctrl, Alt or Win with the key' : 'Hold two of Ctrl, Alt, Shift or Win with the key' };
   }
   return { kind: 'shortcut', text: [...modifiers, key].join('+') };
 }
 
-export const shortcutKeys = (shortcut: string) => shortcut.split('+').filter(Boolean);
+const KEY_LABELS: Record<string, string> = {
+  Super: 'Win',
+  Backquote: '`',
+  Minus: '-',
+  Equal: '=',
+  BracketLeft: '[',
+  BracketRight: ']',
+  Backslash: '\\',
+  Semicolon: ';',
+  Quote: "'",
+  Comma: ',',
+  Period: '.',
+  Slash: '/',
+  Up: '↑',
+  Down: '↓',
+  Left: '←',
+  Right: '→',
+};
+
+export const shortcutKeys = (shortcut: string) =>
+  shortcut
+    .split('+')
+    .filter(Boolean)
+    .map((key) => KEY_LABELS[key] ?? key);

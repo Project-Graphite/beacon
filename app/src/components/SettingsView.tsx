@@ -11,6 +11,7 @@ import {
   setConfig,
   setDisplay,
   setDisplayAvoided,
+  setHotkeyPaused,
   setOverlayPosition,
   setStyle,
   type AppInfo,
@@ -390,7 +391,14 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
           )}
         </SettingsRow>
         <SettingsRow label="Shortcut" help="Opens and closes the panel from anywhere. Click it, then press the keys.">
-          {(field) => <ShortcutRecorder field={field} value={ui.hotkey} onRecord={(hotkey) => change('behaviour', { hotkey })} />}
+          {(field) => (
+            <ShortcutRecorder
+              field={field}
+              value={ui.hotkey}
+              onRecord={(hotkey) => change('behaviour', { hotkey })}
+              onPause={(paused) => attempt('behaviour', setHotkeyPaused(paused))}
+            />
+          )}
         </SettingsRow>
       </SettingsSection>
       <HooksSection open={openParts.includes('hooks')} onToggle={() => onToggle('hooks')} />

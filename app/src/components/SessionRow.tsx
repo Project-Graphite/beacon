@@ -8,6 +8,7 @@ import { ProgressBar } from './ProgressBar';
 import { RequestRow } from './RequestRow';
 import { SessionActions } from './SessionActions';
 import { StepLabel } from './StepLabel';
+import { TextButton } from './TextButton';
 import { TurnTime } from './TurnTime';
 
 interface SessionRowProps {
@@ -22,6 +23,7 @@ interface SessionRowProps {
   onOpen: (sessionId: string) => Promise<void>;
   onJump: (sessionId: string) => void;
   onCrossOff: (sessionId: string) => void;
+  onRestore: (sessionId: string) => void;
 }
 
 export const SessionRow = memo(function SessionRow({
@@ -36,6 +38,7 @@ export const SessionRow = memo(function SessionRow({
   onOpen,
   onJump,
   onCrossOff,
+  onRestore,
 }: SessionRowProps) {
   const line = rowLine(session);
   const alert = needsInput(session);
@@ -75,7 +78,11 @@ export const SessionRow = memo(function SessionRow({
               )}
             </p>
           </div>
-          {!crossedOff && (
+          {crossedOff ? (
+            <TextButton title="Show it in the list again" onClick={() => onRestore(session.session_id)}>
+              Show
+            </TextButton>
+          ) : (
             <SessionActions
               requestPending={pending.length > 0}
               onJump={() => onJump(session.session_id)}

@@ -31,7 +31,7 @@ export function MessageField({ label, placeholder, sendLabel, disabled, onSend, 
             onCancel();
           }
         }}
-        className="h-6 min-w-0 flex-1 rounded-field border border-line bg-paper px-2 text-secondary text-ink placeholder:text-faint focus:border-muted focus:outline-none"
+        className="h-7 min-w-0 flex-1 rounded-field border border-line bg-raised px-2.5 text-secondary text-ink shadow-card placeholder:text-faint focus:border-faint focus:outline-none"
       />
       <OutlineButton disabled={disabled || !message.trim()} onClick={send}>
         {sendLabel}

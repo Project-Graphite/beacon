@@ -7,7 +7,7 @@
   --color-line-soft: #202026;
   --color-ink: #ececef;
   --color-muted: #9b9ba5;
-  --color-faint: #82828c;
+  --color-faint: #8b8b95;
   --color-danger: #f2a09a;
   --color-live: #4cc283;
   --color-wip: #e0ad52;
@@ -171,16 +171,27 @@
     --color-line: #dcdce2;
     --color-line-soft: #e6e6eb;
     --color-ink: #18181b;
-    --color-muted: #5f5f69;
-    --color-faint: #6c6c76;
-    --color-danger: #c2453b;
-    --color-live: #1f8a54;
-    --color-wip: #a8741c;
+    --color-muted: #55555f;
+    --color-faint: #62626c;
+    --color-danger: #ad3a31;
+    --color-live: #187045;
+    --color-wip: #8a5a0a;
+    --color-highlight: #7a5c0c;
     --color-dormant: #a0a0a8;
     --color-raised: #ffffff;
     --color-sheen: rgb(255 255 255 / 0.7);
     --shadow-popover: 0 16px 36px -14px rgb(24 24 27 / 0.28), 0 2px 6px -2px rgb(24 24 27 / 0.12);
     --shadow-card: 0 1px 2px rgb(24 24 27 / 0.08);
+  }
+}
+
+:root {
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
   }
 }
 
@@ -313,6 +324,7 @@ textarea {
 }
 
 :root[data-hidden] *,
+[data-offscreen],
 [data-offscreen] * {
   animation-play-state: paused;
 }

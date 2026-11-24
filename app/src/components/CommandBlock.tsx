@@ -7,7 +7,7 @@ const TOKEN_CLASSES: Record<TokenKind, string | undefined> = {
   command: 'text-ink',
   word: 'text-ink/80',
   flag: 'text-muted',
-  string: 'text-live/75',
+  string: 'text-live',
   operator: 'text-wip',
   variable: 'text-highlight',
   comment: 'text-faint',

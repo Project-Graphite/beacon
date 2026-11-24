@@ -19,6 +19,7 @@ import {
   onClosing,
   onOpened,
   onOpenSettings,
+  onSettingsChanged,
   onSnapshot,
   setUiSettings,
   snooze,
@@ -227,6 +228,7 @@ export function App() {
 
   useEffect(() => {
     const syncHidden = () => document.documentElement.toggleAttribute('data-hidden', document.hidden);
+    syncHidden();
     document.addEventListener('visibilitychange', syncHidden);
     return () => document.removeEventListener('visibilitychange', syncHidden);
   }, []);
@@ -287,9 +289,12 @@ export function App() {
 
   const crossOff = (sessionId: string) => {
     const session = findSession(sessions, ended, sessionId);
+    const index = visible.findIndex((row) => row.session_id === sessionId);
+    const neighbour = index === -1 ? null : (visible[index + 1] ?? visible[index - 1] ?? null);
     run(
       dismiss(sessionId).then(() => {
         if (opening.current === sessionId) opening.current = null;
+        setSelectedId((selected) => (selected === sessionId ? (neighbour?.session_id ?? null) : selected));
         setOpenId((open) => (open === sessionId ? null : open));
         window.clearTimeout(hiddenTimer.current);
         setHidden({ sessionId, title: session ? sessionTitle(session) : sessionId.slice(0, 8) });
@@ -326,13 +331,19 @@ export function App() {
     run(jump(sessionId).then((outcome) => reportJump(sessionId, jumpReport(outcome))));
   };
 
-  const rowActions = useRef({ openDetail, jumpTo, crossOff, openSettings });
+  const rowActions = useRef({ openDetail, jumpTo, crossOff, openSettings, undoHide });
   useLayoutEffect(() => {
-    rowActions.current = { openDetail, jumpTo, crossOff, openSettings };
+    rowActions.current = { openDetail, jumpTo, crossOff, openSettings, undoHide };
   });
   const openRow = useCallback((sessionId: string) => rowActions.current.openDetail(sessionId), []);
   const jumpRow = useCallback((sessionId: string) => rowActions.current.jumpTo(sessionId), []);
   const crossOffRow = useCallback((sessionId: string) => rowActions.current.crossOff(sessionId), []);
+  const restoreRow = useCallback((sessionId: string) => rowActions.current.undoHide(sessionId), []);
+
+  useEffect(() => {
+    const subscription = onSettingsChanged((settings) => settings && setUi(settings));
+    return () => void subscription.then((unlisten) => unlisten());
+  }, []);
 
   useEffect(() => {
     const subscription = onOpenSettings(() => rowActions.current.openSettings());
@@ -357,12 +368,12 @@ export function App() {
         if (event.key === 'Enter' || event.key === ' ') event.preventDefault();
         return;
       }
-      if (settingsOpen) {
-        if (event.key === 'Escape') setSettingsOpen(false);
-        return;
-      }
       if (event.key === 'Escape' && isTextField(event.target)) {
         event.target.blur();
+        return;
+      }
+      if (settingsOpen) {
+        if (event.key === 'Escape') setSettingsOpen(false);
         return;
       }
       if (event.ctrlKey || event.altKey || event.metaKey || isTextField(event.target)) return;
@@ -496,6 +507,7 @@ export function App() {
         onOpen={openRow}
         onJump={jumpRow}
         onCrossOff={crossOffRow}
+        onRestore={restoreRow}
       />
     );
     return (
@@ -546,25 +558,27 @@ export function App() {
           <div ref={scroller} className="scroll-list min-h-0 flex-1 scroll-py-4 overflow-x-hidden overflow-y-auto">
             <div ref={content} className="relative">
               {failure && (
-                <p title={failure} className="origin-top animate-appear truncate border-b border-line-soft px-4 py-2 text-secondary text-danger">
+                <p className="origin-top animate-appear border-b border-line-soft px-4 py-2 text-secondary text-danger [overflow-wrap:anywhere]">
                   {failure}
                 </p>
-              )}
-              {hidden && (
-                <div
-                  role="status"
-                  className="flex origin-top animate-appear items-center gap-3 border-b border-line-soft bg-surface px-4 py-2 text-secondary"
-                >
-                  <p className="min-w-0 flex-1 truncate text-muted">
-                    <span className="text-ink">{hidden.title}</span> is hidden until its next prompt
-                  </p>
-                  <TextButton onClick={() => undoHide(hidden.sessionId)}>Undo</TextButton>
-                </div>
               )}
               <ViewStack key={viewReset} view={view} scroller={scroller} render={renderView} />
               <div ref={ghosts} aria-hidden="true" className="pointer-events-none absolute inset-0" />
             </div>
           </div>
+          {hidden && (
+            <div
+              role="status"
+              onPointerEnter={() => window.clearTimeout(hiddenTimer.current)}
+              onPointerLeave={() => (hiddenTimer.current = window.setTimeout(() => setHidden(null), HIDDEN_NOTICE_MS))}
+              className="absolute inset-x-3 bottom-3 z-30 flex origin-bottom animate-appear items-center gap-3 rounded-[10px] border border-line bg-raised py-2 pr-3 pl-3.5 text-secondary shadow-popover"
+            >
+              <p className="min-w-0 flex-1 truncate text-muted">
+                <span className="text-ink">{hidden.title}</span> is hidden until its next prompt
+              </p>
+              <TextButton onClick={() => undoHide(hidden.sessionId)}>Undo</TextButton>
+            </div>
+          )}
           <div aria-hidden="true" className="scroll-thumb" />
         </div>
       </section>

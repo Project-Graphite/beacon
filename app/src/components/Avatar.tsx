@@ -6,7 +6,9 @@ import { StateMark } from './StateMark';
 
 const SIZES = { tab: 16, row: 28, header: 40 } as const;
 
-const STROKE = { fill: 'none', stroke: 'var(--color-paper)', strokeWidth: 1.5, strokeLinecap: 'round' } as const;
+const FACE = '#141418';
+
+const STROKE = { fill: 'none', stroke: FACE, strokeWidth: 1.5, strokeLinecap: 'round' } as const;
 
 const FLAT_MOUTH = <path d="M8.5 13.75h3" {...STROKE} />;
 
@@ -87,7 +89,7 @@ export function Avatar({ session, size, ringed }: AvatarProps) {
         className={`block ${kind === 'alarmed' && faces.entries > 0 ? 'animate-wiggle' : ''}`}
       >
         <rect width="20" height="20" rx="5" fill={avatarHue(session.session_id)} />
-        <g fill="var(--color-paper)">{face(kind, session.session_id)}</g>
+        <g fill={FACE}>{face(kind, session.session_id)}</g>
       </svg>
       {size !== 'tab' && (
         <span className="absolute -right-[5px] -bottom-[5px] rounded-full bg-paper p-[1.5px]">

@@ -22,12 +22,12 @@ interface ToolActionsProps {
 
 export function ToolActions({ request, destructive, currentId, sending, keys, send, onJump }: ToolActionsProps) {
   const [mode, setMode] = useState<'buttons' | 'rule' | 'message'>('buttons');
-  const [armed, setArmed] = useArmed(currentId);
+  const [armed, setArmed, ready] = useArmed(currentId);
   const [more, setMore] = useState(false);
 
   const allow = () => {
     if (destructive && !armed) setArmed(true);
-    else send({ type: 'allow' });
+    else if (!destructive || ready) send({ type: 'allow' });
   };
 
   useEffect(() => {

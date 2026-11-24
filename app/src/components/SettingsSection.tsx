@@ -40,7 +40,7 @@ export function SettingsSection({ label, summary, open, onToggle, error, childre
         </Collapse>
       </div>
       {error && (
-        <p role="alert" title={error} className="truncate px-4 pb-2.5 text-secondary text-danger">
+        <p role="alert" title={error} className="px-4 pb-2.5 text-secondary text-danger [overflow-wrap:anywhere]">
           {error}
         </p>
       )}

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { Session } from '../beacon';
 import { needsInput, sessionTitle } from '../lib/sessions.ts';
 import { Avatar } from './Avatar';
@@ -9,8 +10,12 @@ interface SessionTabsProps {
 }
 
 export function SessionTabs({ tabs, currentId, onSwitch }: SessionTabsProps) {
+  const strip = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    strip.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [currentId]);
   return (
-    <div role="tablist" aria-label="Sessions" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden px-0.5">
+    <div ref={strip} role="tablist" aria-label="Sessions" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-0.5">
       {tabs.map((tab) => (
         <button
           key={tab.session_id}
