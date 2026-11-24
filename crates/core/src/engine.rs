@@ -35,6 +35,7 @@ const ENDED_KEPT_MS: u64 = 2 * 60 * 60 * 1000;
 const ENDED_KEPT: usize = 20;
 const ENDED_IN_SNAPSHOT: usize = 5;
 const TIMELINE_KEPT: usize = 60;
+const LISTINGS_MISSED_BEFORE_ENDING: u32 = 2;
 const LAST_MESSAGE_BYTES: usize = 64 * 1024;
 const USAGE_EVENTS: [&str; 4] = ["Stop", "SubagentStop", "PostToolBatch", "SessionEnd"];
 const LOCATION_EVENTS: [&str; 3] = ["SessionStart", "UserPromptSubmit", "Stop"];
@@ -89,6 +90,7 @@ struct Runtime {
     image_read: bool,
     titled_by_hook: bool,
     transcript_sought: bool,
+    missed_listings: u32,
 }
 
 enum Followup {
@@ -1361,13 +1363,23 @@ impl Engine {
         for (session_id, pid) in watches {
             self.watch_process(&session_id, pid);
         }
+        for session_id in self.sessions.keys() {
+            let runtime = self.runtime.entry(session_id.clone()).or_default();
+            runtime.missed_listings = if listed_ids.contains(session_id) {
+                0
+            } else {
+                runtime.missed_listings + 1
+            };
+        }
         let gone: Vec<String> = self
             .sessions
             .values()
             .filter(|session| {
-                !session.limited
-                    && session.state != SessionState::Ended
+                session.state != SessionState::Ended
                     && !listed_ids.contains(&session.session_id)
+                    && (!session.limited
+                        || self.runtime[&session.session_id].missed_listings
+                            >= LISTINGS_MISSED_BEFORE_ENDING)
                     && !session
                         .claude_pid
                         .is_some_and(|pid| process_alive(pid, session.claude_pid_created))

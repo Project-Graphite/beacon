@@ -2922,6 +2922,40 @@ fn a_prompt_for_a_waiter_whose_hook_is_gone_fails_instead_of_counting_as_deliver
     assert!(!fixture.can_wake());
 }
 
+#[test]
+fn a_limited_session_without_a_pid_ends_after_two_listings_without_it() {
+    let mut fixture = fixture();
+    let own_pid = std::process::id();
+    let listing = |ids: &[&str]| -> Vec<ListedSession> {
+        ids.iter()
+            .map(|id| {
+                let pid = if *id == "pidless" {
+                    None
+                } else {
+                    Some(own_pid)
+                };
+                listed(id, pid, "idle")
+            })
+            .collect()
+    };
+    fixture
+        .engine
+        .reconcile(listing(&["pidless", "watched"]), now_ms());
+    let state = |fixture: &Fixture, id: &str| fixture.engine.sessions[id].state;
+    fixture.engine.reconcile(listing(&["watched"]), now_ms());
+    assert_eq!(state(&fixture, "pidless"), SessionState::Idle);
+    fixture
+        .engine
+        .reconcile(listing(&["pidless", "watched"]), now_ms());
+    fixture.engine.reconcile(listing(&["watched"]), now_ms());
+    assert_eq!(state(&fixture, "pidless"), SessionState::Idle);
+    fixture.engine.reconcile(listing(&["watched"]), now_ms());
+    assert_eq!(state(&fixture, "pidless"), SessionState::Ended);
+    fixture.engine.reconcile(Vec::new(), now_ms());
+    fixture.engine.reconcile(Vec::new(), now_ms());
+    assert_eq!(state(&fixture, "watched"), SessionState::Idle);
+}
+
 fn running_session(claude_pid_created: Option<u64>) -> Session {
     Session {
         claude_pid: Some(std::process::id()),
