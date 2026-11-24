@@ -22,25 +22,36 @@ use beacon_core::BACKGROUND_ARG;
 use feed::Feed;
 use shell::{Action, Shell};
 use tauri::{Manager, RunEvent, WindowEvent};
+use tauri_plugin_notification::NotificationExt;
 
+#[derive(Debug)]
 struct Options {
     tray_only: bool,
     open_panel: bool,
     list_displays: bool,
 }
 
+const TOAST_ACTIVATED_ARGS: [&str; 2] = ["-toastactivated", "-embedding"];
+
 fn options() -> Result<Options, String> {
+    parse_options(std::env::args().skip(1))
+}
+
+fn parse_options(arguments: impl Iterator<Item = String>) -> Result<Options, String> {
     let mut options = Options {
         tray_only: false,
         open_panel: false,
         list_displays: false,
     };
-    for argument in std::env::args().skip(1) {
+    for argument in arguments {
         match argument.as_str() {
             "--tray-only" => options.tray_only = true,
             "--open-panel" => options.open_panel = true,
             "--list-displays" => options.list_displays = true,
             BACKGROUND_ARG => {}
+            other if TOAST_ACTIVATED_ARGS.contains(&other.to_ascii_lowercase().as_str()) => {
+                options.open_panel = true;
+            }
             other => {
                 return Err(format!(
                     "unknown option {other}; expected --tray-only, --open-panel, --background or --list-displays"
@@ -123,6 +134,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 shell::dispatch(Action::Pill(event))
             })?;
             shell::install(Shell::new(handle.clone(), feed.clone(), tray));
+            let clicked = handle.clone();
+            handle
+                .notification()
+                .on_action(move |_| shell::post(&clicked, Action::OpenPanel))?;
             if let Err(error) = settings::register_hotkey(&handle, &positions::hotkey(&feed.home)) {
                 log_error!("{error}");
             }
@@ -159,4 +174,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parsed(arguments: &[&str]) -> Result<Options, String> {
+        parse_options(arguments.iter().map(|argument| argument.to_string()))
+    }
+
+    #[test]
+    fn toast_activation_arguments_open_the_panel_instead_of_failing() {
+        for argument in ["-ToastActivated", "-toastactivated", "-Embedding"] {
+            assert!(parsed(&[argument]).unwrap().open_panel, "{argument}");
+        }
+    }
+
+    #[test]
+    fn known_options_still_parse_and_unknown_ones_still_fail() {
+        let options = parsed(&["--tray-only", "--background"]).unwrap();
+        assert!(options.tray_only && !options.open_panel && !options.list_displays);
+        assert!(parsed(&["--list-displays"]).unwrap().list_displays);
+        assert!(
+            parsed(&["--wat"])
+                .unwrap_err()
+                .contains("unknown option --wat")
+        );
+    }
 }
