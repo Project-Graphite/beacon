@@ -829,6 +829,44 @@ fn huge_strings_are_bounded() {
 }
 
 #[test]
+fn the_last_message_the_mcp_form_message_and_the_api_error_are_redacted() {
+    let mut fixture = fixture();
+    fixture.send(&custom(
+        "Elicitation",
+        json!({"mcp_server_name": "github", "message": "Use GITHUB_TOKEN=ghp_0123456789abcdefABCDEF for this?"}),
+    ));
+    assert_eq!(
+        fixture.session().mcp_request.unwrap().message,
+        "Use GITHUB_TOKEN=*** for this?"
+    );
+    fixture.send(&custom(
+        "StopFailure",
+        json!({"error": "rejected key sk-ant-api03-abcdefghijklmnop"}),
+    ));
+    assert_eq!(
+        fixture.session().last_error.as_deref(),
+        Some("rejected key ***")
+    );
+    fixture.send(&custom(
+        "Stop",
+        json!({"last_assistant_message": format!("{} ghp_0123456789abcdefABCDEF", "a".repeat(390))}),
+    ));
+    let masked = format!("{} ***", "a".repeat(390));
+    assert_eq!(
+        fixture.session().last_message_preview.as_deref(),
+        Some(masked.as_str())
+    );
+    let detail = fixture
+        .engine
+        .control(Request::Detail {
+            session_id: SESSION.to_string(),
+        })
+        .detail
+        .unwrap();
+    assert_eq!(detail.last_message.as_deref(), Some(masked.as_str()));
+}
+
+#[test]
 fn registry_persists_and_reloads() {
     let mut fixture = fixture();
     fixture.send_with_env(

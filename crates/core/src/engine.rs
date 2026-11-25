@@ -896,7 +896,7 @@ impl Engine {
                 last_assistant_message,
                 background_tasks,
             } => {
-                if let Some(mut message) = last_assistant_message {
+                if let Some(mut message) = last_assistant_message.as_deref().map(redact) {
                     session.set_preview(&message);
                     message.truncate(message.floor_char_boundary(LAST_MESSAGE_BYTES));
                     self.runtime
@@ -924,7 +924,7 @@ impl Engine {
                 }
             }
             Event::StopFailure { error } => {
-                session.last_error = error;
+                session.last_error = error.as_deref().map(redact);
                 (Some(Input::StopFailed), Followup::Nothing)
             }
             Event::SessionEnd { .. } => (Some(Input::SessionEnded), Followup::Nothing),
@@ -943,7 +943,7 @@ impl Engine {
                 session.dismissed = false;
                 session.mcp_request = Some(McpRequest {
                     server: mcp_server_name.unwrap_or_default(),
-                    message: message.unwrap_or_default(),
+                    message: message.as_deref().map(redact).unwrap_or_default(),
                 });
                 (Some(Input::ElicitationRequested), Followup::Nothing)
             }
