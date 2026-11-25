@@ -28,6 +28,7 @@ export default defineConfig({
     },
   },
   build: {
+    outDir: 'dist-preview',
     rollupOptions: { input: { index: here('../index.html'), demo: here('./demo.html') } },
   },
   clearScreen: false,

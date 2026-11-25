@@ -14,7 +14,7 @@ const usage = (context: number, output: number) => ({
   status: 'ok',
 });
 
-const session = (fields: Record<string, unknown>) => ({
+const session = <Fields extends Record<string, unknown>>(fields: Fields) => ({
   overlays: { compacting: false, subagents: 0, background_tasks: 0 },
   attended: true,
   permission_mode: 'default',

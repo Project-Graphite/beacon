@@ -1,3 +1,4 @@
+import { version } from '../package.json';
 import { detail, ended, hooks, overlay, snapshot, ui } from './fixture';
 import { emit } from './tauri-event';
 
@@ -16,7 +17,7 @@ const answers: Record<string, (args: Record<string, unknown>) => unknown> = {
   hooks_status: () => hooks,
   hooks_plan: () => 'No change to the settings file.',
   hooks_apply: () => hooks,
-  app_info: () => ({ version: '0.2.0', home: 'C:\\Users\\you\\AppData\\Local\\Beacon' }),
+  app_info: () => ({ version, home: 'C:\\Users\\you\\AppData\\Local\\Beacon' }),
   get_overlay: () => overlay,
   set_ui_settings: ({ change }) => Object.assign(settings, change),
   dismiss: ({ sessionId }) => hide(String(sessionId), true),

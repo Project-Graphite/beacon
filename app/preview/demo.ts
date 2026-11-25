@@ -110,7 +110,7 @@ async function clickPanel(selector: string, text?: string) {
 async function still() {
   const busy = () =>
     inner()
-      .getAnimations({ subtree: true })
+      .getAnimations()
       .some(
         (animation) =>
           animation.playState === 'running' &&
@@ -238,3 +238,5 @@ async function play() {
 drawPill();
 place(position);
 Object.assign(window, { demo: { ready, play } });
+
+export {};
