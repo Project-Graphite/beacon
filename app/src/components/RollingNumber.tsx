@@ -11,7 +11,7 @@ export function RollingNumber({ value }: { value: number }) {
       className="relative inline-flex overflow-hidden tabular-nums"
     >
       {direction && (
-        <span key={`${shown.previous}-${shown.value}`} aria-hidden="true" className="absolute left-0 animate-roll-out">
+        <span key={`${shown.previous}-${shown.value}`} aria-hidden="true" className="absolute left-0 animate-roll-out motion-reduce:hidden">
           {shown.previous}
         </span>
       )}

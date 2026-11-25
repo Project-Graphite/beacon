@@ -69,7 +69,7 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
               <p
                 key={sentText.id}
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 top-0 animate-sent truncate border border-transparent px-3 py-2 text-ink"
+                className="pointer-events-none absolute inset-x-0 top-0 animate-sent truncate border border-transparent px-3 py-2 text-ink motion-reduce:hidden"
               >
                 {sentText.text}
               </p>
