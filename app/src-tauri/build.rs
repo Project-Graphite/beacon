@@ -5,6 +5,7 @@ fn main() {
             "get_ended",
             "acknowledge",
             "dismiss",
+            "undismiss",
             "decide",
             "snooze",
             "unsnooze",

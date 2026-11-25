@@ -181,9 +181,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     fn parsed(arguments: &[&str]) -> Result<Options, String> {
         parse_options(arguments.iter().map(|argument| argument.to_string()))
+    }
+
+    fn listed(source: &str, opening: &str) -> BTreeSet<String> {
+        source
+            .split_once(opening)
+            .and_then(|(_, rest)| rest.split_once(']'))
+            .unwrap()
+            .0
+            .split(',')
+            .filter_map(|item| item.trim().trim_matches('"').rsplit("::").next())
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn every_handled_command_is_in_the_build_manifest_and_allowed_for_the_panel() {
+        let handled = listed(include_str!("main.rs"), "generate_handler![");
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/panel.json")).unwrap();
+        let allowed: BTreeSet<String> = capability["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|permission| permission.as_str()?.strip_prefix("allow-"))
+            .map(|name| name.replace('-', "_"))
+            .collect();
+        assert!(handled.contains("undismiss"));
+        assert_eq!(listed(include_str!("../build.rs"), ".commands(&["), handled);
+        assert_eq!(allowed, handled);
     }
 
     #[test]
