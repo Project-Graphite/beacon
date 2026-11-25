@@ -280,6 +280,40 @@ test('ordinary commands near the flagged ones are not flagged', () => {
   }
 });
 
+test('abbreviated -Recurse forms are flagged on Remove-Item and its aliases', () => {
+  for (const command of ['Remove-Item x -re', 'ri x -re', 'rm x -re', 'rm x -rec', 'del x -re', 'erase x -rec', 'rd x -re', 'rmdir x -rec']) {
+    assert.ok(powershell(command), command);
+  }
+  assert.equal(powershell('rm x -re'), 'recursive delete');
+  assert.equal(bash('rm -- -r'), null);
+});
+
+test('disk-wiping cmdlets and rimraf are flagged', () => {
+  const cases: [string, string | null][] = [
+    ['Format-Volume -DriveLetter D', 'Format-Volume'],
+    ['Get-Disk 1 | Clear-Disk -RemoveData', 'Clear-Disk'],
+    ['rimraf dist', 'rimraf'],
+    ['npx rimraf node_modules', 'rimraf'],
+    ['npx -y rimraf dist', 'rimraf'],
+    ['npx --package rimraf rimraf dist', 'rimraf'],
+    ['npm test && npx rimraf build', 'rimraf'],
+    ['npx tsc --noEmit', null],
+    ['Get-Volume', null],
+  ];
+  for (const [command, reason] of cases) assert.equal(powershell(command), reason, command);
+});
+
+test('scripts passed to MCP tools are looked into', () => {
+  assert.equal(destructiveReason('mcp__shell__run', { command: 'rm -rf /tmp/x' }, 'C:\\work'), 'rm with recursive and force flags');
+  assert.equal(destructiveReason('mcp__ssh__exec', { host: 'h', cmd: 'git push --force' }, 'C:\\work'), 'git push --force');
+  assert.equal(destructiveReason('mcp__pwsh__invoke', { script: 'Remove-Item x -Recurse' }, 'C:\\work'), 'recursive Remove-Item');
+  assert.equal(destructiveReason('mcp__shell__run', { command: 'ls', script: 'rimraf x' }, 'C:\\work'), 'rimraf');
+  assert.equal(destructiveReason('mcp__shell__run', { command: 'ls -la' }, 'C:\\work'), null);
+  assert.equal(destructiveReason('mcp__shell__run', { command: ['rm', '-rf', 'x'] }, 'C:\\work'), null);
+  assert.equal(destructiveReason('mcp__github__get_issue', { number: 1 }, 'C:\\work'), null);
+  assert.equal(destructiveReason('WebFetch', { command: 'rm -rf x' }, 'C:\\work'), null);
+});
+
 test('writes outside the working directory are flagged for editing tools only', () => {
   assert.equal(destructiveReason('Edit', { file_path: 'C:\\work\\src\\a.ts' }, 'C:\\work'), null);
   assert.equal(destructiveReason('Write', { file_path: 'c:/WORK/new.txt' }, 'C:\\work'), null);

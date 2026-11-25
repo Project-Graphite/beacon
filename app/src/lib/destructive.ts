@@ -12,6 +12,7 @@ const PREFIXES = new Map<string, string[]>([
   ['nice', ['-n']],
   ['timeout', ['-s', '-k']],
   ['xargs', ['-I', '-n', '-P', '-d', '-L', '-E', '-s', '-a', '-l']],
+  ['npx', ['-p', '--package']],
 ]);
 const BLOCK_KEYWORDS = new Set(['then', 'do', 'else', 'elif']);
 const FIND_EXEC = new Set(['-exec', '-execdir', '-ok', '-okdir']);
@@ -128,7 +129,7 @@ function rmReason(args: string[]): string | null {
   const recursive = options.includes('--recursive') || groups.some((group) => /[rR]/.test(group));
   const force = options.includes('--force') || groups.some((group) => group.includes('f'));
   if (recursive) return force ? 'rm with recursive and force flags' : 'rm with recursive flag';
-  if (args.some((arg) => recurseParameter(arg, 4) || arg.toLowerCase() === '/s')) return 'recursive delete';
+  if (args.some((arg) => recurseParameter(arg, 3) || arg.toLowerCase() === '/s')) return 'recursive delete';
   return null;
 }
 
@@ -205,6 +206,12 @@ function commandReason(words: string[]): string | null {
       return args.some((arg) => arg.startsWith('of=')) ? 'dd writing with of=' : null;
     case 'format':
       return args.some((arg) => /^[a-z]:$/i.test(arg)) ? 'format of a drive' : null;
+    case 'format-volume':
+      return 'Format-Volume';
+    case 'clear-disk':
+      return 'Clear-Disk';
+    case 'rimraf':
+      return 'rimraf';
     case 'shutdown':
       return 'shutdown';
     case 'chmod':
@@ -260,6 +267,12 @@ export function destructiveReason(toolName: string, toolInput: unknown, cwd: str
   const input = (toolInput ?? {}) as Record<string, unknown>;
   if ((toolName === 'Bash' || toolName === 'PowerShell') && typeof input.command === 'string') {
     return scriptReason(input.command);
+  }
+  if (toolName.startsWith('mcp__')) {
+    for (const script of [input.command, input.cmd, input.script]) {
+      const reason = typeof script === 'string' ? scriptReason(script) : null;
+      if (reason) return reason;
+    }
   }
   const path = input.file_path ?? input.notebook_path;
   if (WRITING_TOOLS.includes(toolName) && typeof path === 'string' && cwd !== null && relativeInside(path, cwd) === null) {
