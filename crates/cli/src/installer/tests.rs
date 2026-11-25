@@ -544,6 +544,19 @@ fn uninstall_refuses_a_record_for_another_settings_file() {
 }
 
 #[test]
+fn a_relative_settings_path_is_resolved_to_an_absolute_one() {
+    assert_eq!(
+        Paths::resolve(Some(PathBuf::from(r"claude\settings.json")))
+            .unwrap()
+            .settings,
+        std::env::current_dir()
+            .unwrap()
+            .join("claude")
+            .join("settings.json")
+    );
+}
+
+#[test]
 fn a_missing_helper_source_is_an_error() {
     let case = case("realistic");
     std::fs::remove_file(&case.paths.helper_source).unwrap();

@@ -32,7 +32,8 @@ impl Paths {
             })
             .ok_or("cannot locate the Claude Code settings: pass --settings <path>")?;
         Ok(Paths {
-            settings,
+            settings: std::path::absolute(&settings)
+                .context(format_args!("cannot resolve {}", settings.display()))?,
             home: home_dir()
                 .ok_or("cannot locate the Beacon home: set BEACON_HOME or LOCALAPPDATA")?,
             helper_source: std::env::current_exe()
