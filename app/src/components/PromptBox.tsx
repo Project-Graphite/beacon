@@ -83,7 +83,7 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
           </div>
         </>
       )}
-      {failure && <p className="mt-1 text-micro text-danger [overflow-wrap:anywhere]">{failure}</p>}
+      {failure && <p role="alert" className="mt-1 text-micro text-danger [overflow-wrap:anywhere]">{failure}</p>}
       {prompts.length > 0 && (
         <ol className="mt-3 space-y-1.5">
           {prompts.map((prompt) => (

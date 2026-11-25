@@ -147,7 +147,7 @@ export function SessionView({
           )}
           <CardActions session={session} globalSnoozedUntil={globalSnoozedUntil} run={run} />
           {notices.map((notice) => (
-            <p key={notice.id} className="origin-top-left animate-appear text-micro text-muted">
+            <p key={notice.id} role="status" className="origin-top-left animate-appear text-micro text-muted">
               {notice.text}
             </p>
           ))}

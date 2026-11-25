@@ -98,6 +98,7 @@ export function App() {
   const [listening, setListening] = useState(false);
   const [chosenRequestId, setChosenRequestId] = useState<number | null>(null);
   const [notices, setNotices] = useState<ResolutionNotice[]>([]);
+  const [arrival, setArrival] = useState<{ id: number; text: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ui, setUi] = useState<UiSettings>(initialUi);
   const [closing, setClosing] = useState(false);
@@ -139,8 +140,20 @@ export function App() {
     const receive = (next: Snapshot | null) => {
       if (next) {
         const fresh = shown.current ? resolutionNotices(pendingIds.current, next.pending, next.resolved) : [];
+        const arrived = shown.current ? next.pending.filter((request) => !pendingIds.current.includes(request.id)) : [];
         pendingIds.current = next.pending.map((request) => request.id);
         if (fresh.length > 0) showNotices(fresh);
+        if (arrived.length > 0) {
+          setArrival({
+            id: arrived[0].id,
+            text: arrived
+              .map((request) => {
+                const session = next.sessions.find((each) => each.session_id === request.session_id);
+                return `New request from ${session ? sessionTitle(session) : request.session_id.slice(0, 8)}`;
+              })
+              .join('. '),
+          });
+        }
       }
       setSnapshot((previous) =>
         previous && next
@@ -549,6 +562,9 @@ export function App() {
           onToggleSettings={toggleSettings}
           run={run}
         />
+        <p aria-live="polite" className="sr-only">
+          {arrival && <span key={arrival.id}>{arrival.text}</span>}
+        </p>
         <div ref={scrollArea} className="scroll-area relative flex min-h-0 flex-1 flex-col">
           <div ref={scroller} className="scroll-list min-h-0 flex-1 scroll-py-4 overflow-x-hidden overflow-y-auto">
             <div ref={content} className="relative">

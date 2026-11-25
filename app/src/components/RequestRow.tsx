@@ -59,6 +59,7 @@ export function RequestRow({ request, marked, currentId, keys, onOpen }: Request
         <span role="img" aria-label={`Looks destructive: ${destructive}`} title={`Looks destructive: ${destructive}`} className="size-2 shrink-0 rounded-full bg-danger" />
       )}
       <span
+        role={failure ? 'alert' : undefined}
         title={line}
         className={`min-w-0 flex-1 truncate text-secondary ${request.kind === 'tool' && !failure ? 'font-mono' : ''} ${failure ? 'text-danger' : 'text-ink'}`}
       >

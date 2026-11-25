@@ -104,7 +104,7 @@ export const SessionRow = memo(function SessionRow({
           />
         ))}
         {notices.map((notice) => (
-          <p key={notice.id} className="origin-top-left animate-appear pr-4 pb-2.5 pl-[56px] text-secondary text-muted">
+          <p key={notice.id} role="status" className="origin-top-left animate-appear pr-4 pb-2.5 pl-[56px] text-secondary text-muted">
             {notice.text}
           </p>
         ))}

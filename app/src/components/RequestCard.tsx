@@ -80,7 +80,7 @@ export function RequestCard({ request, marked, currentId, keys, onJump }: Reques
       {request.kind === 'plan' && (
         <PlanRequest request={request} masked={!unmasked} sending={sending} keys={keys} send={send} onJump={onJump} />
       )}
-      {failure && <p className="mt-1.5 text-micro text-danger [overflow-wrap:anywhere]">{failure}</p>}
+      {failure && <p role="alert" className="mt-1.5 text-micro text-danger [overflow-wrap:anywhere]">{failure}</p>}
     </div>
   );
 }
