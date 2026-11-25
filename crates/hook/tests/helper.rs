@@ -549,6 +549,14 @@ fn a_core_that_never_replies_to_stop_releases_the_helper_after_a_second() {
     assert!((0.95..1.5).contains(&seconds), "{seconds} s");
 }
 
+#[test]
+fn a_core_that_never_replies_to_an_mcp_form_releases_the_helper_after_a_second() {
+    let home = TempHome::new();
+    let (_runtime, _server) = silent_pipe_server(&home);
+    let seconds = seconds_until_exit(&home, "Elicitation", b"{}");
+    assert!((0.95..1.5).contains(&seconds), "{seconds} s");
+}
+
 fn median_ms(home: &TempHome) -> f64 {
     let mut timings: Vec<f64> = (0..30)
         .map(|_| {

@@ -44,7 +44,7 @@ fn main() {
 }
 
 fn reply_budget(event: &str) -> Option<Duration> {
-    matches!(event, "Stop" | DOCTOR_EVENT).then_some(REPLY_BUDGET)
+    matches!(event, "Stop" | "Elicitation" | DOCTOR_EVENT).then_some(REPLY_BUDGET)
 }
 
 fn start_watchdog(started: Instant, reply_budget: Option<Duration>) -> Sender<()> {
