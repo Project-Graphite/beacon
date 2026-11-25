@@ -16,7 +16,15 @@ export function MessageField({ label, placeholder, sendLabel, disabled, onSend, 
     if (message.trim()) onSend(message.trim());
   };
   return (
-    <div className="mt-2 flex origin-top-left animate-appear items-center gap-1.5">
+    <div
+      className="mt-2 flex origin-top-left animate-appear items-center gap-1.5"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.stopPropagation();
+          onCancel();
+        }
+      }}
+    >
       <input
         autoFocus
         aria-label={label}
@@ -26,10 +34,6 @@ export function MessageField({ label, placeholder, sendLabel, disabled, onSend, 
         onChange={(event) => setMessage(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.nativeEvent.isComposing) send();
-          if (event.key === 'Escape') {
-            event.stopPropagation();
-            onCancel();
-          }
         }}
         className="h-7 min-w-0 flex-1 rounded-field border border-line bg-raised px-2.5 text-secondary text-ink shadow-card placeholder:text-faint focus:border-faint focus:outline-none"
       />
