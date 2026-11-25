@@ -217,7 +217,7 @@ impl Shell {
             },
             Action::Pill(PillEvent::Moved) => self.overlay_changed(),
             Action::Pill(PillEvent::HoverTick) => self.check_hover(),
-            Action::Pill(PillEvent::FullscreenChanged) => {}
+            Action::Pill(PillEvent::FullscreenChanged) => self.yield_to_fullscreen(),
             Action::Pill(PillEvent::ForegroundChanged) => {
                 if jump::has_done(self.snapshot.as_ref()) {
                     jump::resolve_focus(
@@ -229,6 +229,7 @@ impl Shell {
                 if self.mode() == Some(Mode::Sticky) {
                     self.close();
                 }
+                self.yield_to_fullscreen();
             }
             Action::Pill(PillEvent::Pressed(point)) => self.pressed(point),
             Action::OpenPanel => self.open(Mode::Sticky, true),
@@ -315,6 +316,12 @@ impl Shell {
     fn put_away(&mut self) {
         self.pin_dismissed |= self.mode() == Some(Mode::Pinned);
         self.close();
+    }
+
+    fn yield_to_fullscreen(&mut self) {
+        if self.mode() == Some(Mode::Pinned) && pill::fullscreen_in_front() {
+            self.close();
+        }
     }
 
     fn follow_activity(&mut self) {
