@@ -236,6 +236,56 @@ fn a_decision_from_a_process_inside_a_known_session_is_refused() {
     core.shutdown().unwrap();
 }
 
+const PROMPT_CLIENT_HOME: &str = "BEACON_TEST_PROMPT_CLIENT_HOME";
+
+#[test]
+fn prompt_client_child() {
+    let Some(home) = std::env::var_os(PROMPT_CLIENT_HOME) else {
+        return;
+    };
+    let reply = ControlClient::connect(std::path::Path::new(&home))
+        .unwrap()
+        .request(&Request::QueuePrompt {
+            session_id: "nobody".to_string(),
+            text: "go on".to_string(),
+        })
+        .unwrap();
+    println!("REPLY:{}", serde_json::to_string(&reply).unwrap());
+}
+
+#[test]
+fn a_prompt_from_a_process_inside_a_known_session_is_refused() {
+    let home = TempHome::new();
+    let core = start(&home, Ok(vec![listed("a", "waiting")])).unwrap();
+    wait_for(&home, |snapshot| snapshot.sessions.len() == 1);
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "prompt_client_child", "--nocapture"])
+        .env(PROMPT_CLIENT_HOME, &home.0)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let reply: Reply = serde_json::from_str(
+        stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("REPLY:"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        reply,
+        Reply::failed("prompts cannot come from inside a Claude session")
+    );
+    let outside = ControlClient::connect(&home.0)
+        .unwrap()
+        .request(&Request::QueuePrompt {
+            session_id: "nobody".to_string(),
+            text: "go on".to_string(),
+        })
+        .unwrap();
+    assert_eq!(outside, Reply::failed("no session nobody"));
+    core.shutdown().unwrap();
+}
+
 #[test]
 fn a_panicking_task_is_logged_and_the_core_keeps_answering() {
     let home = TempHome::new();

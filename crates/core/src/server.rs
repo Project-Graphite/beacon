@@ -422,7 +422,11 @@ async fn send_reply(pipe: &mut NamedPipeServer, reply: HookReply) -> io::Result<
     Ok(())
 }
 
-fn decide_refusal(shared: &Shared, client_pid: &io::Result<u32>) -> Option<String> {
+fn inside_session_refusal(
+    shared: &Shared,
+    client_pid: &io::Result<u32>,
+    subject: &str,
+) -> Option<String> {
     let pid = match client_pid {
         Ok(pid) => *pid,
         Err(error) => return Some(format!("cannot identify the control client: {error}")),
@@ -431,7 +435,7 @@ fn decide_refusal(shared: &Shared, client_pid: &io::Result<u32>) -> Option<Strin
     match platform::process_parents() {
         Ok(processes) => {
             focus::descends_from(pid, &sessions, &processes, platform::process_created)
-                .then(|| "decisions cannot come from inside a Claude session".to_string())
+                .then(|| format!("{subject} cannot come from inside a Claude session"))
         }
         Err(error) => Some(format!("cannot inspect the running processes: {error}")),
     }
@@ -469,10 +473,20 @@ async fn serve_control(shared: &Shared, pipe: NamedPipeServer) -> io::Result<()>
                     clear_finished_minutes,
                 )
                 .map_or_else(Reply::failed, |()| Reply::ok()),
-            Ok(request @ Request::Decide { .. }) => match decide_refusal(shared, &client_pid) {
-                Some(refusal) => Reply::failed(refusal),
-                None => shared.engine.borrow_mut().control(request),
-            },
+            Ok(request @ (Request::Decide { .. } | Request::QueuePrompt { .. })) => {
+                match inside_session_refusal(
+                    shared,
+                    &client_pid,
+                    if matches!(request, Request::Decide { .. }) {
+                        "decisions"
+                    } else {
+                        "prompts"
+                    },
+                ) {
+                    Some(refusal) => Reply::failed(refusal),
+                    None => shared.engine.borrow_mut().control(request),
+                }
+            }
             Ok(request) => shared.engine.borrow_mut().control(request),
             Err(error) => Reply::failed(format!("bad request: {error}")),
         };
