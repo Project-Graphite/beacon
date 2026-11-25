@@ -17,7 +17,7 @@ use windows_sys::Win32::Devices::Display::{
     DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo,
     GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
 };
-use windows_sys::Win32::Foundation::{LPARAM, LUID, POINT, RECT};
+use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, LPARAM, LUID, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DEVMODEW, DIB_RGB_COLORS,
     ENUM_CURRENT_SETTINGS, EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, HBITMAP,
@@ -116,27 +116,30 @@ fn device_info_header<T>(kind: i32, adapter: LUID, id: u32) -> DISPLAYCONFIG_DEV
 
 fn display_targets() -> Vec<(String, String, String)> {
     let (mut path_count, mut mode_count) = (0, 0);
-    if unsafe {
-        GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count)
-    } != 0
-    {
-        return Vec::new();
-    }
-    let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); path_count as usize];
-    let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); mode_count as usize];
-    if unsafe {
-        QueryDisplayConfig(
-            QDC_ONLY_ACTIVE_PATHS,
-            &mut path_count,
-            paths.as_mut_ptr(),
-            &mut mode_count,
-            modes.as_mut_ptr(),
-            null_mut(),
-        )
-    } != 0
-    {
-        return Vec::new();
-    }
+    let mut paths = loop {
+        if unsafe {
+            GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count)
+        } != 0
+        {
+            return Vec::new();
+        }
+        let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); path_count as usize];
+        let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); mode_count as usize];
+        match unsafe {
+            QueryDisplayConfig(
+                QDC_ONLY_ACTIVE_PATHS,
+                &mut path_count,
+                paths.as_mut_ptr(),
+                &mut mode_count,
+                modes.as_mut_ptr(),
+                null_mut(),
+            )
+        } {
+            0 => break paths,
+            ERROR_INSUFFICIENT_BUFFER => {}
+            _ => return Vec::new(),
+        }
+    };
     paths.truncate(path_count as usize);
     paths
         .iter()
