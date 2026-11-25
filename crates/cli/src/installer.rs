@@ -5,7 +5,7 @@ use beacon_core::{home_dir, now_ms, utc_timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::fmt::Write as _;
-use std::io;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 const MANAGED_DIR: &str = r"C:\Program Files\ClaudeCode";
@@ -404,7 +404,15 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     }
     let mut staged = path.as_os_str().to_owned();
     staged.push(".beacon.tmp");
-    write_file(Path::new(&staged), bytes)?;
+    std::fs::File::create(&staged)
+        .and_then(|mut file| {
+            file.write_all(bytes)?;
+            file.sync_all()
+        })
+        .context(format_args!(
+            "cannot write {}",
+            Path::new(&staged).display()
+        ))?;
     std::fs::rename(&staged, path).context(format_args!("cannot replace {}", path.display()))
 }
 
