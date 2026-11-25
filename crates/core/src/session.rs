@@ -317,7 +317,13 @@ pub fn git_branch(cwd: &Path) -> Option<String> {
             dot_git
         } else if dot_git.is_file() {
             let pointer = std::fs::read_to_string(&dot_git).ok()?;
-            directory.join(pointer.trim().strip_prefix("gitdir:")?.trim())
+            directory.join(
+                pointer
+                    .trim()
+                    .strip_prefix("gitdir:")
+                    .map(str::trim)
+                    .filter(|linked| !linked.starts_with(r"\\") && !linked.starts_with("//"))?,
+            )
         } else {
             continue;
         };
@@ -443,6 +449,26 @@ mod tests {
         assert_eq!(git_branch(&nested).as_deref(), Some("feature/x"));
         std::fs::write(root.join(".git").join("HEAD"), "0123456789abcdef\n").unwrap();
         assert_eq!(git_branch(&nested).as_deref(), Some("0123456"));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_git_file_is_followed_to_a_local_folder_but_not_to_a_network_share() {
+        let root = std::env::temp_dir().join(format!("beacon-gitdir-{}", std::process::id()));
+        let linked = root.join("linked");
+        let worktree = root.join("worktree");
+        std::fs::create_dir_all(&linked).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::write(linked.join("HEAD"), "ref: refs/heads/feature/y\n").unwrap();
+        std::fs::write(worktree.join(".git"), "gitdir: ../linked\n").unwrap();
+        assert_eq!(git_branch(&worktree).as_deref(), Some("feature/y"));
+        for pointer in [
+            r"gitdir: \\server\share\repo\.git",
+            "gitdir: //server/share/repo/.git",
+        ] {
+            std::fs::write(worktree.join(".git"), pointer).unwrap();
+            assert_eq!(git_branch(&worktree), None, "{pointer}");
+        }
         std::fs::remove_dir_all(&root).unwrap();
     }
 
