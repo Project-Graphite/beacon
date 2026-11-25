@@ -58,7 +58,11 @@ pub fn delete_value(key: &str, name: &str) -> io::Result<()> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use windows_sys::Win32::System::Registry::RRF_RT_REG_SZ;
+    use windows_sys::Win32::System::Registry::{RRF_RT_REG_SZ, RegDeleteKeyW};
+
+    pub fn delete_key(key: &str) -> io::Result<()> {
+        checked(unsafe { RegDeleteKeyW(HKEY_CURRENT_USER, wide(key).as_ptr()) })
+    }
 
     pub fn has_value(key: &str, name: &str) -> io::Result<bool> {
         let mut size = 0;

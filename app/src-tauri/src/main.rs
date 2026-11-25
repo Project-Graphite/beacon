@@ -155,6 +155,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &feed.home,
                     positions::ui_settings(&feed.home).start_mode,
                     installed,
+                    settings::RUN_KEY,
                 )
             {
                 log_error!("cannot apply the start mode: {error}");

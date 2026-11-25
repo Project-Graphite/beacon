@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
-const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const RUN_VALUE: &str = "Beacon";
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -117,7 +117,12 @@ pub async fn hooks_apply(action: HooksAction) -> Result<HooksStatus, String> {
     .await
 }
 
-pub fn apply_start_mode(home: &Path, mode: StartMode, sync_registry: bool) -> io::Result<()> {
+pub fn apply_start_mode(
+    home: &Path,
+    mode: StartMode,
+    sync_registry: bool,
+    run_key: &str,
+) -> io::Result<()> {
     let executable = std::env::current_exe()?;
     let marker = home.join(AUTOSTART_FILE);
     if mode == StartMode::Claude {
@@ -131,9 +136,9 @@ pub fn apply_start_mode(home: &Path, mode: StartMode, sync_registry: bool) -> io
     match (sync_registry, mode) {
         (false, _) => Ok(()),
         (true, StartMode::Login) => {
-            registry::write_string(RUN_KEY, RUN_VALUE, &login_command(&executable))
+            registry::write_string(run_key, RUN_VALUE, &login_command(&executable))
         }
-        (true, _) => registry::delete_value(RUN_KEY, RUN_VALUE),
+        (true, _) => registry::delete_value(run_key, RUN_VALUE),
     }
 }
 
@@ -149,7 +154,12 @@ fn change_settings(
     let applied = if start_mode_changed {
         std::env::current_exe()
             .and_then(|executable| {
-                apply_start_mode(home, settings.start_mode, is_installed(&executable))
+                apply_start_mode(
+                    home,
+                    settings.start_mode,
+                    is_installed(&executable),
+                    RUN_KEY,
+                )
             })
             .map_err(|error| format!("cannot apply the start mode: {error}"))
     } else {
@@ -274,31 +284,33 @@ mod tests {
 
     #[test]
     fn the_start_mode_keeps_exactly_one_of_the_marker_and_the_run_value() {
+        let run_key = format!(r"Software\Beacon-test-run-{}", std::process::id());
         assert!(
-            !registry::tests::has_value(RUN_KEY, RUN_VALUE).unwrap(),
+            !registry::tests::has_value(&run_key, RUN_VALUE).unwrap(),
             "a Beacon Run value already exists; this test would replace it"
         );
         let home = std::env::temp_dir().join(format!("beacon-start-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         let marker = home.join(AUTOSTART_FILE);
-        apply_start_mode(&home, StartMode::Claude, false).unwrap();
+        apply_start_mode(&home, StartMode::Claude, false, &run_key).unwrap();
         assert_eq!(
             std::fs::read_to_string(&marker).unwrap(),
             std::env::current_exe().unwrap().to_string_lossy()
         );
-        apply_start_mode(&home, StartMode::Login, true).unwrap();
-        let registered = registry::tests::has_value(RUN_KEY, RUN_VALUE);
+        apply_start_mode(&home, StartMode::Login, true, &run_key).unwrap();
+        let registered = registry::tests::has_value(&run_key, RUN_VALUE);
         let marker_after_login = marker.exists();
-        apply_start_mode(&home, StartMode::Claude, true).unwrap();
+        apply_start_mode(&home, StartMode::Claude, true, &run_key).unwrap();
         assert!(registered.unwrap());
         assert!(!marker_after_login);
-        assert!(!registry::tests::has_value(RUN_KEY, RUN_VALUE).unwrap());
+        assert!(!registry::tests::has_value(&run_key, RUN_VALUE).unwrap());
         assert!(marker.exists());
-        apply_start_mode(&home, StartMode::Manual, true).unwrap();
+        apply_start_mode(&home, StartMode::Manual, true, &run_key).unwrap();
         assert!(!marker.exists());
-        assert!(!registry::tests::has_value(RUN_KEY, RUN_VALUE).unwrap());
-        apply_start_mode(&home, StartMode::Manual, false).unwrap();
+        assert!(!registry::tests::has_value(&run_key, RUN_VALUE).unwrap());
+        apply_start_mode(&home, StartMode::Manual, false, &run_key).unwrap();
         std::fs::remove_dir_all(&home).unwrap();
+        registry::tests::delete_key(&run_key).unwrap();
     }
 
     #[test]
