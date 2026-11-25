@@ -704,7 +704,10 @@ impl Engine {
             event,
             Event::UserPromptSubmit { .. } | Event::Stop { .. } | Event::SessionEnd { .. }
         ) {
-            self.expire_pending(&session_id);
+            self.expire_pending(
+                &session_id,
+                if meta.t_ms == 0 { u64::MAX } else { meta.t_ms },
+            );
         }
         self.reconcile_wanted |= !self.sessions.contains_key(&session_id);
         let session = self
@@ -1154,11 +1157,13 @@ impl Engine {
         Ok(())
     }
 
-    fn expire_pending(&mut self, session_id: &str) {
+    fn expire_pending(&mut self, session_id: &str, created_before_ms: u64) {
         let stale: Vec<u64> = self
             .pending
             .iter()
-            .filter(|(_, pending)| pending.view.session_id == session_id)
+            .filter(|(_, pending)| {
+                pending.view.session_id == session_id && pending.view.created_ms < created_before_ms
+            })
             .map(|(id, _)| *id)
             .collect();
         for id in stale {
@@ -1286,7 +1291,7 @@ impl Engine {
             self.log.info(format_args!(
                 "process {pid} of session {session_id} is gone"
             ));
-            self.expire_pending(session_id);
+            self.expire_pending(session_id, u64::MAX);
             self.apply(session_id, Input::ProcessGone);
             self.reconcile_wanted = true;
             self.changed();
@@ -1391,7 +1396,7 @@ impl Engine {
             self.log.info(format_args!(
                 "session {session_id} is no longer listed and its process is gone"
             ));
-            self.expire_pending(&session_id);
+            self.expire_pending(&session_id, u64::MAX);
             self.apply(&session_id, Input::ProcessGone);
         }
         let sessions = &self.sessions;

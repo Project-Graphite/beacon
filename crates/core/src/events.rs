@@ -43,6 +43,8 @@ pub const KNOWN_EVENTS: [&str; 33] = [
 pub struct Meta {
     pub event: String,
     #[serde(default)]
+    pub t_ms: u64,
+    #[serde(default)]
     pub env: BTreeMap<String, String>,
 }
 

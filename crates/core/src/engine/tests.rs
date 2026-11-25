@@ -2878,6 +2878,32 @@ fn a_session_moving_on_expires_its_pending_decisions() {
 }
 
 #[test]
+fn a_late_prompt_event_expires_only_the_decisions_asked_before_it_was_sent() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    let (stale, mut stale_receiver) = fixture.ask(PERMISSION_REQUEST);
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let sent_ms = now_ms();
+    let (live, mut live_receiver) = fixture.ask(PERMISSION_REQUEST);
+    fixture.engine.handle_hook(
+        json!({"v": 1, "event": "UserPromptSubmit", "pid": 1, "t_ms": sent_ms, "env": {}})
+            .to_string()
+            .as_bytes(),
+        USER_PROMPT_SUBMIT,
+    );
+    assert_eq!(stale_receiver.try_recv(), RELEASED);
+    assert_eq!(
+        live_receiver.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    );
+    let snapshot = fixture.engine.snapshot();
+    assert_eq!(snapshot.pending.len(), 1);
+    assert_eq!(snapshot.pending[0].id, live);
+    assert_eq!(snapshot.resolved[0].id, stale);
+    assert_eq!(snapshot.resolved[0].resolution, Resolution::Expired);
+}
+
+#[test]
 fn a_session_a_reconcile_finds_gone_expires_its_pending_decisions() {
     let mut fixture = fixture();
     fixture.send(USER_PROMPT_SUBMIT);
