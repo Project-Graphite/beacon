@@ -209,7 +209,8 @@ impl Shell {
                 Some(Mode::Sticky | Mode::Pinned) => self.put_away(),
                 _ => self.open(Mode::Sticky, false),
             },
-            Action::Pill(PillEvent::Dragged) => self.place(),
+            Action::Pill(PillEvent::Dragged) if self.mode().is_some() => self.place(),
+            Action::Pill(PillEvent::Dragged) => {}
             Action::Pill(PillEvent::PeekPressed) => self.open(Mode::Sticky, true),
             Action::Pill(PillEvent::Clicked) | Action::TogglePanel => match self.mode() {
                 Some(Mode::Sticky | Mode::Pinned) => self.put_away(),
