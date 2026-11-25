@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { flushSync } from 'react-dom';
 import {
   appInfo,
   cachedAppInfo,
@@ -371,6 +372,7 @@ export function SettingsView({ config, ui, openParts, onToggle, onChangeUi }: Se
                 onBlur={commitStall}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') commitStall();
+                  if (event.key === 'Escape') flushSync(() => setStallText(null));
                 }}
                 className={`${FIELD} w-12 text-right tabular-nums`}
               />
