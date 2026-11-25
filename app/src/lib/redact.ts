@@ -141,3 +141,13 @@ export function redact(text: string): string {
 export function redactValue(name: string, value: string): string {
   return isSecretName(name) ? MASK : redact(value);
 }
+
+export function redactJson(name: string, value: unknown): unknown {
+  if (typeof value === 'string') return redactValue(name, value);
+  if (isSecretName(name)) return MASK;
+  if (Array.isArray(value)) return value.map((item) => redactJson(name, item));
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactJson(key, item)]));
+  }
+  return value;
+}

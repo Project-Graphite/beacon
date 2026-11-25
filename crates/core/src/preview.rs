@@ -1,4 +1,4 @@
-use crate::redact::redact;
+use crate::redact::{redact, redact_json};
 use serde_json::Value;
 
 const INPUT_CHARS: usize = 80;
@@ -14,7 +14,10 @@ pub fn input_preview(tool_name: &str, tool_input: &Value) -> String {
             .map(|server_and_tool| server_and_tool.replacen("__", "/", 1)),
     };
     one_line(
-        &redact(&subject.unwrap_or_else(|| tool_input.to_string())),
+        &subject.map_or_else(
+            || redact_json("", tool_input).to_string(),
+            |subject| redact(&subject),
+        ),
         INPUT_CHARS,
     )
 }
@@ -69,6 +72,11 @@ mod tests {
                 "AskUserQuestion",
                 json!({"questions": [{"question": "Which?"}]}),
                 r#"{"questions":[{"question":"Which?"}]}"#,
+            ),
+            (
+                "Task",
+                json!({"config": "{\"api_key\": \"abc123secret\"}", "note": "password: \"hunter2\""}),
+                r#"{"config":"{\"api_key\": ***}","note":"password: ***"}"#,
             ),
         ];
         for (tool_name, tool_input, expected) in cases {

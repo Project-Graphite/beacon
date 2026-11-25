@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { redact, redactValue } from './redact.ts';
+import { redact, redactJson, redactValue } from './redact.ts';
 
 test('secret assignments keep the name and mask the value', () => {
   assert.equal(redact('GITHUB_TOKEN=abc123 npm publish'), 'GITHUB_TOKEN=*** npm publish');
@@ -70,6 +70,23 @@ test('a value under a secret name is masked whole', () => {
   assert.equal(redactValue('api_key', '"abc"'), '***');
   assert.equal(redactValue('title', '"Fix it"'), '"Fix it"');
   assert.equal(redactValue('body', '"use sk-ant-api03-abcdefghijklmnop"'), '"use ***"');
+});
+
+test('a value tree is masked string by string before it is turned into JSON', () => {
+  const input = {
+    config: '{"api_key": "abc123secret"}',
+    list: ['Bearer abc', { client_secret: { a: 1 } }],
+    note: 'password: "hunter2"',
+    token: 5,
+    count: 3,
+  };
+  assert.equal(
+    JSON.stringify(redactJson('', input)),
+    '{"config":"{\\"api_key\\": ***}","list":["Bearer ***",{"client_secret":"***"}],"note":"password: ***","token":"***","count":3}',
+  );
+  assert.equal(redactJson('', 'GITHUB_TOKEN=abc123 npm publish'), 'GITHUB_TOKEN=*** npm publish');
+  assert.equal(redactJson('api_key', 'abc'), '***');
+  assert.equal(redactJson('', null), null);
 });
 
 test('non-ASCII text survives', () => {

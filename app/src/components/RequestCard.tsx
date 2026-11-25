@@ -4,7 +4,7 @@ import { useNow } from '../hooks/useNow.ts';
 import { errorText } from '../lib/format.ts';
 import { destructiveReason } from '../lib/destructive.ts';
 import { requestId } from '../lib/queue.ts';
-import { redact } from '../lib/redact.ts';
+import { redactJson } from '../lib/redact.ts';
 import { decisionMark, mcpTool, requestMeta } from '../lib/requests.ts';
 import { DecisionMark } from './DecisionMark';
 import { PlanRequest } from './PlanRequest';
@@ -27,7 +27,6 @@ export function RequestCard({ request, marked, currentId, keys, onJump }: Reques
   const [failure, setFailure] = useState<string | null>(null);
   const [unmasked, setUnmasked] = useState(false);
   const destructive = request.kind === 'tool' ? destructiveReason(request.tool_name, request.tool_input, request.cwd) : null;
-  const rawInput = JSON.stringify(request.tool_input) ?? '';
   const sending = outcome !== null;
   const send = (decision: Decision) => {
     setOutcome(decisionMark(decision));
@@ -53,7 +52,7 @@ export function RequestCard({ request, marked, currentId, keys, onJump }: Reques
       )}
       <div className="flex items-baseline gap-2">
         <span className="min-w-0 truncate font-semibold text-ink">{title}</span>
-        {request.kind === 'tool' && redact(rawInput) !== rawInput && (
+        {request.kind === 'tool' && JSON.stringify(redactJson('', request.tool_input)) !== JSON.stringify(request.tool_input) && (
           <span className="ml-auto">
             <TextButton onClick={() => setUnmasked(!unmasked)}>{unmasked ? 'Mask secrets' : 'Show unmasked'}</TextButton>
           </span>

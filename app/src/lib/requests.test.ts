@@ -87,6 +87,17 @@ test('arguments are compact JSON cut at two hundred characters', () => {
   assert.deepEqual(argumentEntries(['a']), [['input', '["a"]']]);
 });
 
+test('masked arguments hide secrets inside string values', () => {
+  const input = { config: '{"api_key": "abc123secret"}', note: 'password: "hunter2"', token: 'x', title: 'Fix it' };
+  assert.deepEqual(argumentEntries(input, true), [
+    ['config', '"{\\"api_key\\": ***}"'],
+    ['note', '"password: ***"'],
+    ['token', '"***"'],
+    ['title', '"Fix it"'],
+  ]);
+  assert.deepEqual(argumentEntries(input)[0], ['config', '"{\\"api_key\\": \\"abc123secret\\"}"']);
+});
+
 test('URLs split around the host', () => {
   assert.deepEqual(splitUrl('https://docs.example.test/a/b?q=1'), { head: 'https://', host: 'docs.example.test', tail: '/a/b?q=1' });
   assert.deepEqual(splitUrl('http://user@host.test:8080/x'), { head: 'http://user@', host: 'host.test', tail: ':8080/x' });

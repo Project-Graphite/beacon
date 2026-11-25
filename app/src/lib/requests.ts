@@ -2,7 +2,7 @@ import type { Decision, PendingDecision } from '../beacon';
 import { readQuestions } from './answers.ts';
 import { formatDuration } from './format.ts';
 import { shortenPath } from './paths.ts';
-import { redactValue } from './redact.ts';
+import { redactJson } from './redact.ts';
 
 const META_CHARS = 52;
 const MIN_PATH_CHARS = 16;
@@ -47,8 +47,7 @@ export function argumentEntries(toolInput: unknown, masked = false): [string, st
       ? Object.entries(toolInput)
       : [['input', toolInput] as const];
   return entries.map(([key, value]) => {
-    const raw = JSON.stringify(value) ?? String(value);
-    const shown = masked ? redactValue(key, raw) : raw;
+    const shown = JSON.stringify(masked ? redactJson(key, value) : value) ?? String(value);
     return [key, shown.length > ARGUMENT_CHARS ? `${shown.slice(0, ARGUMENT_CHARS - 1)}…` : shown];
   });
 }

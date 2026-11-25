@@ -1,3 +1,5 @@
+use serde_json::Value;
+
 const MASK: &str = "***";
 const SECRET_NAME_PARTS: [&str; 5] = ["KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD"];
 const TOKEN_PREFIXES: [&str; 14] = [
@@ -38,6 +40,21 @@ pub fn redact(text: &str) -> String {
         at_word_start = !is_name_char(character);
     }
     redacted
+}
+
+pub fn redact_json(name: &str, value: &Value) -> Value {
+    if is_secret_name(name) {
+        return Value::from(MASK);
+    }
+    match value {
+        Value::String(text) => Value::String(redact(text)),
+        Value::Array(items) => items.iter().map(|item| redact_json(name, item)).collect(),
+        Value::Object(fields) => fields
+            .iter()
+            .map(|(key, item)| (key.clone(), redact_json(key, item)))
+            .collect(),
+        _ => value.clone(),
+    }
 }
 
 fn secret_at(text: &str) -> Option<(usize, usize)> {
@@ -137,8 +154,7 @@ fn url_password(text: &str) -> Option<(usize, usize)> {
 
 fn secret_assignment(text: &str) -> Option<(usize, usize)> {
     let name_len = prefix_len(text, is_name_char);
-    let name = text[..name_len].to_ascii_uppercase();
-    if !SECRET_NAME_PARTS.iter().any(|part| name.contains(part)) {
+    if !is_secret_name(&text[..name_len]) {
         return None;
     }
     let quoted_name = text[name_len..].starts_with(is_quote);
@@ -164,6 +180,11 @@ fn secret_assignment(text: &str) -> Option<(usize, usize)> {
     (value_len > 0).then_some((kept, kept + value_len))
 }
 
+fn is_secret_name(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    SECRET_NAME_PARTS.iter().any(|part| upper.contains(part))
+}
+
 fn prefix_len(text: &str, keep: impl Fn(char) -> bool) -> usize {
     text.find(|character| !keep(character))
         .unwrap_or(text.len())
@@ -187,7 +208,29 @@ fn is_token_char(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::redact;
+    use super::{redact, redact_json};
+    use serde_json::json;
+
+    #[test]
+    fn a_value_tree_is_masked_string_by_string_before_it_is_turned_into_json() {
+        let input = json!({
+            "config": "{\"api_key\": \"abc123secret\"}",
+            "list": ["Bearer abc", {"client_secret": {"a": 1}}],
+            "note": "password: \"hunter2\"",
+            "token": 5,
+            "count": 3,
+        });
+        assert_eq!(
+            redact_json("", &input).to_string(),
+            r#"{"config":"{\"api_key\": ***}","list":["Bearer ***",{"client_secret":"***"}],"note":"password: ***","token":"***","count":3}"#
+        );
+        assert_eq!(
+            redact_json("", &json!("GITHUB_TOKEN=abc123 npm publish")),
+            json!("GITHUB_TOKEN=*** npm publish")
+        );
+        assert_eq!(redact_json("api_key", &json!("abc")), json!("***"));
+        assert_eq!(redact_json("", &json!(null)), json!(null));
+    }
 
     #[test]
     fn secret_assignments_keep_the_name_and_mask_the_value() {
