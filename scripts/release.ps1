@@ -12,11 +12,15 @@ function Invoke-Checked {
     if ($LASTEXITCODE -ne 0) { throw "command failed with exit code ${LASTEXITCODE}: $Command" }
 }
 
+if (Invoke-Checked { git -C $root status --porcelain }) {
+    throw 'the working tree has uncommitted or untracked changes: commit or stash them before a release'
+}
+
 $version = (Get-Content (Join-Path $app 'src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json).version
 
 Push-Location $root
 try {
-    Invoke-Checked { cargo build --release -p beacon-cli -p beacon-hook }
+    Invoke-Checked { cargo build --release --locked -p beacon-cli -p beacon-hook }
 }
 finally {
     Pop-Location
@@ -35,7 +39,10 @@ $resourcesConfig = Join-Path ([IO.Path]::GetTempPath()) "beacon-release-$PID.jso
 
 Push-Location $app
 try {
-    Invoke-Checked { npx tauri build --config $resourcesConfig }
+    if (-not (Test-Path 'node_modules')) {
+        Invoke-Checked { npm ci }
+    }
+    Invoke-Checked { npx tauri build --config $resourcesConfig -- --locked }
 }
 finally {
     Pop-Location
