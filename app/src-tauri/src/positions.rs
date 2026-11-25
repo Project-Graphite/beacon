@@ -96,10 +96,10 @@ impl OverlaySize {
     }
 }
 
-fn lenient<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+pub fn lenient<'de, D: Deserializer<'de>, T: DeserializeOwned + Default>(
     deserializer: D,
-) -> Result<Option<T>, D::Error> {
-    Ok(serde_json::from_value(serde_json::Value::deserialize(deserializer)?).ok())
+) -> Result<T, D::Error> {
+    Ok(serde_json::from_value(serde_json::Value::deserialize(deserializer)?).unwrap_or_default())
 }
 
 fn clamped(value: Option<f64>, (low, default, high): (f64, f64, f64)) -> f64 {
@@ -116,21 +116,49 @@ fn one_of(value: Option<u64>, allowed: &[u64], default: u64) -> u64 {
 
 #[derive(Default, Serialize, Deserialize)]
 struct UiFile {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient")]
     pill_positions: BTreeMap<String, Rect>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "lenient"
+    )]
     display_positions: BTreeMap<String, Rect>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
     style: Option<Style>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "lenient"
+    )]
     tab_positions: BTreeMap<String, TabPlacement>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
     hotkey: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
     toasts_enabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
     toast_on_finished: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
     sounds_enabled: Option<bool>,
     #[serde(
         default,
@@ -428,6 +456,48 @@ mod tests {
             r#"{"hotkey":"Ctrl+Shift+B","#
         );
         assert_eq!(load(&home, "a"), Some(Rect::sized(1, 2, 3, 4)));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn a_mistyped_setting_keeps_its_default_and_every_other_setting_survives() {
+        let home = std::env::temp_dir().join(format!("beacon-ui-mistyped-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let existing: serde_json::Value = serde_json::from_str(r#"{"pill_positions":{"a":{"left":1,"top":2,"right":4,"bottom":6}},"display_positions":{"philips":{"left":5,"top":6,"right":12,"bottom":14}},"style":"pill","tab_positions":{"philips":{"edge":"top","offset":0.25}},"hotkey":"Ctrl+Shift+B","toasts_enabled":false,"toast_on_finished":false,"sounds_enabled":true,"visibility":"attention","display":"philips","avoid_displays":["oled"]}"#).unwrap();
+        let read_back = |file: &serde_json::Value| {
+            std::fs::write(home.join(UI_FILE), file.to_string()).unwrap();
+            serde_json::to_value(read(&home)).unwrap()
+        };
+        for key in [
+            "pill_positions",
+            "display_positions",
+            "style",
+            "tab_positions",
+            "hotkey",
+            "toasts_enabled",
+            "toast_on_finished",
+            "sounds_enabled",
+            "display",
+            "avoid_displays",
+        ] {
+            let mut without = existing.clone();
+            without.as_object_mut().unwrap().remove(key);
+            let mut mistyped = existing.clone();
+            mistyped[key] = 7.into();
+            assert_eq!(read_back(&mistyped), read_back(&without), "{key}");
+        }
+        let mut mistyped = existing.clone();
+        mistyped["sounds_enabled"] = "yes".into();
+        std::fs::write(home.join(UI_FILE), mistyped.to_string()).unwrap();
+        save(&home, "b", Rect::sized(5, 6, 7, 8)).unwrap();
+        assert!(!home.join("ui.json.bad").exists());
+        let settings = ui_settings(&home);
+        assert!(!settings.sounds_enabled);
+        assert_eq!(settings.hotkey, "Ctrl+Shift+B");
+        assert_eq!(settings.visibility, Visibility::Attention);
+        assert_eq!(load(&home, "a"), Some(Rect::sized(1, 2, 3, 4)));
+        assert_eq!(display_choice(&home).avoid_displays, ["oled"]);
         std::fs::remove_dir_all(&home).unwrap();
     }
 
