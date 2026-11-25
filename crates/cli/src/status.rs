@@ -1,6 +1,7 @@
 use crate::{Context, connect, platform};
 use beacon_cli::surface_label;
-use beacon_core::{Reply, Session, Snapshot, now_ms, one_line};
+use beacon_core::{Reply, Session, Snapshot, now_ms, one_line, redact};
+use serde_json::Value;
 use std::cmp::Reverse;
 use std::io::Write;
 use std::path::Path;
@@ -85,7 +86,29 @@ fn shown(mut snapshot: Snapshot, all: bool) -> Snapshot {
 }
 
 fn to_json(snapshot: &Snapshot) -> Result<String, String> {
-    serde_json::to_string(snapshot).context("cannot encode the snapshot")
+    let mut snapshot = snapshot.clone();
+    for pending in &mut snapshot.pending {
+        redact_strings(&mut pending.tool_input);
+        redact_strings(&mut pending.permission_suggestions);
+        pending.plan = pending.plan.as_deref().map(redact);
+    }
+    for prompt in snapshot
+        .sessions
+        .iter_mut()
+        .flat_map(|session| &mut session.prompts)
+    {
+        prompt.text = prompt.text.as_deref().map(redact);
+    }
+    serde_json::to_string(&snapshot).context("cannot encode the snapshot")
+}
+
+fn redact_strings(value: &mut Value) {
+    match value {
+        Value::String(text) => *text = redact(text),
+        Value::Array(items) => items.iter_mut().for_each(redact_strings),
+        Value::Object(fields) => fields.values_mut().for_each(redact_strings),
+        _ => {}
+    }
 }
 
 pub fn render(snapshot: &Snapshot, now: u64) -> String {
@@ -461,6 +484,52 @@ SESSION   STATE    SESSION NAME  PROJECT  SURFACE  ACTIVITY  TURN  FLAGS
 
 No pending decisions.
 "
+        );
+    }
+
+    #[test]
+    fn the_json_output_redacts_request_inputs_plans_and_prompts() {
+        let token = "s3cr3t-bearer-value";
+        let mut request = pending(
+            3,
+            "88888888",
+            "Bash",
+            json!({"command": format!("curl -H \"Authorization: Bearer {token}\" https://x.test")}),
+        );
+        request.permission_suggestions = json!([{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": format!("curl -H 'Authorization: Bearer {token}'")}]}]);
+        request.plan = Some(format!("Call the API with Bearer {token}"));
+        let mut working = session("88888888", SessionState::Working, NOW);
+        working.prompts = vec![Prompt {
+            id: 1,
+            preview: "use the token".to_string(),
+            created_ms: NOW,
+            status: PromptStatus::Queued,
+            reason: None,
+            text: Some(format!("use Bearer {token}")),
+        }];
+        let snapshot = Snapshot {
+            ended_count: 0,
+            sessions: vec![working],
+            pending: vec![request],
+            resolved: Vec::new(),
+            snoozed_until_ms: None,
+            account_usage: None,
+            config: beacon_core::Config::default().live(),
+        };
+        let output = to_json(&snapshot).unwrap();
+        assert!(!output.contains(token), "{output}");
+        let shown: Snapshot = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            shown.pending[0].tool_input,
+            json!({"command": "curl -H \"Authorization: ***\" https://x.test"})
+        );
+        assert_eq!(
+            shown.pending[0].plan.as_deref(),
+            Some("Call the API with Bearer ***")
+        );
+        assert_eq!(
+            shown.sessions[0].prompts[0].text.as_deref(),
+            Some("use Bearer ***")
         );
     }
 
