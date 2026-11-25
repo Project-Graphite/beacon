@@ -1,4 +1,5 @@
 Var BeaconKeepSetup
+Var BeaconUnhookResult
 
 !macro BeaconDefaultInstallDir
   ${If} $INSTDIR == "$LOCALAPPDATA\Beacon"
@@ -51,9 +52,14 @@ FunctionEnd
     StrCpy $BeaconKeepSetup 1
   ${EndIf}
   ${If} $BeaconKeepSetup = 0
-  ${AndIf} ${FileExists} "$INSTDIR\beacon.exe"
-    nsExec::Exec '"$INSTDIR\beacon.exe" uninstall --yes'
-    Pop $0
+    StrCpy $BeaconUnhookResult missing
+    ${If} ${FileExists} "$INSTDIR\beacon.exe"
+      nsExec::Exec '"$INSTDIR\beacon.exe" uninstall --yes'
+      Pop $BeaconUnhookResult
+    ${EndIf}
+    ${If} $BeaconUnhookResult != 0
+      MessageBox MB_OK|MB_ICONEXCLAMATION "Beacon's hooks could not be removed from your Claude Code settings file. Beacon's data in $LOCALAPPDATA\Beacon is kept, so beacon-hook.exe and the settings backups stay. Remove the beacon-hook.exe entries from the settings file's hooks, or reinstall Beacon and run 'beacon uninstall'." /SD IDOK
+    ${EndIf}
   ${EndIf}
   !insertmacro BeaconStop
 !macroend
@@ -62,7 +68,9 @@ FunctionEnd
   ${If} $BeaconKeepSetup = 0
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Beacon"
     Delete "$LOCALAPPDATA\Beacon\autostart"
-    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Also delete Beacon's data (settings, state, logs and hook backups) in $LOCALAPPDATA\Beacon?" /SD IDNO IDNO +2
-    RMDir /r "$LOCALAPPDATA\Beacon"
+    ${If} $BeaconUnhookResult == 0
+      MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Also delete Beacon's data (settings, state, logs and hook backups) in $LOCALAPPDATA\Beacon?" /SD IDNO IDNO +2
+      RMDir /r "$LOCALAPPDATA\Beacon"
+    ${EndIf}
   ${EndIf}
 !macroend
