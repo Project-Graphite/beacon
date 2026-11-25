@@ -6,14 +6,13 @@ use std::f32::consts::{PI, TAU};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
 
-pub const PAPER: Rgb = Rgb(0x0c, 0x0c, 0x0e);
-pub const SURFACE: Rgb = Rgb(0x13, 0x13, 0x16);
-pub const LINE: Rgb = Rgb(0x26, 0x26, 0x2c);
-pub const INK: Rgb = Rgb(0xe8, 0xe8, 0xea);
-pub const MUTED: Rgb = Rgb(0x8b, 0x8b, 0x95);
+pub const SURFACE: Rgb = Rgb(0x19, 0x19, 0x1d);
+pub const LINE: Rgb = Rgb(0x2b, 0x2b, 0x32);
+pub const INK: Rgb = Rgb(0xec, 0xec, 0xef);
+pub const MUTED: Rgb = Rgb(0x9b, 0x9b, 0xa5);
 pub const DORMANT: Rgb = Rgb(0x6e, 0x6e, 0x78);
-pub const LIVE: Rgb = Rgb(0x46, 0xb9, 0x7a);
-pub const WIP: Rgb = Rgb(0xd7, 0xa5, 0x4a);
+pub const LIVE: Rgb = Rgb(0x4c, 0xc2, 0x83);
+pub const WIP: Rgb = Rgb(0xe0, 0xad, 0x52);
 pub const DANGER: Rgb = Rgb(0xf2, 0xa0, 0x9a);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -25,7 +24,6 @@ pub enum Theme {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
-    pub paper: Rgb,
     pub surface: Rgb,
     pub line: Rgb,
     pub ink: Rgb,
@@ -62,7 +60,6 @@ impl Theme {
     pub fn palette(self) -> Palette {
         match self {
             Theme::Dark => Palette {
-                paper: PAPER,
                 surface: SURFACE,
                 line: LINE,
                 ink: INK,
@@ -73,12 +70,11 @@ impl Theme {
                 danger: DANGER,
             },
             Theme::Light => Palette {
-                paper: Rgb(0xf6, 0xf6, 0xf8),
                 surface: Rgb(0xff, 0xff, 0xff),
                 line: Rgb(0xdc, 0xdc, 0xe2),
                 ink: Rgb(0x18, 0x18, 0x1b),
-                muted: Rgb(0x62, 0x62, 0x6c),
-                dormant: Rgb(0x8e, 0x8e, 0x98),
+                muted: Rgb(0x55, 0x55, 0x5f),
+                dormant: Rgb(0x85, 0x85, 0x8e),
                 live: Rgb(0x1f, 0x8a, 0x54),
                 wip: Rgb(0xa8, 0x74, 0x1c),
                 danger: Rgb(0xc2, 0x45, 0x3b),
