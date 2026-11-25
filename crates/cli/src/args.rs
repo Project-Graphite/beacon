@@ -252,6 +252,7 @@ fn always_rule(rule: &str, scope: &str) -> Result<Value, String> {
     };
     let Some((tool, content)) = parsed.filter(|(tool, _)| {
         !tool.is_empty()
+            && !tool.starts_with('-')
             && !tool.contains(|character: char| character.is_whitespace() || character == ')')
     }) else {
         return Err(format!(
@@ -483,6 +484,9 @@ mod tests {
             &["decide", "4", "always", "Bash", "--scope", "everywhere"],
             &["decide", "4", "always", "Bash", "--scope"],
             &["decide", "4", "always", "Bash", "--global"],
+            &["decide", "4", "always", "--scope"],
+            &["decide", "4", "always", "--scope", "user"],
+            &["decide", "4", "always", "-Bash(ls)"],
         ] {
             assert!(parsed(line).is_err(), "{line:?}");
         }
