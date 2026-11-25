@@ -2878,6 +2878,20 @@ fn a_session_moving_on_expires_its_pending_decisions() {
 }
 
 #[test]
+fn a_session_a_reconcile_finds_gone_expires_its_pending_decisions() {
+    let mut fixture = fixture();
+    fixture.send(USER_PROMPT_SUBMIT);
+    let (id, mut receiver) = fixture.ask(PERMISSION_REQUEST);
+    fixture.engine.reconcile(Vec::new(), now_ms());
+    assert_eq!(receiver.try_recv(), RELEASED);
+    let snapshot = fixture.engine.snapshot();
+    assert!(snapshot.pending.is_empty());
+    assert_eq!(snapshot.resolved[0].id, id);
+    assert_eq!(snapshot.resolved[0].resolution, Resolution::Expired);
+    assert_eq!(fixture.state(), SessionState::Ended);
+}
+
+#[test]
 fn a_waiter_for_a_session_unknown_after_a_reconcile_is_released() {
     let mut fixture = fixture();
     let (_, mut unknown) = fixture.wait();

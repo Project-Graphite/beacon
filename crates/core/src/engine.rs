@@ -1391,6 +1391,7 @@ impl Engine {
             self.log.info(format_args!(
                 "session {session_id} is no longer listed and its process is gone"
             ));
+            self.expire_pending(&session_id);
             self.apply(&session_id, Input::ProcessGone);
         }
         let sessions = &self.sessions;
