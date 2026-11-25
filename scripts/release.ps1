@@ -16,7 +16,7 @@ if (Invoke-Checked { git -C $root status --porcelain }) {
     throw 'the working tree has uncommitted or untracked changes: commit or stash them before a release'
 }
 
-$version = (Get-Content (Join-Path $app 'src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json).version
+$version = [regex]::Match((Get-Content (Join-Path $root 'Cargo.toml') -Raw), '(?m)^\[workspace\.package\][^\[]*?^version\s*=\s*"([^"]+)"').Groups[1].Value
 
 Push-Location $root
 try {

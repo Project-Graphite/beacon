@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Beacon",
-  "version": "0.2.0",
   "identifier": "com.project-graphite.beacon",
   "build": {
     "devUrl": "http://localhost:5173",
@@ -18,6 +17,9 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "homepage": "https://github.com/Project-Graphite/beacon",
+    "copyright": "Copyright (c) 2026 Project Graphite contributors",
+    "shortDescription": "Every Claude Code session on your PC in one small panel.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
