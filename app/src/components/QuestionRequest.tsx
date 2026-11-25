@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Decision, PendingDecision } from '../beacon';
 import { NO_CHOICE, assembleAnswers, pickOption, pickOther, readQuestions, typeOther, type Choice } from '../lib/answers.ts';
+import { redact } from '../lib/redact.ts';
 import { FilledButton } from './FilledButton';
 import { JumpButton } from './JumpButton';
 import { KeyHint } from './KeyHint';
@@ -10,14 +11,16 @@ const DISMISSED = 'The user dismissed the question.';
 
 interface QuestionRequestProps {
   request: PendingDecision;
+  masked: boolean;
   sending: boolean;
   keys: Map<number, (key: string) => void> | null;
   send: (decision: Decision) => void;
   onJump: () => void;
 }
 
-export function QuestionRequest({ request, sending, keys, send, onJump }: QuestionRequestProps) {
+export function QuestionRequest({ request, masked, sending, keys, send, onJump }: QuestionRequestProps) {
   const questions = readQuestions(request.tool_input);
+  const shown = (text: string) => (masked ? redact(text) : text);
   const [choices, setChoices] = useState<Choice[]>(() => questions.map(() => NO_CHOICE));
   const answers = assembleAnswers(questions, choices);
   const choose = (index: number, choice: Choice) =>
@@ -45,10 +48,10 @@ export function QuestionRequest({ request, sending, keys, send, onJump }: Questi
           <div key={group} className="mt-2 first:mt-1">
             {question.header && (
               <span className="inline-block rounded-mark border border-line px-1.5 text-micro text-muted">
-                {question.header}
+                {shown(question.header)}
               </span>
             )}
-            <p className="mt-1 text-secondary text-ink">{question.question}</p>
+            <p className="mt-1 text-secondary text-ink">{shown(question.question)}</p>
             <div className="mt-1 space-y-0.5">
               {question.options.map((option) => (
                 <label
@@ -63,9 +66,9 @@ export function QuestionRequest({ request, sending, keys, send, onJump }: Questi
                     className="translate-y-px accent-ink"
                   />
                   <span className="min-w-0">
-                    <span className="text-secondary text-ink">{option.label}</span>
+                    <span className="text-secondary text-ink">{shown(option.label)}</span>
                     {option.description && (
-                      <span className="block text-micro text-muted">{option.description}</span>
+                      <span className="block text-micro text-muted">{shown(option.description)}</span>
                     )}
                   </span>
                 </label>
@@ -80,7 +83,7 @@ export function QuestionRequest({ request, sending, keys, send, onJump }: Questi
                 />
                 <span className="text-secondary text-ink">Other</span>
                 <input
-                  aria-label={`Other answer to ${question.question}`}
+                  aria-label={`Other answer to ${shown(question.question)}`}
                   value={choice.other ?? ''}
                   placeholder="Type an answer"
                   onChange={(event) => choose(index, typeOther(question, choice, event.target.value))}

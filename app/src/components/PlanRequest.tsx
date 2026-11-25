@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Decision, PendingDecision } from '../beacon';
 import { textLines } from '../lib/lines.ts';
+import { redact } from '../lib/redact.ts';
 import { FilledButton } from './FilledButton';
 import { JumpButton } from './JumpButton';
 import { KeyHint } from './KeyHint';
@@ -14,13 +15,14 @@ const KEEP_PLANNING = 'The user wants to keep planning.';
 
 interface PlanRequestProps {
   request: PendingDecision;
+  masked: boolean;
   sending: boolean;
   keys: Map<number, (key: string) => void> | null;
   send: (decision: Decision) => void;
   onJump: () => void;
 }
 
-export function PlanRequest({ request, sending, keys, send, onJump }: PlanRequestProps) {
+export function PlanRequest({ request, masked, sending, keys, send, onJump }: PlanRequestProps) {
   const [gaveUp, setGaveUp] = useState(() => Date.now() - request.created_ms >= PLAN_WAIT_MS);
   const [feedback, setFeedback] = useState(false);
 
@@ -47,7 +49,7 @@ export function PlanRequest({ request, sending, keys, send, onJump }: PlanReques
   return (
     <>
       {request.plan !== null ? (
-        <LineClamp lines={textLines(request.plan)}>
+        <LineClamp lines={textLines(masked ? redact(request.plan) : request.plan)}>
           {(shown) => (
             <div className="mt-1 rounded-field bg-surface px-2 py-1.5">
               <Markdown source={shown.join('\n')} />

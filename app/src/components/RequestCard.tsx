@@ -52,7 +52,7 @@ export function RequestCard({ request, marked, currentId, keys, onJump }: Reques
       )}
       <div className="flex items-baseline gap-2">
         <span className="min-w-0 truncate font-semibold text-ink">{title}</span>
-        {request.kind === 'tool' && JSON.stringify(redactJson('', request.tool_input)) !== JSON.stringify(request.tool_input) && (
+        {JSON.stringify(redactJson('', [request.tool_input, request.plan])) !== JSON.stringify([request.tool_input, request.plan]) && (
           <span className="ml-auto">
             <TextButton onClick={() => setUnmasked(!unmasked)}>{unmasked ? 'Mask secrets' : 'Show unmasked'}</TextButton>
           </span>
@@ -74,8 +74,12 @@ export function RequestCard({ request, marked, currentId, keys, onJump }: Reques
           />
         </>
       )}
-      {request.kind === 'question' && <QuestionRequest request={request} sending={sending} keys={keys} send={send} onJump={onJump} />}
-      {request.kind === 'plan' && <PlanRequest request={request} sending={sending} keys={keys} send={send} onJump={onJump} />}
+      {request.kind === 'question' && (
+        <QuestionRequest request={request} masked={!unmasked} sending={sending} keys={keys} send={send} onJump={onJump} />
+      )}
+      {request.kind === 'plan' && (
+        <PlanRequest request={request} masked={!unmasked} sending={sending} keys={keys} send={send} onJump={onJump} />
+      )}
       {failure && <p className="mt-1.5 text-micro text-danger [overflow-wrap:anywhere]">{failure}</p>}
     </div>
   );
