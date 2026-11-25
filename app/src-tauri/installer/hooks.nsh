@@ -67,10 +67,12 @@ FunctionEnd
 !macro NSIS_HOOK_POSTUNINSTALL
   ${If} $BeaconKeepSetup = 0
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Beacon"
+    DeleteRegKey HKCU "Software\Classes\AppUserModelId\${BUNDLEID}"
     Delete "$LOCALAPPDATA\Beacon\autostart"
     ${If} $BeaconUnhookResult == 0
-      MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Also delete Beacon's data (settings, state, logs and hook backups) in $LOCALAPPDATA\Beacon?" /SD IDNO IDNO +2
+      MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Also delete Beacon's data (settings, state, logs and hook backups) in $LOCALAPPDATA\Beacon?" /SD IDNO IDNO +3
       RMDir /r "$LOCALAPPDATA\Beacon"
+      RMDir /r "$LOCALAPPDATA\${BUNDLEID}"
     ${EndIf}
   ${EndIf}
 !macroend
