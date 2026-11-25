@@ -202,22 +202,25 @@ pub fn tab_tone(snapshot: Option<&Snapshot>) -> TabTone {
     }
 }
 
+fn engaged(session: &Session) -> bool {
+    !session.dismissed
+        && matches!(
+            mark_kind(session.state),
+            Some(MarkKind::Starting | MarkKind::Working | MarkKind::NeedsInput | MarkKind::Stalled)
+        )
+}
+
 pub fn claude_active(snapshot: Option<&Snapshot>) -> bool {
     snapshot.is_some_and(|snapshot| {
-        snapshot.sessions.iter().any(|session| {
-            session.alerting
-                || !session.dismissed
-                    && matches!(
-                        mark_kind(session.state),
-                        Some(
-                            MarkKind::Starting
-                                | MarkKind::Working
-                                | MarkKind::NeedsInput
-                                | MarkKind::Stalled
-                        )
-                    )
-        })
+        snapshot
+            .sessions
+            .iter()
+            .any(|session| session.alerting || engaged(session))
     })
+}
+
+pub fn claude_engaged(snapshot: Option<&Snapshot>) -> bool {
+    snapshot.is_some_and(|snapshot| snapshot.sessions.iter().any(engaged))
 }
 
 pub fn overlay_wanted(snapshot: Option<&Snapshot>, visibility: Visibility) -> bool {
@@ -737,6 +740,54 @@ pub mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_pin_holds_while_a_session_starts_works_stalls_or_needs_you_but_not_once_it_is_done() {
+        assert!(!claude_engaged(None));
+        for state in [
+            SessionState::Starting,
+            SessionState::Working,
+            SessionState::NeedsPermission,
+            SessionState::NeedsAnswer,
+            SessionState::NeedsPlanApproval,
+            SessionState::NeedsMcpInput,
+            SessionState::Stalled,
+        ] {
+            assert!(
+                claude_engaged(Some(&snapshot(vec![session("a", state)]))),
+                "{state:?}"
+            );
+            assert!(
+                claude_engaged(Some(&snapshot(vec![snoozed(session("a", state))]))),
+                "{state:?}"
+            );
+            assert!(
+                !claude_engaged(Some(&snapshot(vec![hidden(session("a", state))]))),
+                "{state:?}"
+            );
+        }
+        for state in [
+            SessionState::Done,
+            SessionState::Error,
+            SessionState::Idle,
+            SessionState::Ended,
+        ] {
+            assert!(
+                !claude_engaged(Some(&snapshot(vec![session("a", state)]))),
+                "{state:?}"
+            );
+        }
+        let finished = snapshot(vec![
+            session("a", SessionState::Done),
+            session("b", SessionState::Idle),
+        ]);
+        assert!(claude_active(Some(&finished)));
+        assert!(!claude_engaged(Some(&finished)));
+        assert!(claude_engaged(Some(&snapshot(vec![
+            session("a", SessionState::Done),
+            session("b", SessionState::Working),
+        ]))));
     }
 
     #[test]

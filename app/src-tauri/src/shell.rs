@@ -6,7 +6,7 @@ use crate::geometry::{
 use crate::jump;
 use crate::model::{
     LINGER, Peek, PeekBatch, PillModel, Pin, Presence, TabTone, Unseen, Unused, alerting_count,
-    claude_active, in_use, overlay_wanted, peek_for, pin_decision, tab_tone,
+    claude_active, claude_engaged, in_use, overlay_wanted, peek_for, pin_decision, tab_tone,
 };
 use crate::panel::{self, PANEL};
 use crate::platform::{
@@ -318,7 +318,7 @@ impl Shell {
     }
 
     fn follow_activity(&mut self) {
-        let active = claude_active(self.snapshot.as_ref());
+        let active = claude_engaged(self.snapshot.as_ref());
         let (pin, dismissed) = pin_decision(
             self.was_active,
             active,
