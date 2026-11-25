@@ -323,6 +323,35 @@ fn a_no_op_reinstall_writes_no_new_backup() {
 }
 
 #[test]
+fn repairing_an_altered_install_keeps_a_copy_of_the_replaced_file() {
+    let case = case("realistic");
+    case.install();
+    let (mut settings, format) = settings::parse(&case.settings().unwrap()).unwrap();
+    let beacon_group = settings["hooks"]["SessionStart"]
+        .as_array_mut()
+        .unwrap()
+        .last_mut()
+        .unwrap();
+    beacon_group["hooks"][0]["async"] = Value::Bool(false);
+    let altered = format.write(&settings);
+    std::fs::write(&case.paths.settings, &altered).unwrap();
+    case.install();
+    assert_eq!(case.settings(), Some(case.golden("realistic")));
+    let copies: Vec<String> = backup_names(&case.paths)
+        .into_iter()
+        .filter(|name| name.ends_with(".before-install.json"))
+        .collect();
+    assert_eq!(copies.len(), 1);
+    assert_eq!(
+        shown(Some(
+            &std::fs::read(case.paths.backups().join(&copies[0])).unwrap()
+        )),
+        shown(Some(&altered))
+    );
+    assert_eq!(read_record(&case.paths).unwrap().unwrap().backup_path, None);
+}
+
+#[test]
 fn backups_made_in_the_same_second_get_distinct_names() {
     let root = TempDir::new("backup-names");
     let first = unused_backup(&root.0, ".json");

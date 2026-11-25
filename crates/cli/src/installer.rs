@@ -147,14 +147,15 @@ pub fn install(paths: &Paths, apply: bool) -> Result<String, String> {
         std::fs::rename(&staged, &helper)
             .context(format_args!("cannot replace {}", helper.display()))?;
     }
-    let (existed_before, backup_path, created) = match previous {
+    let (existed_before, backup_path, created, restore_point_written) = match previous {
         Some(previous) if std::fs::read(&previous.installed_copy_path).ok() == current => (
             previous.existed_before,
             previous.backup_path,
             previous.created,
+            false,
         ),
-        Some(_) if settings::has_beacon(&original) => (true, None, created),
-        None if current.as_ref() == Some(&installed) => (true, None, created),
+        Some(_) if settings::has_beacon(&original) => (true, None, created, false),
+        None if current.as_ref() == Some(&installed) => (true, None, created, false),
         _ => {
             let backup_path = match &current {
                 Some(bytes) => {
@@ -164,10 +165,17 @@ pub fn install(paths: &Paths, apply: bool) -> Result<String, String> {
                 }
                 None => None,
             };
-            (current.is_some(), backup_path, created)
+            (current.is_some(), backup_path, created, true)
         }
     };
     if current.as_ref() != Some(&installed) {
+        if !restore_point_written && let Some(bytes) = &current {
+            write_file(
+                &unused_backup(&paths.backups(), ".before-install.json"),
+                bytes,
+            )?;
+            prune_backups(&paths.backups(), ".before-install.json", &[]);
+        }
         write_atomic(&paths.settings, &installed)?;
     }
     let installed_copy_path = match previous_copy {
