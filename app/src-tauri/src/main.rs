@@ -150,11 +150,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             {
                 log_error!("cannot register the notification identity: {error}");
             }
-            if let Err(error) = settings::apply_start_mode(
-                &feed.home,
-                positions::ui_settings(&feed.home).start_mode,
-                installed,
-            ) {
+            if installed
+                && let Err(error) = settings::apply_start_mode(
+                    &feed.home,
+                    positions::ui_settings(&feed.home).start_mode,
+                    installed,
+                )
+            {
                 log_error!("cannot apply the start mode: {error}");
             }
             let publisher = handle.clone();
