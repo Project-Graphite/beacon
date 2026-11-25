@@ -829,6 +829,7 @@ impl Pill {
             );
             self.reveal.update(rect, &self.hit_canvas, u8::MAX);
         }
+        self.reveal_tracking &= strip.is_some();
         self.reveal.show(strip.is_some());
     }
 
