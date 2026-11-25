@@ -211,7 +211,8 @@ export function App() {
   const endedKey = `${snapshot?.ended_count ?? 0}:${recentlyEnded.map((session) => session.session_id)}`;
   const crossed = useMemo(() => crossedOff(sessions), [sessions]);
   const listOrder = [...groups.flatMap((group) => group.sessions), ...ended];
-  const visible = [...groups.flatMap((group) => group.sessions), ...(endedOpen ? ended : [])];
+  const endedShown = endedOpen && endedList !== null;
+  const visible = [...groups.flatMap((group) => group.sessions), ...(endedShown ? ended : [])];
   const openSession = findSession(sessions, ended, openId);
   const queue = requestQueue(snapshot?.pending ?? []);
   const current = currentRequest(queue, chosenRequestId);
@@ -248,7 +249,12 @@ export function App() {
   );
 
   useEffect(() => {
-    if (endedOpen) getEnded().then(setEndedList, fail);
+    if (!endedOpen) return;
+    let current = true;
+    getEnded().then((list) => current && setEndedList(list), fail);
+    return () => {
+      current = false;
+    };
   }, [endedOpen, endedKey, fail]);
 
   const firstVisibleId = visible[0]?.session_id ?? null;
@@ -308,17 +314,6 @@ export function App() {
     window.clearTimeout(hiddenTimer.current);
     setHidden(null);
     run(undismiss(sessionId));
-  };
-
-  const toggleEnded = () => {
-    if (endedOpen) setEndedOpen(false);
-    else
-      run(
-        getEnded().then((list) => {
-          setEndedList(list);
-          setEndedOpen(true);
-        }),
-      );
   };
 
   const reportJump = (sessionId: string, { notice, succeeded }: JumpReport) => {
@@ -521,9 +516,9 @@ export function App() {
           ended={ended}
           endedCount={snapshot?.ended_count ?? 0}
           crossed={crossed}
-          endedOpen={endedOpen}
+          endedOpen={endedShown}
           crossedOpen={crossedOpen}
-          onToggleEnded={toggleEnded}
+          onToggleEnded={() => setEndedOpen(!endedOpen)}
           onToggleCrossed={() => setCrossedOpen(!crossedOpen)}
           renderRow={(session) => renderRow(session, false)}
           renderCrossedRow={(session) => renderRow(session, true)}
