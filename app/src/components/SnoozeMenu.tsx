@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { snooze, unsnooze } from '../beacon';
 import { useExit } from '../hooks/useExit.ts';
 import { clockTime } from '../lib/format.ts';
@@ -17,6 +17,7 @@ interface SnoozeMenuProps {
 export function SnoozeMenu({ snoozedUntil, soundsEnabled, onToggleSounds, run }: SnoozeMenuProps) {
   const [open, setOpen] = useState(false);
   const menu = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const shown = useExit(open);
 
   useEffect(() => {
@@ -28,8 +29,9 @@ export function SnoozeMenu({ snoozedUntil, soundsEnabled, onToggleSounds, run }:
     return () => window.removeEventListener('pointerdown', closeOutside);
   }, [open]);
 
-  const choose = (action: Promise<unknown>) => {
+  const choose = (event: MouseEvent, action: Promise<unknown>) => {
     setOpen(false);
+    if (event.detail === 0) trigger.current?.focus();
     run(action);
   };
 
@@ -41,14 +43,15 @@ export function SnoozeMenu({ snoozedUntil, soundsEnabled, onToggleSounds, run }:
         if (event.key === 'Escape' && open) {
           event.stopPropagation();
           setOpen(false);
+          trigger.current?.focus();
         }
       }}
     >
       <button
+        ref={trigger}
         type="button"
         aria-label="Snooze and sounds"
         title={snoozedUntil === null ? 'Snooze and sounds' : `Snoozed until ${clockTime(snoozedUntil)}`}
-        aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
         className={`press grid size-7 place-items-center rounded-[7px] hover:bg-surface hover:text-ink ${snoozedUntil === null ? 'text-muted' : 'text-ink'}`}
@@ -57,18 +60,17 @@ export function SnoozeMenu({ snoozedUntil, soundsEnabled, onToggleSounds, run }:
       </button>
       {shown.mounted && (
         <div
-          role="menu"
           className={`absolute top-full right-0 z-20 mt-1.5 w-60 origin-top-right rounded-[10px] border border-line bg-raised p-1.5 text-secondary shadow-popover ${shown.leaving ? 'pointer-events-none animate-dismiss' : 'animate-appear'}`}
         >
           {[5, 15, 60].map((minutes) => (
-            <button key={minutes} type="button" role="menuitem" onClick={() => choose(snooze(null, minutes))} className={ITEM}>
+            <button key={minutes} type="button" onClick={(event) => choose(event, snooze(null, minutes))} className={ITEM}>
               Snooze for {minutes === 60 ? '1 hour' : `${minutes} minutes`}
             </button>
           ))}
           {snoozedUntil !== null && (
             <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-line-soft px-2.5 pt-2 pb-1">
               <span className="text-muted">Snoozed until {clockTime(snoozedUntil)}</span>
-              <OutlineButton role="menuitem" onClick={() => choose(unsnooze(null))}>
+              <OutlineButton onClick={(event) => choose(event, unsnooze(null))}>
                 End snooze
               </OutlineButton>
             </div>
@@ -76,8 +78,7 @@ export function SnoozeMenu({ snoozedUntil, soundsEnabled, onToggleSounds, run }:
           <div className="mt-1.5 border-t border-line-soft pt-1.5">
             <button
               type="button"
-              role="menuitemcheckbox"
-              aria-checked={soundsEnabled}
+              aria-pressed={soundsEnabled}
               onClick={onToggleSounds}
               className={`${ITEM} justify-between`}
             >
