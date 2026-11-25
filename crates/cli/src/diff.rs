@@ -43,7 +43,7 @@ pub fn unified(before: &str, after: &str, before_label: &str, after_label: &str)
                 Edit::Added => '+',
             };
             text.push(marker);
-            text.push_str(line);
+            text.push_str(&beacon_core::redact(line));
             text.push('\n');
         }
     }

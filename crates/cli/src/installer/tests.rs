@@ -233,6 +233,23 @@ fn the_plan_changes_nothing_and_shows_the_diff_and_warnings() {
 }
 
 #[test]
+fn the_plans_redact_secrets_in_the_settings_lines_they_show() {
+    let case = case("empty-object");
+    let token = "ghp_0123456789abcdefABCDEF";
+    std::fs::write(
+        &case.paths.settings,
+        format!("{{\n  \"env\": {{\n    \"GITHUB_TOKEN\": \"{token}\"\n  }}\n}}\n"),
+    )
+    .unwrap();
+    let install_plan = install(&case.paths, false).unwrap();
+    case.install();
+    for plan in [install_plan, uninstall(&case.paths, false).unwrap()] {
+        assert!(plan.contains("     \"GITHUB_TOKEN\": ***\n"), "{plan}");
+        assert!(!plan.contains(token), "{plan}");
+    }
+}
+
+#[test]
 fn disabled_hooks_and_managed_hooks_only_are_warned_about() {
     let case = case("empty-object");
     std::fs::write(&case.paths.settings, "{\n  \"disableAllHooks\": true\n}\n").unwrap();
