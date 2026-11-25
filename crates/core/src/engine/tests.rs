@@ -2713,6 +2713,29 @@ fn titles_come_from_the_prompt_and_the_transcript_and_a_hook_title_wins() {
 }
 
 #[test]
+fn hook_titles_and_listed_names_are_one_redacted_line_of_eighty_characters_at_most() {
+    let mut fixture = fixture();
+    let long = format!("first line\nAPI_KEY=abc123 {}", "é".repeat(200));
+    fixture.send(&custom("SessionStart", json!({"session_title": long})));
+    let title = fixture.session().title.unwrap();
+    assert!(title.starts_with("first line API_KEY=*** é"));
+    assert_eq!(title.chars().count(), 80);
+    fixture.send(&custom(
+        "UserPromptSubmit",
+        json!({"session_title": "second\ntitle"}),
+    ));
+    assert_eq!(fixture.session().title.as_deref(), Some("second title"));
+    fixture.engine.reconcile(
+        vec![ListedSession {
+            name: Some(long),
+            ..listed(SESSION, None, "busy")
+        }],
+        now_ms(),
+    );
+    assert_eq!(fixture.session().listed_name, Some(title));
+}
+
+#[test]
 fn a_session_without_a_transcript_is_looked_up_once_and_adopts_what_is_found() {
     let mut fixture = fixture();
     fixture.engine.reconcile(

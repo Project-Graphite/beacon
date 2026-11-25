@@ -790,7 +790,10 @@ impl Engine {
                 session_title,
             } => {
                 session.model = model.or(session.model.take());
-                session.title = session_title.or(session.title.take());
+                session.title = session_title
+                    .as_deref()
+                    .map(title_line)
+                    .or(session.title.take());
                 session.dismissed = false;
                 if source.as_deref() == Some("clear") {
                     session.clear_tasks();
@@ -810,7 +813,10 @@ impl Engine {
                 if let Some(prompt) = prompt {
                     session.last_prompt = Some(title_line(&prompt));
                 }
-                session.title = session_title.or(session.title.take());
+                session.title = session_title
+                    .as_deref()
+                    .map(title_line)
+                    .or(session.title.take());
                 session.turn_started_ms = Some(now);
                 session.dismissed = false;
                 (Some(Input::PromptSubmitted), Followup::Nothing)
@@ -1339,7 +1345,7 @@ impl Engine {
                     }
                 }
             }
-            session.listed_name = entry.name;
+            session.listed_name = entry.name.as_deref().map(title_line);
             match &session.transcript_path {
                 None => {
                     let runtime = self.runtime.entry(entry.session_id.clone()).or_default();
