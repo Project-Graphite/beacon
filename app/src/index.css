@@ -236,9 +236,9 @@ textarea {
 
 @layer base {
   button:focus-visible,
-  input[type='checkbox']:focus-visible,
-  input[type='radio']:focus-visible,
-  input[type='range']:focus-visible {
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--color-ink) 70%, transparent);
     outline-offset: 2px;
   }

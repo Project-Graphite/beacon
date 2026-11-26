@@ -35,7 +35,7 @@ export function MessageField({ label, placeholder, sendLabel, disabled, onSend, 
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.nativeEvent.isComposing) send();
         }}
-        className="h-7 min-w-0 flex-1 rounded-field border border-line bg-raised px-2.5 text-secondary text-ink shadow-card placeholder:text-faint focus:border-faint focus:outline-none"
+        className="h-7 min-w-0 flex-1 rounded-field border border-line bg-raised px-2.5 text-secondary text-ink shadow-card placeholder:text-faint"
       />
       <OutlineButton disabled={disabled || !message.trim()} onClick={send}>
         {sendLabel}

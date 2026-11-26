@@ -32,14 +32,14 @@ export function RuleEditor({ initialRule, initialDestination, disabled, onSave, 
         value={ruleText}
         disabled={disabled}
         onChange={(event) => setRuleText(event.target.value)}
-        className={`h-7 w-full rounded-field border bg-raised px-2.5 font-mono text-secondary text-ink shadow-card focus:outline-none ${rule ? 'border-line focus:border-faint' : 'border-danger'}`}
+        className={`h-7 w-full rounded-field border bg-raised px-2.5 font-mono text-secondary text-ink shadow-card ${rule ? 'border-line' : 'border-danger'}`}
       />
       <select
         aria-label="Where the rule applies"
         value={destination}
         disabled={disabled}
         onChange={(event) => setDestination(event.target.value as RuleDestination)}
-        className="h-7 w-full rounded-field border border-line bg-raised px-2 text-secondary text-ink shadow-card focus:border-faint focus:outline-none"
+        className="h-7 w-full rounded-field border border-line bg-raised px-2 text-secondary text-ink shadow-card"
       >
         {SCOPES.map((scope) => (
           <option key={scope.destination} value={scope.destination}>

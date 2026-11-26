@@ -58,7 +58,7 @@ import { TextButton } from './TextButton';
 export type SettingsPart = 'overlay' | 'attention' | 'startup' | 'behaviour' | 'hooks' | 'about';
 
 const FIELD =
-  'h-7 rounded-field border border-line bg-raised px-2.5 text-secondary text-ink shadow-card transition-colors duration-150 ease-settle placeholder:text-faint focus:border-faint focus:outline-none disabled:opacity-45';
+  'h-7 rounded-field border border-line bg-raised px-2.5 text-secondary text-ink shadow-card transition-colors duration-150 ease-settle placeholder:text-faint disabled:opacity-45';
 
 interface SettingsViewProps {
   config: LiveConfig | null;

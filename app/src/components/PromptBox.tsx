@@ -63,7 +63,7 @@ export function PromptBox({ session, onJumpReport }: PromptBoxProps) {
                   send();
                 }
               }}
-              className="block max-h-[calc(6lh+18px)] min-h-[calc(2lh+18px)] w-full resize-none rounded-field border border-line bg-raised px-3 py-2 text-ink shadow-card transition-colors duration-150 ease-settle field-sizing-content placeholder:text-faint focus:border-faint focus:outline-none"
+              className="block max-h-[calc(6lh+18px)] min-h-[calc(2lh+18px)] w-full resize-none rounded-field border border-line bg-raised px-3 py-2 text-ink shadow-card transition-colors duration-150 ease-settle field-sizing-content placeholder:text-faint"
             />
             {sentText && (
               <p
