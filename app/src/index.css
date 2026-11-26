@@ -11,6 +11,7 @@
   --color-danger: #f2a09a;
   --color-live: #4cc283;
   --color-wip: #e0ad52;
+  --color-wip-tint: var(--color-wip);
   --color-dormant: #6e6e78;
   --color-highlight: #d7b24a;
   --color-raised: #1d1d22;
@@ -187,6 +188,7 @@
     --color-danger: #ad3a31;
     --color-live: #187045;
     --color-wip: #8a5a0a;
+    --color-wip-tint: #a8741c;
     --color-highlight: #7a5c0c;
     --color-dormant: #a0a0a8;
     --color-raised: #ffffff;

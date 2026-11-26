@@ -56,7 +56,7 @@ export const SessionRow = memo(function SessionRow({
     >
       <div
         onClick={open}
-        className={`relative transition-colors duration-150 ease-settle ${crossedOff ? 'opacity-45' : alert && !selected ? 'bg-wip/[0.07] hover:bg-wip/[0.11]' : 'hover:bg-surface'} ${selected ? 'bg-surface' : ''}`}
+        className={`relative transition-colors duration-150 ease-settle ${crossedOff ? 'opacity-45' : alert ? `hover:bg-wip-tint/[0.11] ${selected ? 'bg-wip-tint/[0.11]' : 'bg-wip-tint/[0.07]'}` : 'hover:bg-surface'} ${selected && !alert ? 'bg-surface' : ''}`}
       >
         <span data-flash aria-hidden="true" className="pointer-events-none absolute inset-0 bg-ink/8 opacity-0" />
         <div className="relative flex h-[52px] items-center gap-3 pr-2.5 pl-4">

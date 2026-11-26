@@ -39,16 +39,15 @@ export function RequestRow({ request, marked, currentId, keys, onOpen }: Request
     <div
       id={keys ? requestId(request.id) : undefined}
       data-motion={`request:${request.id}`}
-      className="relative flex min-h-9 scroll-my-2 items-center gap-2.5 pr-3 pb-2.5 pl-[56px]"
+      className="flex min-h-9 scroll-my-2 items-center gap-2.5 pr-3 pb-2.5 pl-[56px]"
     >
-      {marked && <span aria-hidden="true" className="absolute top-0.5 bottom-3 left-[44px] w-[3px] rounded-full bg-wip" />}
       {destructive && (
         <span role="img" aria-label={`Looks destructive: ${destructive}`} title={`Looks destructive: ${destructive}`} className="size-2 shrink-0 rounded-full bg-danger" />
       )}
       <span
         role={failure ? 'alert' : undefined}
         title={line}
-        className={`min-w-0 flex-1 truncate text-secondary ${request.kind === 'tool' && !failure ? 'font-mono' : ''} ${failure ? 'text-danger' : 'text-ink'}`}
+        className={`min-w-0 flex-1 truncate text-secondary ${request.kind === 'tool' && !failure ? 'font-mono' : ''} ${marked ? 'font-medium' : ''} ${failure ? 'text-danger' : 'text-ink'}`}
       >
         {line}
       </span>
