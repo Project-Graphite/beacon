@@ -113,7 +113,7 @@ export function Select<T extends string | number>({
             aria-labelledby={field.labelId}
             aria-multiselectable={multiple}
             style={place}
-            className={`fixed z-30 max-w-[calc(100vw-16px)] rounded-[10px] ${shown.leaving ? 'pointer-events-none animate-dismiss' : 'animate-appear'} border border-line bg-raised p-1.5 text-secondary shadow-popover ${'bottom' in place ? 'origin-bottom-right' : 'origin-top-right'}`}
+            className={`fixed z-30 max-w-[calc(100vw-16px)] rounded-popover ${shown.leaving ? 'pointer-events-none animate-dismiss' : 'animate-appear'} border border-line bg-raised p-1.5 text-secondary shadow-popover ${'bottom' in place ? 'origin-bottom-right' : 'origin-top-right'}`}
           >
             {choices.map((choice, index) => (
               <li
@@ -125,7 +125,7 @@ export function Select<T extends string | number>({
                 onPointerDown={(event) => event.preventDefault()}
                 onPointerEnter={() => setActive(index)}
                 onClick={() => choose(index)}
-                className={`flex h-8 cursor-default items-center justify-between gap-4 rounded-[7px] px-2.5 text-ink transition-colors duration-100 ${index === active ? 'bg-surface' : ''}`}
+                className={`flex h-8 cursor-default items-center justify-between gap-4 rounded-field px-2.5 text-ink transition-colors duration-100 ${index === active ? 'bg-surface' : ''}`}
               >
                 <span className="truncate">{choice.label}</span>
                 <Icon

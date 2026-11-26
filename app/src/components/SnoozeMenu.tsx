@@ -5,7 +5,7 @@ import { clockTime } from '../lib/format.ts';
 import { Icon } from './Icon';
 import { OutlineButton } from './OutlineButton';
 
-const ITEM = 'flex h-8 w-full items-center rounded-[7px] px-2.5 text-left text-ink transition-colors duration-120 ease-settle hover:bg-surface';
+const ITEM = 'flex h-8 w-full items-center rounded-field px-2.5 text-left text-ink transition-colors duration-120 ease-settle hover:bg-surface';
 
 interface SnoozeMenuProps {
   snoozedUntil: number | null;
@@ -54,13 +54,13 @@ export function SnoozeMenu({ snoozedUntil, soundsEnabled, onToggleSounds, run }:
         title={snoozedUntil === null ? 'Snooze and sounds' : `Snoozed until ${clockTime(snoozedUntil)}`}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className={`press grid size-7 place-items-center rounded-[7px] hover:bg-surface hover:text-ink ${snoozedUntil === null ? 'text-muted' : 'text-ink'}`}
+        className={`press grid size-7 place-items-center rounded-field hover:bg-surface hover:text-ink ${snoozedUntil === null ? 'text-muted' : 'text-ink'}`}
       >
         <Icon name={snoozedUntil === null ? 'bell' : 'bell-off'} />
       </button>
       {shown.mounted && (
         <div
-          className={`absolute top-full right-0 z-20 mt-1.5 w-60 origin-top-right rounded-[10px] border border-line bg-raised p-1.5 text-secondary shadow-popover ${shown.leaving ? 'pointer-events-none animate-dismiss' : 'animate-appear'}`}
+          className={`absolute top-full right-0 z-20 mt-1.5 w-60 origin-top-right rounded-popover border border-line bg-raised p-1.5 text-secondary shadow-popover ${shown.leaving ? 'pointer-events-none animate-dismiss' : 'animate-appear'}`}
         >
           {[5, 15, 60].map((minutes) => (
             <button key={minutes} type="button" onClick={(event) => choose(event, snooze(null, minutes))} className={ITEM}>

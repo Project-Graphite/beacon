@@ -22,7 +22,7 @@ export function SessionDetails({ session, detail, open, onToggle }: SessionDetai
         type="button"
         aria-expanded={open}
         onClick={onToggle}
-        className="press flex items-center gap-1.5 rounded-[6px] text-secondary text-faint hover:text-muted"
+        className="press flex items-center gap-1.5 rounded-field text-secondary text-faint hover:text-muted"
       >
         <Icon name="chevron" className={`size-3 transition-transform duration-200 ease-settle ${open ? 'rotate-90' : ''}`} />
         More

@@ -8,7 +8,7 @@ function inlineNodes(nodes: Inline[]): ReactNode[] {
         return node.text;
       case 'code':
         return (
-          <code key={index} className="rounded-[4px] bg-surface px-1 font-mono text-micro">
+          <code key={index} className="rounded-mark bg-surface px-1 font-mono text-micro">
             {node.text}
           </code>
         );

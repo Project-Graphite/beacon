@@ -35,7 +35,7 @@ export function UsageButton({ usage }: { usage: AccountUsage }) {
       title={usageTitle(usage, hoveredAt, failure)}
       onPointerEnter={() => setHoveredAt(Date.now())}
       onClick={refresh}
-      className="press flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] px-2 text-micro text-muted tabular-nums hover:bg-surface hover:text-ink disabled:animate-pulse disabled:cursor-progress disabled:text-faint disabled:hover:bg-transparent"
+      className="press flex h-7 shrink-0 items-center gap-1.5 rounded-field px-2 text-micro text-muted tabular-nums hover:bg-surface hover:text-ink disabled:animate-pulse disabled:cursor-progress disabled:text-faint disabled:hover:bg-transparent"
     >
       {failure !== null && <span className="size-1.5 rounded-full bg-danger" />}
       {label}

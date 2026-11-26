@@ -20,6 +20,7 @@
   --font-mono: 'Cascadia Mono', ui-monospace, 'JetBrains Mono', Consolas, monospace;
   --radius-mark: 0.3rem;
   --radius-field: 0.5rem;
+  --radius-popover: 0.625rem;
   --radius-panel: 0.875rem;
   --radius-card: 0.75rem;
   --shadow-popover: 0 16px 36px -12px rgb(0 0 0 / 0.65), 0 2px 6px -2px rgb(0 0 0 / 0.4);

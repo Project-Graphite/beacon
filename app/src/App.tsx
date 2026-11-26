@@ -579,7 +579,7 @@ export function App() {
               role="status"
               onPointerEnter={() => window.clearTimeout(hiddenTimer.current)}
               onPointerLeave={() => (hiddenTimer.current = window.setTimeout(() => setHidden(null), HIDDEN_NOTICE_MS))}
-              className="absolute inset-x-3 bottom-3 z-30 flex origin-bottom animate-appear items-center gap-3 rounded-[10px] border border-line bg-raised py-2 pr-3 pl-3.5 text-secondary shadow-popover"
+              className="absolute inset-x-3 bottom-3 z-30 flex origin-bottom animate-appear items-center gap-3 rounded-popover border border-line bg-raised py-2 pr-3 pl-3.5 text-secondary shadow-popover"
             >
               <p className="min-w-0 flex-1 truncate text-muted">
                 <span className="text-ink">{hidden.title}</span> is hidden until its next prompt

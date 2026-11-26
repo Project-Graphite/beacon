@@ -54,7 +54,7 @@ export function ShortcutRecorder({ field, value, onRecord, onPause }: ShortcutRe
         <span aria-live="polite" className="animate-appear truncate px-1 text-muted">{hint ?? 'Press a shortcut…'}</span>
       ) : (
         shortcutKeys(value).map((key) => (
-          <kbd key={key} className="rounded-[5px] border border-line-soft bg-surface px-1.5 font-sans text-micro leading-5 text-ink">
+          <kbd key={key} className="rounded-mark border border-line-soft bg-surface px-1.5 font-sans text-micro leading-5 text-ink">
             {key}
           </kbd>
         ))

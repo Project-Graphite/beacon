@@ -60,7 +60,7 @@ export function Header({
             aria-label="Hide until Claude is next active"
             title="Pinned while Claude is active. Click to hide until Claude is next active"
             onClick={onUnpin}
-            className="press grid size-7 place-items-center rounded-[7px] text-ink hover:bg-surface"
+            className="press grid size-7 place-items-center rounded-field text-ink hover:bg-surface"
           >
             <Icon name="pin" />
           </button>
@@ -72,7 +72,7 @@ export function Header({
           aria-pressed={settingsOpen}
           title={settingsOpen ? 'Back to sessions' : 'Settings'}
           onClick={onToggleSettings}
-          className={`press grid size-7 place-items-center rounded-[7px] transition-[color,background-color,rotate] duration-200 ease-settle hover:bg-surface hover:text-ink ${settingsOpen ? 'rotate-45 ' : ''}${settingsOpen ? 'bg-surface text-ink' : 'text-muted'}`}
+          className={`press grid size-7 place-items-center rounded-field transition-[color,background-color,rotate] duration-200 ease-settle hover:bg-surface hover:text-ink ${settingsOpen ? 'rotate-45 ' : ''}${settingsOpen ? 'bg-surface text-ink' : 'text-muted'}`}
         >
           <Icon name="gear" />
         </button>
