@@ -102,7 +102,8 @@ and steps aside for a fullscreen window.
   (only you or shared) or all your projects. Beacon keeps no rules of its own.
 - A request that looks destructive (recursive deletes, force pushes, download-and-run and similar)
   is flagged, needs a second deliberate press, and never offers Always allow.
-- Secrets in a tool request stay masked until you press **Show unmasked**.
+- Secrets in a request (tool input, plan text, question text and options) stay masked until you
+  press **Show unmasked** on that request.
 - Questions show their options plus **Other**; plans show their text with **Approve plan**, **Keep
   planning** and **Reject with feedback**.
 
@@ -124,9 +125,16 @@ or **Show** brings it back. Hiding never closes the session itself.
 
 | Where | Keys |
 |---|---|
-| A request | `A` allow · `D` deny · `M` deny with message · `Tab` next request |
-| The list | `↑` `↓` select · `Enter` open · `a` acknowledge · `s` snooze 5 min · `j` jump · `x` hide · `/` prompt |
-| A session | `Esc` back · `[` `]` previous or next session · `j` jump · `x` hide · `/` prompt |
+| The marked request | `A` allow, send the answer or approve the plan · `D` deny, dismiss the question or keep planning · `M` deny with message or reject with feedback · `Tab` `Shift+Tab` next or previous request, when two or more wait |
+| The list | `↑` `↓` select · `Enter` open · `A` acknowledge (no request waiting) · `S` snooze 5 min · `J` jump · `X` hide (no request waiting) · `/` prompt · `Esc` close the panel |
+| A session | `Esc` `←` `Backspace` back · `[` `]` previous or next session · `A` acknowledge · `S` snooze 5 min · `J` jump · `X` hide · `/` prompt |
+
+The marked request, with an amber bar on its left, is the one the keys act on. In the list, `M`,
+and any of the three on a question or plan, open the session instead, since they need the full
+card. Letters work in either case and held keys are ignored. A key acts only on a request that is
+fully in view (the first press scrolls it into view), and is ignored for 0.4 s after the marked
+request changes, so an answer cannot land on a request that just took another's place. With fewer
+than two requests waiting, or with focus on a control outside a request, `Tab` moves focus as usual.
 
 ## Settings
 
