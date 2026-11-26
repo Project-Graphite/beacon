@@ -14,7 +14,7 @@ interface Placement {
   width: number;
 }
 
-function offsetWithin(node: HTMLElement, container: HTMLElement): Offset {
+export function offsetWithin(node: HTMLElement, container: HTMLElement): Offset {
   const offset = { x: 0, y: 0 };
   for (let current: Element | null = node; current instanceof HTMLElement && current !== container; current = current.offsetParent) {
     offset.x += current.offsetLeft;

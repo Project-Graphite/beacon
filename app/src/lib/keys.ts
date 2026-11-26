@@ -13,6 +13,7 @@ export interface KeyPress {
   repeat: boolean;
   focus: FocusKind;
   inRequest: boolean;
+  settled: boolean;
   targetView: 'absent' | 'hidden' | 'shown';
 }
 
@@ -63,6 +64,7 @@ export function decideKey(press: KeyPress, state: KeyState): KeyResult {
   const { openSession, queue } = state;
   const { selected, target } = keyFocus(state);
   if (target && (key === 'a' || key === 'd' || key === 'm')) {
+    if (!press.settled) return result(true);
     if (press.targetView === 'absent') return result(true, { type: 'open', sessionId: target.session_id });
     return result(true, press.targetView === 'shown' ? { type: 'answer', id: target.id, key } : { type: 'reveal', id: target.id });
   }

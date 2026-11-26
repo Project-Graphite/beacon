@@ -38,8 +38,10 @@ import { SessionView } from './components/SessionView';
 import { SettingsView, type SettingsPart } from './components/SettingsView';
 import { TextButton } from './components/TextButton';
 import { ViewStack } from './components/ViewStack';
-import { useListMotion } from './hooks/useListMotion.ts';
+import { RequestGate } from './hooks/useDecision.ts';
+import { offsetWithin, useListMotion } from './hooks/useListMotion.ts';
 import { PanelFit, usePanelHeight } from './hooks/usePanelHeight.ts';
+import { settledSince, useSettled } from './hooks/useSettled.ts';
 import { toggleOpen } from './lib/disclosure.ts';
 import { errorText } from './lib/format.ts';
 import { jumpReport, type JumpReport } from './lib/jump.ts';
@@ -105,6 +107,7 @@ export function App() {
   const shown = useRef(false);
   const pendingIds = useRef<number[]>([]);
   const requestKeys = useRef(new Map<number, (key: string) => void>());
+  const requestPlaces = useRef(new Map<number, { top: number; at: number }>());
   const nextJumpNoticeId = useRef(-1);
   const opening = useRef<string | null>(null);
   const shownView = useRef('list');
@@ -251,6 +254,27 @@ export function App() {
     entrance,
   );
 
+  const targetSettled = useSettled(target?.id ?? null);
+
+  useLayoutEffect(() => {
+    const root = content.current;
+    if (!root) return;
+    const places = new Map<number, { top: number; at: number }>();
+    for (const { id } of queue) {
+      const node = document.getElementById(requestId(id));
+      if (!node) continue;
+      const top = offsetWithin(node, root).y;
+      const known = requestPlaces.current.get(id);
+      places.set(id, known?.top === top ? known : { top, at: performance.now() });
+    }
+    requestPlaces.current = places;
+  });
+
+  const requestSettled = useCallback((id: number) => {
+    const place = requestPlaces.current.get(id);
+    return place === undefined || settledSince(place.at);
+  }, []);
+
   useEffect(() => {
     if (!endedOpen) return;
     let current = true;
@@ -373,6 +397,7 @@ export function App() {
           repeat: event.repeat,
           focus: focusKind(event.target),
           inRequest: event.target instanceof Element && event.target.closest('[id^="request-"]') !== null,
+          settled: targetSettled(),
           targetView: !element
             ? 'absent'
             : scroller.current && fullyShown(element.getBoundingClientRect(), scroller.current.getBoundingClientRect())
@@ -543,7 +568,9 @@ export function App() {
                   {failure}
                 </p>
               )}
-              <ViewStack key={viewReset} view={view} scroller={scroller} render={renderView} />
+              <RequestGate value={requestSettled}>
+                <ViewStack key={viewReset} view={view} scroller={scroller} render={renderView} />
+              </RequestGate>
               <div ref={ghosts} aria-hidden="true" className="pointer-events-none absolute inset-0" />
             </div>
           </div>

@@ -59,6 +59,7 @@ const press = (key: string, fields: Partial<KeyPress> = {}): KeyPress => ({
   repeat: false,
   focus: 'body',
   inRequest: false,
+  settled: true,
   targetView: 'shown',
   ...fields,
 });
@@ -129,6 +130,19 @@ test('A, D and M on a request that is not on screen open its session', () => {
   assert.deepEqual(decideKey(press('a', { targetView: 'absent' }), state({ selectedId: 'b' })), {
     prevent: true,
     action: { type: 'open', sessionId: 'b' },
+  });
+});
+
+test('A, D and M are ignored until the key target has settled', () => {
+  for (const targetView of ['shown', 'hidden', 'absent'] as const) {
+    for (const key of ['a', 'd', 'm']) {
+      assert.deepEqual(decideKey(press(key, { settled: false, targetView }), state({ selectedId: 'b' })), { prevent: true, action: null });
+    }
+  }
+  assert.deepEqual(decideKey(press('Tab', { settled: false }), state()).action, { type: 'select', sessionId: 'a', requestId: 2 });
+  assert.deepEqual(decideKey(press('a', { settled: false }), state({ selectedId: 'b', queue: [] })).action, {
+    type: 'acknowledge',
+    sessionId: 'b',
   });
 });
 
