@@ -279,7 +279,13 @@ export function App() {
   useEffect(() => {
     if (!endedOpen) return;
     let current = true;
-    getEnded().then((list) => current && setEndedList(list), fail);
+    getEnded().then(
+      (list) => current && setEndedList(list),
+      (error) => {
+        fail(error);
+        if (current) setEndedOpen(false);
+      },
+    );
     return () => {
       current = false;
     };
@@ -532,7 +538,10 @@ export function App() {
           crossed={crossed}
           endedOpen={endedShown}
           crossedOpen={crossedOpen}
-          onToggleEnded={() => setEndedOpen(!endedOpen)}
+          onToggleEnded={() => {
+            if (!endedOpen) setEndedList(null);
+            setEndedOpen(!endedOpen);
+          }}
           onToggleCrossed={() => setCrossedOpen(!crossedOpen)}
           renderRow={(session) => renderRow(session, false)}
           renderCrossedRow={(session) => renderRow(session, true)}
