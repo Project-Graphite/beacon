@@ -154,7 +154,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 && let Err(error) = settings::apply_start_mode(
                     &feed.home,
                     positions::ui_settings(&feed.home).start_mode,
-                    installed,
                     settings::RUN_KEY,
                 )
             {
