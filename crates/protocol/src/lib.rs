@@ -136,15 +136,6 @@ fn frame_prefix(bytes: &[u8]) -> io::Result<[u8; 4]> {
     Ok((bytes.len() as u32).to_le_bytes())
 }
 
-pub fn read_preamble<R: Read>(reader: &mut R) -> io::Result<(Channel, [u8; TOKEN_LEN])> {
-    let mut magic = [0u8; 4];
-    reader.read_exact(&mut magic)?;
-    let channel = channel_for(magic)?;
-    let mut token = [0u8; TOKEN_LEN];
-    reader.read_exact(&mut token)?;
-    Ok((channel, token))
-}
-
 pub fn encode_preamble(channel: Channel, token: &str) -> io::Result<Vec<u8>> {
     if token.len() != TOKEN_LEN {
         return Err(invalid("token has the wrong length"));
@@ -168,13 +159,6 @@ impl HookRequest {
         write_frame(&mut bytes, &self.meta)?;
         write_frame(&mut bytes, &self.payload)?;
         Ok(bytes)
-    }
-
-    pub fn read_body<R: Read>(reader: &mut R) -> io::Result<HookRequest> {
-        Ok(HookRequest {
-            meta: read_frame(reader)?,
-            payload: read_frame(reader)?,
-        })
     }
 }
 
@@ -220,6 +204,24 @@ mod tests {
     use std::io::Cursor;
 
     const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn read_preamble<R: Read>(reader: &mut R) -> io::Result<(Channel, [u8; TOKEN_LEN])> {
+        let mut magic = [0u8; 4];
+        reader.read_exact(&mut magic)?;
+        let channel = channel_for(magic)?;
+        let mut token = [0u8; TOKEN_LEN];
+        reader.read_exact(&mut token)?;
+        Ok((channel, token))
+    }
+
+    impl HookRequest {
+        fn read_body<R: Read>(reader: &mut R) -> io::Result<HookRequest> {
+            Ok(HookRequest {
+                meta: read_frame(reader)?,
+                payload: read_frame(reader)?,
+            })
+        }
+    }
 
     #[test]
     fn hook_request_round_trips() {

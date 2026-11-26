@@ -326,7 +326,7 @@ impl Engine {
 
     pub fn control(&mut self, request: Request) -> Reply {
         let result = match request {
-            Request::Snapshot | Request::Subscribe => return Reply::with_snapshot(self.snapshot()),
+            Request::Snapshot => return Reply::with_snapshot(self.snapshot()),
             Request::Reconcile => {
                 self.reconcile_wanted = true;
                 self.changed();
@@ -371,7 +371,10 @@ impl Engine {
                 );
             }
             Request::CancelPrompt { id } => self.cancel_prompt(id),
-            Request::RefreshUsage | Request::SetConfig { .. } | Request::Shutdown => Ok(()),
+            Request::Subscribe
+            | Request::RefreshUsage
+            | Request::SetConfig { .. }
+            | Request::Shutdown => Err("this request is handled by the server".to_string()),
         };
         result.map_or_else(Reply::failed, |()| Reply::ok())
     }
