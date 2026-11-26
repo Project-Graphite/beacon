@@ -28,7 +28,7 @@ export function RequestCard({ request, marked, currentId, keys, onJump }: Reques
   const destructive = request.kind === 'tool' ? destructiveReason(request.tool_name, request.tool_input, request.cwd) : null;
   const sending = outcome !== null;
   const title =
-    request.kind === 'question' ? 'Question' : request.kind === 'plan' ? 'Plan' : mcpTool(request.tool_name) ? 'MCP tool' : request.tool_name;
+    request.kind === 'question' ? 'Question' : request.kind === 'plan' ? 'Plan approval' : mcpTool(request.tool_name) ? 'MCP tool' : request.tool_name;
 
   return (
     <div
