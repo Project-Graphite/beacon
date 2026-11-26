@@ -2,7 +2,7 @@ import type { SessionState } from '../beacon';
 
 export type AvatarFace = 'working' | 'alarmed' | 'happy' | 'crossed' | 'sideways' | 'sleepy' | 'blank' | 'closed';
 
-export const AVATAR_HUES = ['#7aa2f7', '#f29bb4', '#f2b66d', '#b79cf2', '#6fcfb2', '#c9d36a'];
+export const AVATAR_HUES = ['#8f9cf7', '#f08cc0', '#5bbcf0', '#bd95f2', '#33c9bf', '#e08fdc'];
 
 const BLINK_PERIOD_MS = 4200;
 
