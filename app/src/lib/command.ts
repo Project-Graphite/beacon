@@ -60,3 +60,17 @@ export function tokenizeCommand(source: string): Token[] {
   }
   return tokens;
 }
+
+export function commandWords(tokens: Token[]): Token[][] {
+  const words: Token[][] = [];
+  for (const { kind, text } of tokens) {
+    for (const piece of text.split(/(\s+)/)) {
+      const last = words.at(-1);
+      if (!piece) continue;
+      if (/^\s/.test(piece)) words.push([{ kind: 'space', text: piece }]);
+      else if (last && last[0].kind !== 'space') last.push({ kind, text: piece });
+      else words.push([{ kind, text: piece }]);
+    }
+  }
+  return words;
+}

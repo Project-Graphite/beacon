@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { tokenizeCommand, type TokenKind } from './command.ts';
+import { commandWords, tokenizeCommand, type TokenKind } from './command.ts';
 
 const NASTY = [
   '',
@@ -49,6 +49,57 @@ test('joining the tokens always gives back the input', () => {
     assert.equal(tokens.map((token) => token.text).join(''), input, JSON.stringify(input));
     assert.ok(tokens.every((token) => token.text.length > 0), JSON.stringify(input));
   }
+});
+
+test('words split the tokens at white space only and join back to the input', () => {
+  const random = seededRandom(11);
+  const alphabet = ['a', '-', '--', ' ', '\n', '\t', "'", '"', '#', '|', '&&', '=', '/', '🙂'];
+  const generated = Array.from({ length: 500 }, () =>
+    Array.from({ length: Math.floor(random() * 40) }, () => alphabet[Math.floor(random() * alphabet.length)]).join(''),
+  );
+  for (const input of [...NASTY, ...generated]) {
+    const words = commandWords(tokenizeCommand(input));
+    assert.equal(words.flat().map((token) => token.text).join(''), input, JSON.stringify(input));
+    words.forEach((word, index) => {
+      const text = word.map((token) => token.text).join('');
+      assert.ok(text.length > 0, JSON.stringify(input));
+      if (word[0].kind === 'space') assert.ok(word.length === 1 && /^\s+$/.test(text), JSON.stringify(input));
+      else assert.ok(!/\s/.test(text) && (index === 0 || words[index - 1][0].kind === 'space'), JSON.stringify(input));
+    });
+  }
+});
+
+const wordKinds = (input: string) =>
+  commandWords(tokenizeCommand(input)).map((word) => word.map((token): [TokenKind, string] => [token.kind, token.text]));
+
+test('a word keeps its highlighted parts and a quoted string splits at its spaces', () => {
+  assert.deepEqual(wordKinds('npm test -- auth/login.spec.ts --runInBand'), [
+    [['command', 'npm']],
+    [['space', ' ']],
+    [['word', 'test']],
+    [['space', ' ']],
+    [['flag', '--']],
+    [['space', ' ']],
+    [['word', 'auth/login.spec.ts']],
+    [['space', ' ']],
+    [['flag', '--runInBand']],
+  ]);
+  assert.deepEqual(wordKinds('git commit --message="fix it"&&ls'), [
+    [['command', 'git']],
+    [['space', ' ']],
+    [['word', 'commit']],
+    [['space', ' ']],
+    [
+      ['flag', '--message='],
+      ['string', '"fix'],
+    ],
+    [['space', ' ']],
+    [
+      ['string', 'it"'],
+      ['operator', '&&'],
+      ['command', 'ls'],
+    ],
+  ]);
 });
 
 const kinds = (input: string) =>
