@@ -7,37 +7,26 @@
   </head>
   <body>
     <div id="viewport">
-      <div id="world">
-        <div class="wallpaper"></div>
-        <div class="editor">
-          <div class="editor-bar">
-            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-            <span class="editor-title">graphite-hub — Visual Studio Code</span>
-          </div>
-          <div class="editor-body">
-            <div class="editor-side"></div>
-            <div class="editor-code"></div>
-          </div>
+      <div class="wallpaper"></div>
+      <aside class="story">
+        <div class="brand">
+          <img src="/src-tauri/icons/128x128@2x.png" width="40" height="40" alt="" />
+          <p class="brand-name">Beacon</p>
         </div>
-        <div id="pill" class="pill"></div>
-        <iframe id="panel" src="/" title="Beacon panel"></iframe>
-        <div id="ripple"></div>
-        <svg id="cursor" width="26" height="32" viewBox="0 0 26 32" aria-hidden="true">
-          <path d="M3 2 L3 25 L9.2 19.6 L13.4 29 L17.6 27.1 L13.5 18 L22 18 Z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round" />
-        </svg>
-      </div>
-      <div id="step"></div>
-      <div id="intro">
-        <img src="/src-tauri/icons/128x128@2x.png" width="96" height="96" alt="" />
-        <p class="end-name">Beacon</p>
-        <p class="end-line">Answer every Claude Code session from one small panel</p>
-      </div>
-      <div id="endcard">
-        <img src="/src-tauri/icons/128x128@2x.png" width="112" height="112" alt="" />
-        <p class="end-name">Beacon</p>
-        <p class="end-line">Every Claude Code session in one small panel</p>
-        <p class="end-url">github.com/Project-Graphite/beacon</p>
-      </div>
+        <p class="tagline">Every Claude Code session on your PC in one small panel.</p>
+        <ol class="steps">
+          <li>See every session at a glance</li>
+          <li>Allow a permission request</li>
+          <li>Answer a question</li>
+          <li>Send a session a prompt</li>
+        </ol>
+      </aside>
+      <div id="pill" class="pill"></div>
+      <iframe id="panel" src="/" title="Beacon panel"></iframe>
+      <div id="ripple"></div>
+      <svg id="cursor" width="26" height="32" viewBox="0 0 26 32" aria-hidden="true">
+        <path d="M3 2 L3 25 L9.2 19.6 L13.4 29 L17.6 27.1 L13.5 18 L22 18 Z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round" />
+      </svg>
     </div>
     <script type="module" src="/preview/demo.ts"></script>
   </body>

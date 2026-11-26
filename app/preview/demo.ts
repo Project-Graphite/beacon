@@ -1,21 +1,26 @@
 type Point = { x: number; y: number };
 type Kind = 'needs' | 'working' | 'done' | 'idle';
 
-interface Preview {
-  emit: (name: string, payload?: unknown) => void;
-  snapshot: { sessions: Record<string, unknown>[] };
-  ui: Record<string, unknown>;
+interface Session {
+  session_id: string;
+  display_title: string;
+  state: string;
+  alerting: boolean;
+  dismissed: boolean;
+  prompts: { status: string }[];
 }
 
-const VIEW = { width: 1280, height: 720 };
-const world = document.getElementById('world') as HTMLDivElement;
+interface Preview {
+  emit: (name: string, payload?: unknown) => void;
+  listen: (name: string, handler: () => void) => Promise<() => void>;
+  snapshot: { sessions: Session[] };
+}
+
 const frame = document.getElementById('panel') as HTMLIFrameElement;
 const cursor = document.getElementById('cursor') as unknown as SVGSVGElement;
 const ripple = document.getElementById('ripple') as HTMLDivElement;
 const pill = document.getElementById('pill') as HTMLDivElement;
-const endcard = document.getElementById('endcard') as HTMLDivElement;
-const intro = document.getElementById('intro') as HTMLDivElement;
-const chip = document.getElementById('step') as HTMLDivElement;
+const steps = [...document.querySelectorAll<HTMLLIElement>('.steps li')];
 
 const MARK: Record<Kind, string> = {
   working:
@@ -25,19 +30,26 @@ const MARK: Record<Kind, string> = {
   idle: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3.6" fill="none" stroke="var(--muted)" stroke-width="1.4"/></svg>',
 };
 
-let marks: Kind[] = ['needs', 'needs', 'working', 'working', 'done', 'idle'];
-let open = false;
-let position: Point = { x: 470, y: 430 };
+const REST: Point = { x: 176, y: 520 };
+let position = REST;
+let start = '';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const ease = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
+const rank = (session: Session) => (session.alerting ? 0 : session.state === 'working' ? 1 : 2);
+
+const preview = () => (frame.contentWindow as unknown as { __beaconPreview: Preview }).__beaconPreview;
+const inner = () => frame.contentDocument as Document;
 
 function drawPill() {
-  const count = marks.filter((kind) => kind === 'needs').length;
+  const sessions = preview()
+    .snapshot.sessions.filter((session) => !session.dismissed)
+    .sort((a, b) => rank(a) - rank(b) || a.session_id.localeCompare(b.session_id));
+  const count = sessions.filter((session) => session.alerting).length;
   pill.innerHTML = [
-    ...marks.map((kind) => `<span class="mark">${MARK[kind]}</span>`),
+    ...sessions.map((session) => `<span class="mark">${MARK[(session.state.startsWith('needs') ? 'needs' : session.state) as Kind]}</span>`),
     count > 0 ? `<span class="count">${count}</span>` : '',
-    `<span class="chevron${open ? ' up' : ''}"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 4.5 6 7.5l3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`,
+    '<span class="chevron"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 4.5 6 7.5l3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>',
   ].join('');
 }
 
@@ -46,19 +58,9 @@ function place(point: Point) {
   cursor.style.translate = `${point.x - 3}px ${point.y - 2}px`;
 }
 
-const preview = () => (frame.contentWindow as unknown as { __beaconPreview: Preview }).__beaconPreview;
-const inner = () => frame.contentDocument as Document;
-
 function framePoint(element: Element): Point {
   const rect = element.getBoundingClientRect();
   return { x: frame.offsetLeft + rect.left + rect.width / 2, y: frame.offsetTop + rect.top + rect.height / 2 };
-}
-
-function pillPoint(element: HTMLElement): Point {
-  return {
-    x: pill.offsetLeft + element.offsetLeft + element.offsetWidth / 2,
-    y: pill.offsetTop + element.offsetTop + element.offsetHeight / 2,
-  };
 }
 
 function inPanel(selector: string, text?: string): HTMLElement {
@@ -72,13 +74,13 @@ function inPanel(selector: string, text?: string): HTMLElement {
 function moveTo(target: Point): Promise<void> {
   const from = position;
   const distance = Math.hypot(target.x - from.x, target.y - from.y);
-  const duration = Math.min(1400, Math.max(750, 600 + distance * 0.9));
+  const duration = Math.min(1100, Math.max(650, 550 + distance * 0.9));
   const bend = { x: -(target.y - from.y) * 0.06, y: (target.x - from.x) * 0.06 };
   const control = { x: (from.x + target.x) / 2 + bend.x, y: (from.y + target.y) / 2 + bend.y };
-  const start = performance.now();
+  const begin = performance.now();
   return new Promise((resolve) => {
     const step = (now: number) => {
-      const t = Math.min(1, (now - start) / duration);
+      const t = Math.min(1, (now - begin) / duration);
       const k = ease(t);
       const a = (1 - k) * (1 - k);
       const b = 2 * (1 - k) * k;
@@ -125,28 +127,19 @@ async function still() {
 
 async function clickElement(element: HTMLElement) {
   await moveTo(framePoint(element));
-  await wait(320);
+  await wait(280);
   await press(() => element.click());
   await still();
 }
 
-async function step(number: number, text: string) {
-  chip.classList.remove('on');
-  await wait(chip.textContent ? 280 : 0);
-  chip.innerHTML = `<span class="step-number">${number}</span>${text}`;
-  chip.classList.add('on');
+function step(index: number) {
+  steps.forEach((item, at) => item.classList.toggle('on', at === index));
 }
 
-function settle(title: string, fields: Record<string, unknown>) {
+function settle(title: string, change: (session: Session) => Record<string, unknown>) {
   const state = preview().snapshot;
-  state.sessions = state.sessions.map((session) => (session.display_title === title ? { ...session, ...fields } : session));
+  state.sessions = state.sessions.map((session) => (session.display_title === title ? { ...session, ...change(session) } : session));
   preview().emit('beacon://snapshot', state);
-}
-
-function zoom(scale: number, focus: Point) {
-  const x = Math.min(0, Math.max(VIEW.width - VIEW.width * scale, VIEW.width / 2 - focus.x * scale));
-  const y = Math.min(0, Math.max(VIEW.height - VIEW.height * scale, VIEW.height / 2 - focus.y * scale));
-  world.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`;
 }
 
 async function type(text: string) {
@@ -156,7 +149,7 @@ async function type(text: string) {
   for (let index = 1; index <= text.length; index++) {
     setter?.call(field, text.slice(0, index));
     field.dispatchEvent(new view.Event('input', { bubbles: true }));
-    await wait(55);
+    await wait(45);
   }
 }
 
@@ -166,77 +159,63 @@ async function ready() {
   );
   const style = inner().createElement('style');
   style.textContent =
-    'html{background:transparent!important}body{margin:0!important;width:376px!important}#root>section{height:auto!important}*:focus-visible,label:has(:focus-visible){outline:none!important}';
+    'html{background:transparent!important}body{margin:0!important;width:376px!important}body #root>section{height:100vh!important}*:focus-visible,label:has(:focus-visible){outline:none!important}';
   inner().head.append(style);
+  start = JSON.stringify(preview().snapshot);
+  await preview().listen('beacon://snapshot', drawPill);
+  drawPill();
   await wait(900);
 }
 
 async function play() {
-  await wait(1900);
-  intro.classList.add('off');
-  cursor.classList.add('shown');
-  await wait(700);
-  await step(1, 'Open Beacon from the pill');
-  await wait(700);
-  const chevron = pill.querySelector('.chevron') as HTMLElement;
-  await moveTo(pillPoint(chevron));
-  chevron.classList.add('hover');
-  await wait(450);
-  await press(() => {
-    open = true;
-    drawPill();
-    frame.classList.add('open');
-    preview().emit('beacon://closing');
-    setTimeout(
-      () => preview().emit('beacon://opened', { mode: 'sticky', focused: true, edge: 'top', snapshot: preview().snapshot, ui: preview().ui }),
-      30,
-    );
-  });
-  await wait(700);
-  zoom(1.15, { x: 1100, y: 313 });
-  await wait(1300);
+  await wait(1400);
 
-  await step(2, 'Approve a permission request');
-  await wait(350);
+  step(1);
+  settle('Fix the flaky login test', () => ({ step_current: { kind: 'run', label: 'Running npm test -- auth/login.spec.ts' } }));
   await clickPanel('button', 'Allow');
-  marks = ['working', 'needs', 'working', 'working', 'done', 'idle'];
-  drawPill();
-  await wait(500);
+  await wait(900);
 
-  await step(3, 'Answer a question');
-  await wait(350);
+  step(2);
   await clickPanel('button', 'Answer');
-  settle('Fix the flaky login test', { state: 'working', alerting: false, attention: false, step_current: { kind: 'run', label: 'Running npm test -- auth/login.spec.ts' } });
-  await wait(500);
   await clickElement(inPanel('label', 'Redis').querySelector('input') as HTMLElement);
   await clickPanel('button', 'Send answer');
-  marks = ['working', 'working', 'working', 'working', 'done', 'idle'];
-  drawPill();
-  settle('Choose a cache for the tile server', { state: 'working', alerting: false, attention: false });
-  await wait(400);
+  await wait(500);
   await clickPanel('button[aria-label="Back to sessions"]');
-  await wait(300);
 
-  await step(4, 'Send a session a prompt');
-  await wait(350);
+  step(3);
   await clickPanel('span', 'Draft the 0.2.0 release notes');
-  await wait(400);
   await clickPanel('textarea');
   await type('Open a pull request with these notes');
-  await wait(450);
+  await wait(300);
   await clickPanel('button', 'Send');
-  await wait(1200);
-
-  chip.classList.remove('on');
-  zoom(1, { x: 640, y: 360 });
-  await moveTo({ x: 560, y: 470 });
   await wait(900);
-  endcard.classList.add('on');
-  await wait(2800);
+  settle('Draft the 0.2.0 release notes', (session) => ({
+    state: 'working',
+    alerting: false,
+    attention: false,
+    turn_started_ms: Date.now(),
+    step_current: { kind: 'read', label: 'Reading docs/notes/0.2.0.md' },
+    prompts: session.prompts.map((prompt) => ({ ...prompt, status: 'acknowledged' })),
+  }));
+  await wait(1100);
+  await clickPanel('button[aria-label="Back to sessions"]');
+  await wait(500);
+
+  step(0);
+  await moveTo(REST);
+  Object.assign(preview().snapshot, JSON.parse(start));
+  preview().emit('beacon://snapshot', preview().snapshot);
+  await wait(500);
+  const view = frame.contentWindow as unknown as typeof window;
+  for (let count = 0; count < 2; count++) {
+    view.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'ArrowUp' }));
+    await wait(180);
+  }
+  await wait(700);
 }
 
-drawPill();
 place(position);
+step(0);
 Object.assign(window, { demo: { ready, play } });
 
 export {};

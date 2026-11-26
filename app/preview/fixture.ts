@@ -1,3 +1,5 @@
+import type { Prompt } from '../src/beacon';
+
 const now = Date.now();
 const minutes = (count: number) => now - count * 60_000;
 
@@ -27,13 +29,13 @@ const session = <Fields extends Record<string, unknown>>(fields: Fields) => ({
   snoozed_until_ms: null,
   alerting: false,
   dismissed: false,
-  prompts: [],
+  prompts: [] as Prompt[],
   ...fields,
 });
 
 export const sessions = [
   session({
-    session_id: '7f3a9c2e-1b44-4d0a-9e61-0c5d2f8a9b10',
+    session_id: '7f3a9c2e-1b44-4d0a-9e61-0c5d2f8a9b06',
     state: 'needs_permission',
     attention: true,
     alerting: true,
@@ -49,7 +51,7 @@ export const sessions = [
     step_current: { kind: 'permission', label: 'Permission requested: Bash' },
   }),
   session({
-    session_id: '2c81d0b7-6e19-4f3b-a2d4-77e0b5c3f912',
+    session_id: '2c81d0b7-6e19-4f3b-a2d4-77e0b5c3f903',
     state: 'needs_answer',
     attention: true,
     alerting: true,
@@ -63,7 +65,7 @@ export const sessions = [
     usage: usage(41_000, 3_100),
   }),
   session({
-    session_id: '9d0e4a61-3c7b-4e88-b5f2-1a6c8d2e7f34',
+    session_id: '9d0e4a61-3c7b-4e88-b5f2-1a6c8d2e7f03',
     state: 'working',
     cwd: 'C:\\code\\atlas',
     project: 'atlas',
@@ -80,7 +82,7 @@ export const sessions = [
     usage: usage(132_000, 21_400),
   }),
   session({
-    session_id: '4b6f8e20-9a13-4c57-8d0e-5f2a1b7c9e63',
+    session_id: '4b6f8e20-9a13-4c57-8d0e-5f2a1b7c9e00',
     state: 'working',
     cwd: 'C:\\code\\ledger',
     project: 'ledger',
@@ -94,7 +96,7 @@ export const sessions = [
     usage: usage(64_000, 5_800),
   }),
   session({
-    session_id: 'e5a7c3d1-8b20-4f6e-9c14-2d7b0a5e8f71',
+    session_id: 'e5a7c3d1-8b20-4f6e-9c14-2d7b0a5e8f01',
     state: 'done',
     attention: true,
     alerting: true,
@@ -111,7 +113,7 @@ export const sessions = [
     can_wake: true,
   }),
   session({
-    session_id: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
+    session_id: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c00',
     state: 'idle',
     cwd: 'C:\\code\\dotfiles',
     project: 'dotfiles',
@@ -203,7 +205,7 @@ const step = (id: number, kind: string, label: string, ago: number, duration: nu
   duration_ms: duration,
 });
 
-const PLANNING = '9d0e4a61-3c7b-4e88-b5f2-1a6c8d2e7f34';
+const PLANNING = '9d0e4a61-3c7b-4e88-b5f2-1a6c8d2e7f03';
 
 export const detail = (sessionId: string) => ({
   session_id: sessionId,

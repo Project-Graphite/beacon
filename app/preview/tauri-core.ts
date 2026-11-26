@@ -1,13 +1,15 @@
 import { version } from '../package.json';
+import type { Session } from '../src/beacon';
+import { promptPath } from '../src/lib/prompts.ts';
 import { detail, ended, hooks, overlay, snapshot, ui } from './fixture';
-import { emit } from './tauri-event';
+import { emit, listen } from './tauri-event';
 
 const settings = { ...ui };
 
-Object.assign(window, { __beaconPreview: { emit, snapshot, ui: settings } });
+Object.assign(window, { __beaconPreview: { emit, listen, snapshot } });
 
-function hide(sessionId: string, dismissed: boolean) {
-  snapshot.sessions = snapshot.sessions.map((session) => (session.session_id === sessionId ? { ...session, dismissed } : session));
+function update(sessionId: string, change: (session: (typeof snapshot.sessions)[number]) => Partial<(typeof snapshot.sessions)[number]>) {
+  snapshot.sessions = snapshot.sessions.map((session) => (session.session_id === sessionId ? { ...session, ...change(session) } : session));
   emit('beacon://snapshot', snapshot);
 }
 
@@ -20,12 +22,29 @@ const answers: Record<string, (args: Record<string, unknown>) => unknown> = {
   app_info: () => ({ version, home: 'C:\\Users\\you\\AppData\\Local\\Beacon' }),
   get_overlay: () => overlay,
   set_ui_settings: ({ change }) => Object.assign(settings, change),
-  dismiss: ({ sessionId }) => hide(String(sessionId), true),
-  undismiss: ({ sessionId }) => hide(String(sessionId), false),
+  set_panel_height: ({ height }) => (window.frameElement as HTMLElement | null)?.style.setProperty('height', `${height}px`),
+  dismiss: ({ sessionId }) => update(String(sessionId), () => ({ dismissed: true })),
+  undismiss: ({ sessionId }) => update(String(sessionId), () => ({ dismissed: false })),
   decide: ({ id }) => {
-    snapshot.pending = snapshot.pending.filter((request) => request.id !== id);
-    emit('beacon://snapshot', snapshot);
+    const request = snapshot.pending.find((pending) => pending.id === id);
+    window.setTimeout(() => {
+      snapshot.pending = snapshot.pending.filter((pending) => pending !== request);
+      update(String(request?.session_id), () => ({ state: 'working', alerting: false, attention: false }));
+    }, 400);
   },
+  queue_prompt: ({ sessionId, text }) =>
+    update(String(sessionId), (session) => ({
+      prompts: [
+        ...session.prompts,
+        {
+          id: Date.now(),
+          preview: String(text),
+          created_ms: Date.now(),
+          status: promptPath(session as Session)?.path === 'wake' ? 'delivered' : 'queued',
+          reason: null,
+        },
+      ],
+    })),
   jump: () => ({ result: 'focused', kind: { type: 'editor', scheme: 'vscode' }, ambiguous: false, link_opened: true }),
   send_prompt_to_window: () => ({
     path: 'wake',
