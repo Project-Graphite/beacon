@@ -52,8 +52,10 @@ export function Header({
               </Fragment>
             ))}
       </p>
-      <div className="ml-auto flex shrink-0 items-center gap-1">
+      <div className="flex h-7 min-w-0 flex-1 flex-wrap justify-end overflow-hidden before:h-7">
         {accountUsage && <UsageButton usage={accountUsage} />}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
         {pinned && (
           <button
             type="button"
@@ -72,9 +74,9 @@ export function Header({
           aria-pressed={settingsOpen}
           title={settingsOpen ? 'Back to sessions' : 'Settings'}
           onClick={onToggleSettings}
-          className={`press grid size-7 place-items-center rounded-field transition-[color,background-color,rotate] duration-200 ease-settle hover:bg-surface hover:text-ink ${settingsOpen ? 'rotate-45 ' : ''}${settingsOpen ? 'bg-surface text-ink' : 'text-muted'}`}
+          className={`press grid size-7 place-items-center rounded-field transition-[color,background-color] duration-200 ease-settle hover:bg-surface hover:text-ink ${settingsOpen ? 'bg-surface text-ink' : 'text-muted'}`}
         >
-          <Icon name="gear" />
+          <Icon name="gear" className={`transition-[rotate] duration-200 ease-settle ${settingsOpen ? 'rotate-45' : ''}`} />
         </button>
       </div>
     </header>
