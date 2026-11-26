@@ -89,9 +89,6 @@ export const SessionRow = memo(function SessionRow({
               onCrossOff={() => onCrossOff(session.session_id)}
             />
           )}
-          {session.tasks_created > 0 && (
-            <ProgressBar fraction={taskProgress(session)} alert={alert} className="absolute inset-x-0 bottom-0 h-0.5" />
-          )}
         </div>
         {pending.map((request) => (
           <RequestRow
@@ -108,6 +105,13 @@ export const SessionRow = memo(function SessionRow({
             {notice.text}
           </p>
         ))}
+        {session.tasks_created > 0 && (
+          <ProgressBar
+            fraction={taskProgress(session)}
+            alert={alert}
+            className="absolute right-2.5 bottom-1 left-[56px] h-0.5 rounded-full"
+          />
+        )}
       </div>
     </li>
   );
