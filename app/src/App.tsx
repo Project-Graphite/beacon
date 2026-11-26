@@ -401,7 +401,12 @@ export function App() {
           settled: targetSettled(),
           targetView: !element
             ? 'absent'
-            : scroller.current && fullyShown(element.getBoundingClientRect(), scroller.current.getBoundingClientRect())
+            : scroller.current &&
+                fullyShown(
+                  element.getBoundingClientRect(),
+                  scroller.current.getBoundingClientRect(),
+                  parseFloat(getComputedStyle(scroller.current).scrollPaddingTop) + parseFloat(getComputedStyle(element).scrollMarginTop),
+                )
               ? 'shown'
               : 'hidden',
         },
