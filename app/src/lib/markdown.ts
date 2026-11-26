@@ -144,26 +144,6 @@ function parseList(lines: string[], start: number, first: RegExpExecArray): [Lis
   return [finishList(list), index];
 }
 
-const inlineText = (nodes: Inline[]): string =>
-  nodes.map((node) => (node.type === 'text' || node.type === 'code' ? node.text : inlineText(node.children))).join('');
-
-const blockText = (block: Block): string => {
-  switch (block.type) {
-    case 'code':
-      return block.text;
-    case 'list':
-      return block.items
-        .map((item) => (item.nested ? `${inlineText(item.children)} ${blockText(item.nested)}` : inlineText(item.children)))
-        .join(' ');
-    default:
-      return inlineText(block.children);
-  }
-};
-
-export function plainText(source: string): string {
-  return parseMarkdown(source).map(blockText).join(' ');
-}
-
 export function parseMarkdown(source: string): Block[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n');
   const blocks: Block[] = [];

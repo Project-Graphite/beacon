@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseInline, parseMarkdown, plainText } from './markdown.ts';
+import { parseInline, parseMarkdown } from './markdown.ts';
 
 const text = (value: string) => ({ type: 'text', text: value });
 
@@ -118,13 +118,6 @@ test('HTML-looking text stays text', () => {
     { type: 'link', children: [text('<b>x</b>')], url: 'javascript:alert(1' },
     text(')'),
   ]);
-});
-
-test('plain text drops the markup and keeps the words', () => {
-  assert.equal(
-    plainText('## Done\n\nFixed **the** `cache`, see [docs](https://x.test).\n\n- a\n  - b\n\n```\nnpm test'),
-    'Done Fixed the cache, see docs. a b npm test',
-  );
 });
 
 test('unknown syntax falls through as plain text', () => {
