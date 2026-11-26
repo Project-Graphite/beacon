@@ -1,7 +1,7 @@
 use crate::geometry::{
     Corner, Edge, Monitor, Rect, TabPlacement, monitor_for, near_edge, nearest_edge, primary, slide,
 };
-use crate::positions::{Style, lenient};
+use crate::positions::{Style, lenient, lenient_list};
 use serde::{Deserialize, Serialize};
 
 pub const SHOW_ON: &str = "show-on";
@@ -40,7 +40,7 @@ pub struct DisplayChoice {
     #[serde(
         default,
         skip_serializing_if = "Vec::is_empty",
-        deserialize_with = "lenient"
+        deserialize_with = "lenient_list"
     )]
     pub avoid_displays: Vec<String>,
 }

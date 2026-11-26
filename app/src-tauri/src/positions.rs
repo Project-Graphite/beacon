@@ -102,6 +102,26 @@ pub fn lenient<'de, D: Deserializer<'de>, T: DeserializeOwned + Default>(
     Ok(serde_json::from_value(serde_json::Value::deserialize(deserializer)?).unwrap_or_default())
 }
 
+fn lenient_map<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+    deserializer: D,
+) -> Result<BTreeMap<String, T>, D::Error> {
+    Ok(
+        lenient::<D, BTreeMap<String, serde_json::Value>>(deserializer)?
+            .into_iter()
+            .filter_map(|(key, value)| Some((key, serde_json::from_value(value).ok()?)))
+            .collect(),
+    )
+}
+
+pub fn lenient_list<'de, D: Deserializer<'de>, T: DeserializeOwned>(
+    deserializer: D,
+) -> Result<Vec<T>, D::Error> {
+    Ok(lenient::<D, Vec<serde_json::Value>>(deserializer)?
+        .into_iter()
+        .filter_map(|item| serde_json::from_value(item).ok())
+        .collect())
+}
+
 fn clamped(value: Option<f64>, (low, default, high): (f64, f64, f64)) -> f64 {
     value
         .filter(|value| value.is_finite())
@@ -116,12 +136,12 @@ fn one_of(value: Option<u64>, allowed: &[u64], default: u64) -> u64 {
 
 #[derive(Default, Serialize, Deserialize)]
 struct UiFile {
-    #[serde(default, deserialize_with = "lenient")]
+    #[serde(default, deserialize_with = "lenient_map")]
     pill_positions: BTreeMap<String, Rect>,
     #[serde(
         default,
         skip_serializing_if = "BTreeMap::is_empty",
-        deserialize_with = "lenient"
+        deserialize_with = "lenient_map"
     )]
     display_positions: BTreeMap<String, Rect>,
     #[serde(
@@ -133,7 +153,7 @@ struct UiFile {
     #[serde(
         default,
         skip_serializing_if = "BTreeMap::is_empty",
-        deserialize_with = "lenient"
+        deserialize_with = "lenient_map"
     )]
     tab_positions: BTreeMap<String, TabPlacement>,
     #[serde(
@@ -496,6 +516,34 @@ mod tests {
         assert!(!settings.sounds_enabled);
         assert_eq!(settings.hotkey, "Ctrl+Shift+B");
         assert_eq!(settings.visibility, Visibility::Attention);
+        assert_eq!(load(&home, "a"), Some(Rect::sized(1, 2, 3, 4)));
+        assert_eq!(display_choice(&home).avoid_displays, ["oled"]);
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn a_malformed_entry_is_dropped_and_the_valid_entries_survive_a_read_and_a_save() {
+        let home = std::env::temp_dir().join(format!("beacon-ui-entries-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join(UI_FILE),
+            r#"{"pill_positions":{"a":{"left":1,"top":2,"right":4,"bottom":6},"b":{"left":"x"}},"display_positions":{"philips":{"left":5,"top":6,"right":12,"bottom":14},"oled":null},"tab_positions":{"philips":{"edge":"top","offset":0.25},"oled":{"edge":"middle","offset":0.5}},"avoid_displays":["oled",7]}"#,
+        )
+        .unwrap();
+        let survivors = serde_json::json!({"pill_positions":{"a":{"left":1,"top":2,"right":4,"bottom":6}},"display_positions":{"philips":{"left":5,"top":6,"right":12,"bottom":14}},"tab_positions":{"philips":{"edge":"top","offset":0.25}},"avoid_displays":["oled"]});
+        assert_eq!(serde_json::to_value(read(&home)).unwrap(), survivors);
+        save_style(&home, Style::Pill).unwrap();
+        assert!(!home.join("ui.json.bad").exists());
+        let mut expected = survivors;
+        expected["style"] = "pill".into();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &std::fs::read(home.join(UI_FILE)).unwrap()
+            )
+            .unwrap(),
+            expected
+        );
         assert_eq!(load(&home, "a"), Some(Rect::sized(1, 2, 3, 4)));
         assert_eq!(display_choice(&home).avoid_displays, ["oled"]);
         std::fs::remove_dir_all(&home).unwrap();
