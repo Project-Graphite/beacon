@@ -8,6 +8,12 @@ import { KeyHint } from './KeyHint';
 import { OutlineButton } from './OutlineButton';
 
 const DISMISSED = 'The user dismissed the question.';
+const CHOICE_BOX =
+  'grid size-3.5 shrink-0 appearance-none place-items-center border border-faint bg-raised transition-colors duration-120 ease-settle checked:border-ink checked:bg-ink disabled:opacity-45';
+const CHOICE = {
+  radio: `${CHOICE_BOX} rounded-full checked:shadow-[inset_0_0_0_3px_var(--color-raised)]`,
+  checkbox: `${CHOICE_BOX} rounded-mark checked:before:h-2 checked:before:w-1 checked:before:-translate-y-px checked:before:rotate-45 checked:before:border-r-[1.5px] checked:before:border-b-[1.5px] checked:before:border-paper`,
+};
 
 interface QuestionRequestProps {
   request: PendingDecision;
@@ -56,14 +62,14 @@ export function QuestionRequest({ request, masked, sending, keys, send, onJump }
               {question.options.map((option) => (
                 <label
                   key={option.label}
-                  className="flex cursor-pointer items-baseline gap-2 rounded-field px-1.5 py-1 transition-colors duration-120 ease-settle hover:bg-surface"
+                  className="flex cursor-pointer items-start gap-2 rounded-field px-1.5 py-1 transition-colors duration-120 ease-settle hover:bg-surface"
                 >
                   <input
                     type={kind}
                     name={group}
                     checked={choice.labels.includes(option.label)}
                     onChange={() => choose(index, pickOption(question, choice, option.label))}
-                    className="translate-y-px accent-ink"
+                    className={`mt-0.5 ${CHOICE[kind]}`}
                   />
                   <span className="min-w-0">
                     <span className="text-secondary text-ink">{shown(option.label)}</span>
@@ -79,7 +85,7 @@ export function QuestionRequest({ request, masked, sending, keys, send, onJump }
                   name={group}
                   checked={choice.other !== null}
                   onChange={() => choose(index, pickOther(question, choice))}
-                  className="accent-ink"
+                  className={CHOICE[kind]}
                 />
                 <span className="text-secondary text-ink">Other</span>
                 <input
