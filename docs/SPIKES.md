@@ -1,5 +1,9 @@
 # Beacon phase 0 spike results
 
+These results were measured on 2026-11-19 against Claude Code 2.1.328. They are kept as a record of
+what the phase 0 experiments found and are not maintained; [DECISIONS.md](DECISIONS.md) says what
+was built from them and what changed since.
+
 - Date: 2026-11-19
 - Claude Code: 2.1.328
 - OS: Windows 11 Pro
@@ -22,7 +26,7 @@
 | S5 questions and plans | partly confirmed | Works only with `--permission-prompt-tool stdio`; plain `-p` does not offer AskUserQuestion or ExitPlanMode. Elicitation not run. |
 | S6 prompt injection | partly confirmed | Stop block, Stop additionalContext, asyncRewake, live resume and streaming input work; terminal injection not testable here; the inbox pipe delivered nothing in 3 attempts. |
 | S7 window identity | partly confirmed | Env and ancestor chain captured for `-p` only; no terminal or editor variables were present. |
-| S8 Antigravity | open | Not installed on this machine. |
+| S8 Antigravity | open | Not installed on the development machine. |
 | S9 usage metrics | partly confirmed | Per-session tokens and estimated cost are readable for every surface; the 5-hour and weekly limit % have no documented source that covers every surface. |
 
 ## S1 event coverage
@@ -228,7 +232,8 @@ d) Streaming input (`s6d-stream`). Two user lines on stdin gave two results with
 `session_id`; UserPromptSubmit fired for each (15:19:22.834 and 15:19:24.491). A `system/init` line
 is emitted before each turn; SessionStart fired once.
 
-e) Terminal injection. `tmux`, `wezterm` and `kitty` are not on PATH on this machine; not tested.
+e) Terminal injection. `tmux`, `wezterm` and `kitty` are not on PATH on the development machine;
+not tested.
 
 f) Inbox pipe (`s6f-inbox`). A SessionStart hook captured `CLAUDE_CODE_MESSAGING_SOCKET`
 (`\\.\pipe\LOCAL\cc-msg-<32 hex>`) and the 32-character token; the harness connected to the pipe
@@ -284,8 +289,8 @@ chain from the hook upwards:
 folder in `%LOCALAPPDATA%\Programs` and no `%USERPROFILE%\.antigravity` or
 `.antigravity\extensions`.
 
-**Not covered.** Everything: Antigravity is not installed on this machine, so this is not testable
-here.
+**Not covered.** Everything: Antigravity is not installed on the development machine, so this was
+not testable there.
 
 ## S9 usage metrics
 
@@ -294,8 +299,8 @@ limit %, reset times, spend), and on which surfaces?
 
 **What was run.** `spikes/usage-probe.mjs` over every transcript modified in the last 24 hours (39
 sessions, 372 MB), `spikes/otel-probe.mjs` (a loopback OTLP `http/json` listener plus one `claude -p`
-run), one `--output-format json` run and one `--output-format stream-json --verbose` run. The account
-is a claude.ai Team plan seat.
+run), one `--output-format json` run and one `--output-format stream-json --verbose` run, signed
+in with a claude.ai subscription.
 
 **Observed.**
 
@@ -323,7 +328,7 @@ is a claude.ai Team plan seat.
   `active_time.total`. Events seen include `api_request` with `input_tokens`, `output_tokens`,
   `cache_read_tokens`, `cache_creation_tokens`, `cost_usd`. Attributes include `session.id` and
   `app.entrypoint`, and also the account email, account id and organization id. No rate-limit or
-  quota attribute appeared. It worked on the claude.ai Team login.
+  quota attribute appeared. It worked with the claude.ai subscription login.
 - `-p` result JSON: `total_cost_usd`, `usage`, and `modelUsage.<model>` with `costUSD`,
   `contextWindow` (1,000,000 for haiku), `maxOutputTokens`, `costBasis: "list"`. No rate-limit field.
 - `-p` stream: a `rate_limit_event` was emitted with status `allowed`:
@@ -338,7 +343,7 @@ is a claude.ai Team plan seat.
   "appears only for claude.ai Pro, Max, and Ultra subscribers", and do not say which surfaces run a
   statusline command. The user settings have no `statusLine` key.
 - `~/.claude/stats-cache.json`, which the docs describe as the `/usage` aggregate, does not exist on
-  this machine.
+  the development machine.
 - Documented statements on cost: the session dollar figure is computed "locally from token counts at
   list price", "isn't relevant for billing purposes" on subscriptions, and on Team "usage inside the
   seat allowance isn't metered in dollars".
@@ -365,11 +370,13 @@ is a claude.ai Team plan seat.
   `entrypoint`, `hostSessionId` (only in some files), `pidDomain`, `asksForConvertedSkills`,
   `messagingSocketPath`, `name`, `nameSource`, `nameSince`, `status`, `updatedAt`,
   `statusUpdatedAt`. The folder also holds `.key` files with `peerToken`, `procStartFt`, `pidDomain`.
-- The owner's own settings applied to every spike session: a GitKraken hook
-  (`gk.exe ai hook run --host claude-code`) ran on every event next to the spike hooks, and the
-  owner's global CLAUDE.md was loaded (InstructionsLoaded `memory_type: User`).
+- The user settings also applied to every spike session: a third-party hook ran on every event next
+  to the spike hooks, and a user-level CLAUDE.md was loaded (InstructionsLoaded `memory_type: User`).
 
-## Manual steps still needed
+## Manual steps still needed (historical)
+
+This list is as it stood on 2026-11-19. Since then the desktop Code tab has been verified end to
+end; the terminal, VS Code and Antigravity steps below have not been done.
 
 1. Interactive surfaces.
    1. Run `node spikes/harness.mjs probe <folder>` for an empty folder. It writes

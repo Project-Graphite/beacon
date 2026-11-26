@@ -1,12 +1,86 @@
 # Decisions
 
-Decisions taken while building Beacon, newest phase first. Evidence for the phase 0 entries is in
-[SPIKES.md](SPIKES.md). An entry marked **needs Amr** is a proposal until he answers.
+This is Beacon's design log: the decisions taken while building it, with what was measured or
+verified, in dated entries with the newest first. A later entry supersedes an earlier one, and a
+statement that no longer holds is marked "(Superseded …)" where it stands. An item marked **open**
+is not decided yet. Evidence for the phase 0 entries is in [SPIKES.md](SPIKES.md).
+
+## Audit after 0.2.0 (2026-11-26)
+
+A code audit of 0.2.0 found the gaps below. Most fixes landed with a test; the items left open
+follow at the end.
+
+- **More text is redacted at the source.** The core now redacts the last message, an MCP form's
+  message and an API error before it stores them, as it already did for previews, titles and
+  activity lines. `beacon status --json` redacts request inputs, permission suggestions, plans and
+  queued prompts, and the install and uninstall plans redact the settings lines they show.
+- **Prompts are refused from inside a Claude session, like decisions.** The core refuses a `prompt`
+  request whose pipe client descends from a live session's `claude.exe`. This is still a speed bump,
+  not a security boundary (see 2026-11-24).
+- **An MCP form gets the 1 s reply budget.** The helper waited for the core's reply to an
+  `Elicitation` without a deadline, so a core that accepted the event and then stalled hid Claude
+  Code's own dialog for up to the hook's hour. It now gives up after 1 s, as for `Stop`.
+- **A session that reconcile finds gone has its pending requests expired**, instead of leaving them
+  waiting in the panel.
+- **A late prompt event expires only the requests asked before it was sent.** A prompt, stop or
+  session-end event used to expire every pending request of its session, so one that arrived late
+  could expire the new turn's request. The core now compares each request with the time the helper
+  stamped on the event. Limit: the helper stamps it after connecting to the core, so a request asked
+  while that helper was connecting still counts as older.
+- **A `gitdir:` pointer to a network share is not followed**, so reading a session's branch never
+  opens a `\\server` or `//server` path.
+- **Titles from hooks and names from `claude agents` are cut to one redacted line of 80 characters**,
+  like the other titles.
+- **Install and uninstall are safer with the settings file.** Install writes a `before-install` copy
+  before it repairs a file that has no restore point, backups are kept ten per kind, a relative
+  `--settings` path is stored and compared as an absolute one, and the staged file is flushed to
+  disk before it replaces the original. An always rule that starts with a dash is refused instead of
+  being read as a flag.
+- **The uninstaller keeps the data when it cannot remove the hooks.** It warns that the hooks are
+  still in the settings file and keeps `%LOCALAPPDATA%\Beacon`, so the helper they point to and the
+  backups remain. It now also removes the notification registration and, when the data is deleted,
+  the WebView2 profile in `%LOCALAPPDATA%\com.project-graphite.beacon`.
+- **The version lives in the workspace `Cargo.toml` and `app/package.json`**, not in
+  `tauri.conf.json`, which now gives the installer a homepage, copyright and description instead. The
+  release script refuses a working tree with uncommitted or untracked changes, builds with
+  `--locked`, and runs `npm ci` only when `node_modules` is missing.
+- **`undismiss` was missing from the panel's allowed commands in 0.2.0**, so Hide's Undo and Show
+  failed. It is allowed now, and a test checks that the command handler list, the build manifest and
+  the panel's capability name the same commands.
+- **The pinned panel holds only while a session is starting, working, stalled or needs you.** In
+  0.2.0 an unseen finished or failed session also held it, so it did not close after Claude was done.
+  It also closes when a fullscreen window takes the foreground and opens again after.
+- **Only the installed build applies the start mode**, so a development build run from `target\`
+  no longer takes over starting with Claude or the sign-in entry.
+- **Every `ui.json` field is read leniently**: one mistyped value falls back to its default alone
+  instead of resetting the file.
+- **The overlay palette matches the panel's dark tokens.** The light theme's accents stay at the
+  stronger mark grade, so they read on a white capsule.
+
+### Open
+
+- (a) The overlay's invisible hit areas catch clicks (pinned by tests). Removing them needs polling
+  or a mouse hook, against the goal that an idle Beacon costs nothing.
+- (b) "Uninstall" from the setup program's maintenance page keeps the hooks. Tauri passes the
+  uninstaller no marker that tells that case from an upgrade.
+- (c) `bundle.publisher` is not set, because Tauri derives the registry key that holds the install
+  folder from it, and changing it would break upgrades from 0.2.0.
+- (d) There is one install record per machine, so installing into a second Claude config folder
+  replaces the record of the first.
+- (e) With no install record and stale Beacon handlers in the settings file, uninstall restores the
+  stale handlers (pinned by a test).
+- (f) A request resolved only by `PostToolBatch` is recorded as "Denied in session" even when it was
+  allowed natively and its `PostToolUse` arrives second (pinned by a test).
+- (g) A `settings.json` that is a symbolic link is replaced by a regular file on write.
+- (h) Blocking filesystem work (the git branch lookup, the state write) runs on the core's single
+  thread.
+- (i) A wake prompt is marked delivered when it is queued, so a helper that dies in that instant
+  loses it without a trace.
 
 ## 0.2.0: refined Graphite, light and dark, an installer (2026-11-24)
 
-- **The look is refined Graphite, not a new world.** Amr chose to keep the Graphite dark identity and
-  make it calmer and roomier rather than adopt Windows Fluent or a new palette. The panel is 376 px
+- **The look is refined Graphite, not a new world.** The owner chose to keep the Graphite dark
+  identity and make it calmer and roomier rather than adopt Windows Fluent or a new palette. The panel is 376 px
   wide with 52 px rows, 16 px gutters and Segoe UI Variable; [DESIGN.md](../DESIGN.md) holds the
   tokens.
 - **Beacon follows the Windows theme.** The panel follows `prefers-color-scheme`, the pill, tab and
@@ -18,7 +92,9 @@ Decisions taken while building Beacon, newest phase first. Evidence for the phas
 - **Two invisible options for the pill.** `Pill background: None` drops the capsule and keeps the
   marks; `Show it: Only when Claude needs you` with `Reveal on hover` keeps the overlay invisible
   until needed, revealed from a thin strip so it never swallows clicks on what lies beneath. Shadows
-  sit in click-through windows for the same reason.
+  sit in click-through windows for the same reason. (Superseded: the reveal strip, like the tab's hit
+  band and a background-less pill, does catch clicks on its own small area. That is the accepted
+  cost of hover detection without polling; see the open items of 2026-11-26.)
 - **The tray menu and the settings view use the same names and choices.** The menu covers snooze,
   the overlay, attention and opens the settings view; the old flat show/hide items are gone.
 - **The shortcut is recorded, not typed.** The recorder pauses the global hotkey while it listens and
@@ -35,7 +111,7 @@ Decisions taken while building Beacon, newest phase first. Evidence for the phas
   an agent cannot casually approve its own requests with `beacon decide`. A process that was
   reparented away from the session, or any other process of the same user, can still reach the pipe
   and send the request: the pipe is only closed to other users. Nothing here defends against a
-  hostile agent.
+  hostile agent. (Prompts are refused the same way since 2026-11-26.)
 - **The wake hook reconnects and exits when its Claude process is gone.** The `StopWaiter` helper
   that outlives a core restart keeps trying to register again, and now ends when the process named
   by `CLAUDE_PID` no longer exists or after 24 hours, instead of waiting forever. The core likewise
@@ -49,8 +125,9 @@ Decisions taken while building Beacon, newest phase first. Evidence for the phas
   the pill points down while the panel is closed and turns up while it is open; a press on it
   toggles the panel in sticky mode without taking focus. A press elsewhere on the pill only starts a
   drag, so moving the pill no longer risks opening the panel. The edge tab still toggles on a click.
-- **Hover opening is a setting.** `open_on_hover` ("Open on hover" under Overlay) is on by default
-  for the edge tab and off for the pill; until it is set, the default follows the current style.
+- **Hover opening is a setting.** `open_on_hover` ("Open panel on hover" under Overlay) is on by
+  default for the edge tab and off for the pill; until it is set, the default follows the current
+  style.
   With it off, hovering the reveal strip of a hidden overlay only brings the overlay back.
 - **The open panel follows the overlay.** While the pill or the tab is dragged, and while the tab
   glides to its dock, the panel is placed against the overlay's current rectangle on every move.
@@ -105,7 +182,9 @@ its task list, on every change, and the panel's WebView was built from scratch o
   the panel opens by itself without focus while a session is starting, working, stalled or needs
   the user, ignores presses outside it, and closes 5 s after Claude is done. Its pin button hides it
   until Claude is next active; it does not open over a fullscreen window. This is an opt-in
-  exception to "the panel never holds itself open" from 2026-11-20.
+  exception to "the panel never holds itself open" from 2026-11-20. (Corrected on 2026-11-26: in
+  0.2.0 an unseen finished or failed session also held it open, so it did not close after Claude
+  was done, and a fullscreen window taking the foreground did not close it.)
 - **Session titles come from the transcript.** A row shows the first of: the custom title (from the
   hooks, or else from the transcript), Claude Code's AI title, the last prompt, the name `claude
   agents` lists (skipped when it is only the project name with a two-digit hex suffix), the project
@@ -127,9 +206,9 @@ its task list, on every change, and the panel's WebView was built from scratch o
   "Clear finished after" offers Never, 5, 10, 30 minutes and 1 hour) acknowledges a `done` session
   that long after its turn ended, checked with the stall check every 30 s. `error` and `stalled`
   sessions are left for the user.
-- `core.log` moves to `core.log.1` before it would pass 5 MB, so the log no longer grows without
-  bound. The app's own diagnostics go to `app.log` beside it with the same rotation, since a release
-  build has no console.
+- `logs\core.log` moves to `logs\core.log.1` before it would pass 5 MB, so the log no longer grows
+  without bound. The app's own diagnostics go to a separate `logs\app.log` beside it with the same
+  rotation, since a release build has no console.
 
 ### Fixes
 
@@ -140,13 +219,16 @@ its task list, on every change, and the panel's WebView was built from scratch o
 
 ## Overlay options, peek and starting with Claude (2026-11-22)
 
-Changed on Amr's feedback: the overlay being on screen all the time was annoying, attention should
-be noticeable without being sticky, and Beacon should start with Claude rather than with Windows.
+Changed on the owner's feedback: the overlay being on screen all the time was annoying, attention
+should be noticeable without being sticky, and Beacon should start with Claude rather than with
+Windows.
 
 - **The overlay is not always on screen.** `visibility` is `always`, `active` (a session is working
   or needs the user; the default), `attention` or `never`. It fades out 5 s after its condition
   stops holding. While hidden, a 2 px strip on its screen edge reveals it on hover, so it stays
-  within reach.
+  within reach. (Superseded: the reveal strip is a 4 px band on the pill's spot, or the tab's 8 px
+  footprint. `active` also covers a session that is starting or stalled, or has an alert not yet
+  seen.)
 - **Attention is a short label, not a held-open panel.** When a session starts needing the user the
   overlay pops, bursts once and slides out a "peek" label naming the session and what it needs, for
   a few seconds. A reminder burst repeats at a chosen interval until the panel is opened. Style,
@@ -157,23 +239,26 @@ be noticeable without being sticky, and Beacon should start with Claude rather t
   reachable. Headless runs never start it. The app quits after Claude has been unused for a chosen
   time. The check costs nothing while the core is running: the hook measured 28 ms after against
   31 ms before.
-- **The panel is an owned popup.** Some program on this machine re-centres new unowned application
-  windows on the primary display: the panel was created in place and moved by a cross-thread
-  `SetWindowPos` from outside Beacon about 190 ms later. Owned popups are left alone, so the panel
-  is now owned by the overlay window. Which program does it was not identified.
+- **The panel is an owned popup.** Some program on the development machine re-centres new unowned
+  application windows on the primary display: the panel was created in place and moved by a
+  cross-thread `SetWindowPos` from outside Beacon about 190 ms later. Owned popups are left alone, so
+  the panel is now owned by the overlay window. Which program does it was not identified.
 - **A prompt delivered at turn end is also shown in the session** through the hook's
   `systemMessage`, as "Beacon follow-up: ...". A hook cannot add a real user message.
 - Streamlining: one bell menu for snooze and sounds, 36 px rows, the last message and usage under a
   "More" disclosure, and a view's data is loaded before the view slides in so nothing pops in.
+  (Superseded: 0.2.0 has 52 px rows in a 376 px panel.)
 
 ## Edge tab, compact panel and motion (2026-11-20)
 
-Changed on Amr's feedback after using v1.
+Changed on the owner's feedback after using v1.
 
-- **The panel never holds itself open.** The brief wanted it to refuse to go away while something
-  was waiting; in use that got in the way of other work. An alert no longer opens it, and it closes
-  on a press anywhere outside it, on the cursor leaving it, or on losing focus. A low-level mouse
-  hook sees the outside press and exists only while the panel does.
+- **The panel never holds itself open.** The original plan wanted it to refuse to go away while
+  something was waiting; in use that got in the way of other work. An alert no longer opens it, and
+  it closes on a press anywhere outside it, on the cursor leaving it, or on losing focus. A
+  low-level mouse hook sees the outside press and exists only while the panel does. (Superseded: the
+  hook is installed only while the panel is shown in hover or sticky mode, not while it is pinned or
+  kept warm.)
 - **An edge tab is the default native form.** A strip 4 px thick and 72 px long sits flush against
   a screen edge; hovering opens the panel against that edge and a click keeps it open. The pill
   remains as a second style. A display's default edge is the first one that touches no other
@@ -183,7 +268,7 @@ Changed on Amr's feedback after using v1.
   minutes, then every 10 s. A continuous pulse would animate for hours while the user is away.
 - **Compact rows.** A session is one 32 px row, with a second 28 px row carrying Allow and Deny when
   it is waiting. Everything else is behind expanding the row. The panel is 340 px wide and 18
-  sessions fit where 6 did.
+  sessions fit where 6 did. (Superseded: 0.2.0 has 52 px rows in a 376 px panel.)
 - **Motion follows the display.** In the panel only `transform`, `opacity` and grid-row heights
   animate, as CSS or Web Animations, so the compositor paces them at the refresh rate; measured at
   238 Hz with no slow frames on expand, reorder and view switch. The native tab is paced by a
@@ -194,7 +279,7 @@ Changed on Amr's feedback after using v1.
   area, and nothing inside it scrolls by itself; a block over 40 lines is cut with a "Show all"
   button. When the whole panel does overflow, native scrollbars stay hidden and an overlay thumb and
   edge fades, driven by a CSS scroll timeline, show the position.
-- **Sessions have a face, a title and progress** (adapted from a reference widget Amr sent). Each
+- **Sessions have a face, a title and progress** (adapted from a reference widget the owner sent). Each
   session gets an avatar whose colour is fixed by its id and whose expression follows its state,
   with the state mark as a badge. A row leads with the session's title and shows task progress from
   Claude's own task list. Opening a row replaces the list with a detail view: the plan as a
@@ -215,7 +300,8 @@ Changed on Amr's feedback after using v1.
 
 Asked to drop what is not needed: the VS Code companion extension, Antigravity support, the claude.ai
 browser extension, the desktop-chat adapter, Beacon-spawned sessions, idle wake, headless resume, the
-edge-reveal form, toast action buttons and the test-matrix document are all out of v1.
+edge-reveal form, toast action buttons and the test-matrix document are all out of v1. (Idle wake
+returned on 2026-11-22.)
 
 ### Answering from the panel (M3)
 
@@ -260,6 +346,10 @@ edge-reveal form, toast action buttons and the test-matrix document are all out 
 | Idle elsewhere | Copy and jump | The text goes to the clipboard and the window is raised. |
 | Ended | None | |
 
+(Superseded on 2026-11-22: an idle session is woken through the `StopWaiter` hook; prefill and copy
+and jump are the fallback for a session that cannot be woken. Prefill now also puts the text on
+the clipboard.)
+
 - A queued prompt shows `queued`, `delivered`, `acknowledged` or `failed` with a reason, and
   survives a core restart. A turn that ends without a `Stop` fails its queued prompts instead of
   leaving them queued.
@@ -271,7 +361,8 @@ edge-reveal form, toast action buttons and the test-matrix document are all out 
 
 - `ui.json` holds the chosen display and a list of displays to avoid. The pill and the panel appear
   only on the target: the chosen display if connected and allowed, otherwise the primary if allowed,
-  otherwise the first allowed display, otherwise nowhere (tray only).
+  otherwise the first allowed display, otherwise nowhere (tray only). (Superseded: with no allowed
+  display the overlay stays hidden, but the panel opens on the primary display.)
 - The tray menu has `Show on`, `Never show on` and `Position`. Dragging the pill onto an allowed
   display selects it; a drop on an avoided display is undone.
 - The single-instance lock is skipped when `BEACON_HOME` is set, so a test instance can run beside
@@ -285,6 +376,7 @@ edge-reveal form, toast action buttons and the test-matrix document are all out 
 - There is no installer. At start the app registers its notification identity under
   `HKCU\Software\Classes\AppUserModelId`, so Windows attributes toasts to Beacon, and start at
   sign-in is a `Run` value under `HKCU`. A build run from `target\` skips the registration.
+  (Superseded: 0.2.0 ships a per-user NSIS installer.)
 
 ### Build
 
@@ -295,7 +387,7 @@ be built through the Tauri CLI, or it loads the dev server instead of the bundle
 
 ### The pill is native; the panel is a WebView that exists only while it is open
 
-Measured on this machine with a release build, 60 s of sampling after a 60 s warm-up:
+Measured on the development machine with a release build, 60 s of sampling after a 60 s warm-up:
 
 | State | Processes | Private memory | Working set | CPU over 60 s |
 |---|---|---|---|---|
@@ -308,7 +400,9 @@ Measured on this machine with a release build, 60 s of sampling after a 60 s war
 A live WebView2 window costs about 160 MB whether it is shown or hidden, against an idle budget of
 80 MB, so the collapsed pill is a Win32 layered window painted by Beacon's own rasterizer. The panel
 window is created when it opens and destroyed when it closes, never hidden. Opening it from cold
-takes about 0.3 s. The app is over the idle budget only while the panel is open.
+takes about 0.3 s. The app is over the idle budget only while the panel is open. (Superseded on
+2026-11-22: a closed panel is hidden and kept warm for 45 s, or 60 s while Claude is active, before
+it is destroyed.)
 
 ### Pill
 
@@ -320,29 +414,33 @@ takes about 0.3 s. The app is over the idle budget only while the panel is open.
 - Fully transparent pixels pass clicks through. The pill never takes focus.
 - It hides while a fullscreen window is in the foreground on its monitor. That is driven by the
   foreground-change hook, so a window that goes fullscreen while already in the foreground is not
-  noticed until the foreground changes.
+  noticed until the foreground changes. (Superseded: a location-change hook on the foreground
+  window now notices it going fullscreen.)
 - Its position is stored per monitor layout in `ui.json` and snaps to edges and corners.
 
 ### Panel
 
 - Two modes. Hover closes 400 ms after the cursor leaves the tab or pill and the panel. Sticky (a
   click, the hotkey, the tray, a second launch) stays until dismissed. The pinned mode this
-  milestone shipped with was removed; see "Edge tab, compact panel and motion".
+  milestone shipped with was removed; see "Edge tab, compact panel and motion". (An opt-in pinned
+  mode returned on 2026-11-22.)
 - A hover open does not take focus.
 - The page can call a fixed list of commands and nothing else, restricted to the panel window by a
   capability file. The CSP is `default-src 'self'` plus the `connect-src` Tauri's own IPC needs.
 - Everything from a session is rendered as text nodes. The last message goes through a hand-written
   renderer for a Markdown subset; there is no HTML injection path and no Markdown dependency.
-- The panel is a solid Graphite surface. The brief's OS blur is not used, because Graphite is flat.
+- The panel is a solid Graphite surface. The original plan's OS blur is not used, because Graphite
+  is flat.
 
 ### Attention, acknowledge and snooze
 
 - `alerting` means in an attention state and not snoozed. The tab's colour and pulse, the pill count,
   the tray icon and toasts all follow it.
-- Acknowledge clears `done`, `error` and `stalled`. The brief had it only for `done`, which would
-  leave an API error pinning the panel until the next prompt.
+- Acknowledge clears `done`, `error` and `stalled`. The original plan had it only for `done`, which
+  would leave an API error pinning the panel until the next prompt.
 - Snooze is per session or global, for 5 or 15 minutes, held in the core so the CLI and the app
-  agree, and it survives a restart.
+  agree, and it survives a restart. (Superseded: the tray also offers 1 hour, and `beacon snooze`
+  takes any number of minutes.)
 
 ### Toasts
 
@@ -352,8 +450,9 @@ takes about 0.3 s. The app is over the idle budget only while the panel is open.
 
 ### Hotkey
 
-`Ctrl+Alt+Space` is already registered by another program on this machine, so it never fired. The
-accelerator is read from `hotkey` in `ui.json` and can be changed in the settings view.
+`Ctrl+Alt+Space` is already registered by another program on the development machine, so it never
+fired there. The accelerator is read from `hotkey` in `ui.json` and can be changed in the settings
+view.
 
 ### Usage, as built
 
@@ -372,7 +471,8 @@ accelerator is read from `hotkey` in `ui.json` and can be changed in the setting
   unknown until a hook fires.
 - The one-line preview of a pending request and the activity line are redacted in the core, so no
   front end sees the raw text.
-- A light theme is not planned, because Graphite is dark only.
+- A light theme is not planned, because Graphite is dark only. (Superseded: 0.2.0 follows the
+  Windows theme, light or dark.)
 
 ## M1: helper, core, installer and CLI (2026-11-19)
 
@@ -397,9 +497,11 @@ accelerator is read from `hotkey` in `ui.json` and can be changed in the setting
   other variable leaves the session.
 - A watchdog ends it if the request is not sent within 2 s, or if a turn-end reply does not arrive
   within 1 s, so a hung core cannot hold a session. Permission requests and MCP input wait without a
-  deadline, because the wait is for the person.
-- **The 15 ms budget is not met: an event costs about 30 ms.** That is process creation on this
-  machine; an empty run of the helper takes 31 ms and `whoami.exe` 34 ms. It delays a session only on
+  deadline, because the wait is for the person. (Corrected on 2026-11-26: an MCP form now gets the
+  same 1 s reply budget, because the helper holding it hides Claude Code's own dialog; only
+  permission requests wait without a deadline.)
+- **The 15 ms budget is not met: an event costs about 30 ms.** That is process creation on the
+  development machine; an empty run of the helper takes 31 ms and `whoami.exe` 34 ms. It delays a session only on
   the five blocking events below. HTTP hooks would avoid the process, but they show a hook error in
   every session while the core is down and cannot report the session's environment, so the helper
   stays.
@@ -438,7 +540,10 @@ Twenty-two events, kept in one constant that install, uninstall, doctor and the 
 ### Behaviour worth knowing
 
 - A malformed `state.json` or `config.json` stops the core with an error instead of being discarded.
-- Ended sessions are dropped from the registry 24 hours after their last event.
+  (Superseded: an unreadable `state.json` is kept as `state.json.bad` and the core starts with no
+  sessions; only a malformed `config.json` stops the core.)
+- Ended sessions are dropped from the registry 24 hours after their last event. (Superseded on
+  2026-11-22: they are kept for 2 hours from when they ended, and at most 20.)
 - A session known only from `claude agents --json` is marked limited until one of its hooks fires.
 - The end-to-end check ran against a real `claude -p` session with a temporary settings file: allow
   from `beacon decide` ran the tool, deny returned the message to Claude, and uninstall restored the
@@ -446,10 +551,10 @@ Twenty-two events, kept in one constant that install, uninstall, doctor and the 
 
 ## Phase 0 (2026-11-19)
 
-### Where the brief was wrong or incomplete
+### Where the original plan was wrong or incomplete
 
-- **`PermissionRequest` has no `tool_use_id`.** The brief keyed pending decisions on `session_id` +
-  `tool_use_id`. A pending decision is keyed on the helper connection instead, and its `tool_use_id`
+- **`PermissionRequest` has no `tool_use_id`.** The original plan keyed pending decisions on
+  `session_id` + `tool_use_id`. A pending decision is keyed on the helper connection instead, and its `tool_use_id`
   is joined from the `PreToolUse` with the same session, agent, tool name and input. The two hooks
   start in either order, so the join tolerates both.
 - **Answering elsewhere is not signalled to the hook.** When another approver decides first, the
@@ -481,7 +586,7 @@ writes to stdout only a complete decision. It gives the core 150 ms to accept th
 that are never registered: `WorktreeCreate` and `WorktreeRemove` (they replace git behaviour),
 `PreModelSwitch` (a timeout blocks the switch), `MessageDisplay` and `FileChanged`.
 
-### Hook registration, changed from the brief's table
+### Hook registration, changed from the original plan's table
 
 - `Stop` is registered blocking. The helper returns at once when no prompt is queued, and otherwise
   returns `hookSpecificOutput.additionalContext`, which reaches Claude as "Stop hook additional
@@ -529,7 +634,7 @@ nothing; its message format is undocumented, so it is not used.
 - **Mods** could do this in-process, but need a plugin install and are limited by the default guard.
   Command hooks stay the mechanism.
 
-### Usage metrics (added to the brief on 2026-11-19)
+### Usage metrics (added to the original plan on 2026-11-19)
 
 - **Per session:** tokens and context fill come from transcripts, one usage per `message.id`, with
   `<session>/subagents/` included. The reader is an isolated adapter with a self-test, because the
@@ -548,13 +653,15 @@ nothing; its message format is undocumented, so it is not used.
 - **Graphite look, own components.** Beacon copies the Graphite tokens (`paper`, `surface`, `line`,
   `ink`, `muted`, `live`, `wip`, `danger`, `dormant`, the radii, `--ease-settle`, the system sans and
   mono stacks) into its own stylesheet and imports nothing from `graphite-ui` or MUI. It is dark only,
-  as Graphite is, which replaces the brief's follow-the-OS light and dark. `ink` is the accent; `wip`
-  marks needs-input, `live` done, `danger` error.
+  as Graphite is, which replaces the original plan's follow-the-OS light and dark. `ink` is the
+  accent; `wip` marks needs-input, `live` done, `danger` error. (Superseded: 0.2.0 follows the
+  Windows theme, light or dark.)
 - **React 19, TypeScript, Vite and Tailwind 4** for the UI, as in every other Graphite app. The size
   difference from Svelte is noise next to WebView2.
 - **Tauri 2 with a Rust core, and a native Rust helper.** A Node helper measured 46 ms per event
   against the 15 ms budget. Visual Studio Build Tools 2026 with the C++ tools and WebView2 157 are
-  installed; Rust is not. **Needs Amr:** approval to install the Rust toolchain with rustup.
+  installed on the development machine; Rust is not. **Open:** approval to install the Rust
+  toolchain with rustup. (Done: Rust was installed and M1 was built with it.)
 - **The long-running process is called the core, not the hub** (`crates/core`), because Graphite Hub
   already exists.
 - **Risk: the 80 MB idle budget.** A WebView2 window that is always on screen may not fit. It is
@@ -563,7 +670,8 @@ nothing; its message format is undocumented, so it is not used.
 
 ### Deferred
 
-- `.graphite.yml` is added in M1, once the stack is approved and the tags are known.
-- Antigravity is not installed on this machine, so S8 is open. **Needs Amr.**
+- `.graphite.yml` is added in M1, once the stack is approved and the tags are known. (Done.)
+- Antigravity is not installed on the development machine, so S8 is **open**.
 - The interactive terminal, VS Code and desktop surfaces are unmeasured until the manual probe in
-  SPIKES.md is run. They gate M4 (jump to window, surface icons), not M1.
+  SPIKES.md is run. They gate M4 (jump to window, surface icons), not M1. (The desktop Code tab has
+  since been verified; the terminal and VS Code have not.)
