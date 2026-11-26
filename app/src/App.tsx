@@ -46,7 +46,7 @@ import { jumpReport, type JumpReport } from './lib/jump.ts';
 import { decideKey, keyFocus, type FocusKind } from './lib/keys.ts';
 import { entryOffset } from './lib/panel.ts';
 import { promptBoxId } from './lib/prompts.ts';
-import { thumbFraction } from './lib/scroll.ts';
+import { fullyShown, thumbFraction } from './lib/scroll.ts';
 import { keyTarget, requestId, requestQueue, requestsOf, resolutionNotices, type ResolutionNotice } from './lib/queue.ts';
 import { reuseEqual } from './lib/reuse.ts';
 import { cardId, crossedOff, findSession, groupSessions, sessionTabs, sessionTitle } from './lib/sessions.ts';
@@ -265,6 +265,11 @@ export function App() {
     if (opened?.focused) setSelectedId((selected) => selected ?? firstVisibleId);
   }, [opened?.focused, firstVisibleId]);
 
+  const selectionLost = selectedId !== null && openId === null && !visible.some((session) => session.session_id === selectedId);
+  useEffect(() => {
+    if (selectionLost) setSelectedId(opened?.focused ? firstVisibleId : null);
+  }, [selectionLost, opened?.focused, firstVisibleId]);
+
   useEffect(() => {
     if (selectedId) document.getElementById(cardId(selectedId))?.scrollIntoView({ block: 'nearest' });
   }, [selectedId]);
@@ -359,6 +364,7 @@ export function App() {
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
+      const element = target && document.getElementById(requestId(target.id));
       const { prevent, action } = decideKey(
         {
           key: event.key,
@@ -367,6 +373,11 @@ export function App() {
           repeat: event.repeat,
           focus: focusKind(event.target),
           inRequest: event.target instanceof Element && event.target.closest('[id^="request-"]') !== null,
+          targetView: !element
+            ? 'absent'
+            : scroller.current && fullyShown(element.getBoundingClientRect(), scroller.current.getBoundingClientRect())
+              ? 'shown'
+              : 'hidden',
         },
         {
           ...keyState,
@@ -383,12 +394,12 @@ export function App() {
         case 'close-settings':
           setSettingsOpen(false);
           break;
-        case 'answer': {
-          const act = requestKeys.current.get(action.id);
-          if (act) act(action.key);
-          else void openDetail(action.sessionId);
+        case 'answer':
+          requestKeys.current.get(action.id)?.(action.key);
           break;
-        }
+        case 'reveal':
+          element?.scrollIntoView({ block: 'nearest' });
+          break;
         case 'open':
           void openDetail(action.sessionId);
           break;

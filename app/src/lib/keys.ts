@@ -13,6 +13,7 @@ export interface KeyPress {
   repeat: boolean;
   focus: FocusKind;
   inRequest: boolean;
+  targetView: 'absent' | 'hidden' | 'shown';
 }
 
 export interface KeyFocusState {
@@ -32,7 +33,8 @@ export interface KeyState extends KeyFocusState {
 export type KeyAction =
   | { type: 'blur' }
   | { type: 'close-settings' }
-  | { type: 'answer'; id: number; sessionId: string; key: RequestKey }
+  | { type: 'answer'; id: number; key: RequestKey }
+  | { type: 'reveal'; id: number }
   | { type: 'open'; sessionId: string }
   | { type: 'prompt'; sessionId: string }
   | { type: 'select'; sessionId: string | null; requestId: number | null }
@@ -61,7 +63,8 @@ export function decideKey(press: KeyPress, state: KeyState): KeyResult {
   const { openSession, queue } = state;
   const { selected, target } = keyFocus(state);
   if (target && (key === 'a' || key === 'd' || key === 'm')) {
-    return result(true, { type: 'answer', id: target.id, sessionId: target.session_id, key });
+    if (press.targetView === 'absent') return result(true, { type: 'open', sessionId: target.session_id });
+    return result(true, press.targetView === 'shown' ? { type: 'answer', id: target.id, key } : { type: 'reveal', id: target.id });
   }
   switch (key) {
     case 'tab': {

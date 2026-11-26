@@ -59,6 +59,7 @@ const press = (key: string, fields: Partial<KeyPress> = {}): KeyPress => ({
   repeat: false,
   focus: 'body',
   inRequest: false,
+  targetView: 'shown',
   ...fields,
 });
 
@@ -105,19 +106,34 @@ test('A, D and M act on the key target', () => {
   for (const key of ['a', 'd', 'm']) {
     assert.deepEqual(decideKey(press(key), state({ selectedId: 'b' })), {
       prevent: true,
-      action: { type: 'answer', id: 3, sessionId: 'b', key },
+      action: { type: 'answer', id: 3, key },
     });
   }
   assert.deepEqual(decideKey(press('m'), state({ openSession: asking, chosenRequestId: 2 })).action, {
     type: 'answer',
     id: 2,
-    sessionId: 'a',
     key: 'm',
   });
 });
 
+test('A, D and M on a request scrolled out of view only bring it into view', () => {
+  for (const key of ['a', 'd', 'm']) {
+    assert.deepEqual(decideKey(press(key, { targetView: 'hidden' }), state({ selectedId: 'b' })), {
+      prevent: true,
+      action: { type: 'reveal', id: 3 },
+    });
+  }
+});
+
+test('A, D and M on a request that is not on screen open its session', () => {
+  assert.deepEqual(decideKey(press('a', { targetView: 'absent' }), state({ selectedId: 'b' })), {
+    prevent: true,
+    action: { type: 'open', sessionId: 'b' },
+  });
+});
+
 test('Caps Lock and Shift do not change what a letter does', () => {
-  assert.deepEqual(decideKey(press('A'), state({ selectedId: 'b' })).action, { type: 'answer', id: 3, sessionId: 'b', key: 'a' });
+  assert.deepEqual(decideKey(press('A'), state({ selectedId: 'b' })).action, { type: 'answer', id: 3, key: 'a' });
   const quiet = state({ selectedId: 'b', queue: [] });
   assert.deepEqual(decideKey(press('A'), quiet).action, { type: 'acknowledge', sessionId: 'b' });
   assert.deepEqual(decideKey(press('J'), quiet).action, { type: 'jump', sessionId: 'b' });
