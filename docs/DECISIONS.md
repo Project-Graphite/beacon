@@ -56,6 +56,20 @@ follow at the end.
   instead of resetting the file.
 - **The overlay palette matches the panel's dark tokens.** The light theme's accents stay at the
   stronger mark grade, so they read on a white capsule.
+- **The keys act on one current request.** The marked request is the one `A`, `D` and `M` act on,
+  decided in one pure function (`decideKey` in `app/src/lib/keys.ts`) with its own tests. A key acts
+  only on a request that is fully in view (the first press scrolls it there) and only once the
+  marked request has been in place for 0.4 s, so an answer cannot land on a request that just took
+  another's place; request buttons ignore clicks for the same 0.4 s. `Tab` is left to the browser
+  unless two or more requests wait and focus is on the page or inside a request.
+- **Masking covers plans and questions too.** Plan text, question text and options are masked like
+  tool input, each card with its own "Show unmasked". Masking walks the value tree, so a secret
+  inside a string argument, or a value under a secret-looking key, is masked in TypeScript and in
+  Rust (`redact_json`, which `beacon status --json` also uses).
+- **Destructive detection covers more.** Scripts in MCP tool arguments (`command`, `cmd`,
+  `script`), an abbreviated `-Recurse`, `Format-Volume`, `Clear-Disk` and `rimraf` are flagged.
+- **Screen readers hear new requests, notices and failures**, through a polite live region and
+  alerts on decide and prompt failures.
 
 ### Open
 
@@ -76,6 +90,8 @@ follow at the end.
   thread.
 - (i) A wake prompt is marked delivered when it is queued, so a helper that dies in that instant
   loses it without a trace.
+- (j) With two or more requests waiting, `Tab` steps through the requests, so the controls inside a
+  card are reached by pointer or by the letter keys.
 
 ## 0.2.0: refined Graphite, light and dark, an installer (2026-11-24)
 
