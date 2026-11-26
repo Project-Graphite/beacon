@@ -186,8 +186,8 @@ export function App() {
     const [area, list, inner] = [scrollArea.current, scroller.current, content.current];
     if (!area || !list || !inner) return;
     const observer = new ResizeObserver(() => {
-      area.style.setProperty('--thumb', String(thumbFraction(list.clientHeight, list.scrollHeight)));
-      area.toggleAttribute('data-overflowing', list.scrollHeight > list.clientHeight);
+      area.style.setProperty('--thumb', String(thumbFraction(list.clientHeight, inner.offsetHeight)));
+      area.toggleAttribute('data-overflowing', inner.offsetHeight > list.clientHeight);
     });
     let idle = 0;
     const startScrolling = () => {
