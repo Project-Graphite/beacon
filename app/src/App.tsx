@@ -231,6 +231,7 @@ export function App() {
 
   useEffect(() => {
     shownView.current = view.key;
+    if (view.key !== 'list') setHidden(null);
   }, [view.key]);
 
   useEffect(() => {
@@ -571,22 +572,22 @@ export function App() {
               <RequestGate value={requestSettled}>
                 <ViewStack key={viewReset} view={view} scroller={scroller} render={renderView} />
               </RequestGate>
+              {hidden && (
+                <div
+                  role="status"
+                  onPointerEnter={() => window.clearTimeout(hiddenTimer.current)}
+                  onPointerLeave={() => (hiddenTimer.current = window.setTimeout(() => setHidden(null), HIDDEN_NOTICE_MS))}
+                  className="sticky bottom-3 z-30 mx-3 mt-2 mb-3 flex origin-bottom animate-appear items-center gap-3 rounded-popover border border-line bg-raised py-2 pr-3 pl-3.5 text-secondary shadow-popover"
+                >
+                  <p className="line-clamp-2 min-w-0 flex-1 text-muted">
+                    <span className="text-ink">{hidden.title}</span> is hidden until its next prompt
+                  </p>
+                  <TextButton onClick={() => undoHide(hidden.sessionId)}>Undo</TextButton>
+                </div>
+              )}
               <div ref={ghosts} aria-hidden="true" className="pointer-events-none absolute inset-0" />
             </div>
           </div>
-          {hidden && (
-            <div
-              role="status"
-              onPointerEnter={() => window.clearTimeout(hiddenTimer.current)}
-              onPointerLeave={() => (hiddenTimer.current = window.setTimeout(() => setHidden(null), HIDDEN_NOTICE_MS))}
-              className="absolute inset-x-3 bottom-3 z-30 flex origin-bottom animate-appear items-center gap-3 rounded-popover border border-line bg-raised py-2 pr-3 pl-3.5 text-secondary shadow-popover"
-            >
-              <p className="min-w-0 flex-1 truncate text-muted">
-                <span className="text-ink">{hidden.title}</span> is hidden until its next prompt
-              </p>
-              <TextButton onClick={() => undoHide(hidden.sessionId)}>Undo</TextButton>
-            </div>
-          )}
           <div aria-hidden="true" className="scroll-thumb" />
         </div>
       </section>
