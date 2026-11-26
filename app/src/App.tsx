@@ -43,32 +43,13 @@ import { PanelFit, usePanelHeight } from './hooks/usePanelHeight.ts';
 import { toggleOpen } from './lib/disclosure.ts';
 import { errorText } from './lib/format.ts';
 import { jumpReport, type JumpReport } from './lib/jump.ts';
+import { decideKey, keyFocus, type FocusKind } from './lib/keys.ts';
 import { entryOffset } from './lib/panel.ts';
-import { promptBoxId, promptPath } from './lib/prompts.ts';
+import { promptBoxId } from './lib/prompts.ts';
 import { thumbFraction } from './lib/scroll.ts';
-import {
-  currentRequest,
-  firstRequestOf,
-  keyTarget,
-  requestId,
-  requestQueue,
-  requestsOf,
-  resolutionNotices,
-  stepRequest,
-  type ResolutionNotice,
-} from './lib/queue.ts';
+import { keyTarget, requestId, requestQueue, requestsOf, resolutionNotices, type ResolutionNotice } from './lib/queue.ts';
 import { reuseEqual } from './lib/reuse.ts';
-import {
-  canAcknowledge,
-  canSnooze,
-  cardId,
-  crossedOff,
-  findSession,
-  groupSessions,
-  sessionTabs,
-  sessionTitle,
-  stepTab,
-} from './lib/sessions.ts';
+import { cardId, crossedOff, findSession, groupSessions, sessionTabs, sessionTitle } from './lib/sessions.ts';
 import { flashRow } from './motion.ts';
 
 const NOTICE_MS = 4000;
@@ -81,10 +62,18 @@ const NO_SESSIONS: Session[] = [];
 const whenLoaded = (loading: Promise<unknown>) =>
   Promise.race([loading.catch(() => null), new Promise((ready) => window.setTimeout(ready, PRELOAD_WAIT_MS))]);
 
-const isTextField = (target: EventTarget | null): target is HTMLElement =>
+const focusKind = (target: EventTarget | null): FocusKind =>
   target instanceof HTMLTextAreaElement ||
   target instanceof HTMLSelectElement ||
-  (target instanceof HTMLInputElement && target.type !== 'radio' && target.type !== 'checkbox');
+  (target instanceof HTMLInputElement && target.type !== 'radio' && target.type !== 'checkbox')
+    ? 'text'
+    : target instanceof HTMLInputElement
+      ? 'choice'
+      : target instanceof HTMLButtonElement
+        ? 'button'
+        : target === document.body
+          ? 'body'
+          : 'other';
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(initialSnapshot);
@@ -228,7 +217,8 @@ export function App() {
   const visible = [...groups.flatMap((group) => group.sessions), ...(endedShown ? ended : [])];
   const openSession = findSession(sessions, ended, openId);
   const queue = requestQueue(snapshot?.pending ?? []);
-  const current = currentRequest(queue, chosenRequestId);
+  const keyState = { openSession: openSession ?? null, selectedId, visible, queue, chosenRequestId };
+  const { target } = keyFocus(keyState);
   const pendingOf = (sessionId: string) => requestsOf(queue, sessionId);
   const view = settingsOpen
     ? { key: 'settings', depth: 2 }
@@ -368,95 +358,64 @@ export function App() {
     window.setTimeout(() => document.getElementById(promptBoxId(sessionId))?.focus({ preventScroll: !openSession }));
 
   useEffect(() => {
-    const index = visible.findIndex((session) => session.session_id === selectedId);
-    const selected: Session | undefined = openSession ?? visible[index];
-    const tabQueue = openSession ? pendingOf(openSession.session_id) : queue;
     const handleKey = (event: KeyboardEvent) => {
-      if (event.repeat && !isTextField(event.target) && !event.key.startsWith('Arrow')) {
-        if (event.key === 'Enter' || event.key === ' ') event.preventDefault();
-        return;
-      }
-      if (event.key === 'Escape' && isTextField(event.target)) {
-        event.target.blur();
-        return;
-      }
-      if (settingsOpen) {
-        if (event.key === 'Escape') setSettingsOpen(false);
-        return;
-      }
-      if (event.ctrlKey || event.altKey || event.metaKey || isTextField(event.target)) return;
-      const key = event.key.toLowerCase();
-      const target = keyTarget(queue, chosenRequestId, selected?.session_id ?? null);
-      if (target && (key === 'a' || key === 'd' || key === 'm')) {
-        event.preventDefault();
-        const act = requestKeys.current.get(target.id);
-        if (act) act(key);
-        else void openDetail(target.session_id);
-        return;
-      }
-      switch (event.key) {
-        case 'Tab': {
-          const nextId = stepRequest(tabQueue, chosenRequestId, event.shiftKey ? -1 : 1);
-          const next = tabQueue.find((request) => request.id === nextId);
-          if (next) {
-            event.preventDefault();
-            setChosenRequestId(next.id);
-            if (!openSession) setSelectedId(next.session_id);
-          }
+      const { prevent, action } = decideKey(
+        {
+          key: event.key,
+          shift: event.shiftKey,
+          modified: event.ctrlKey || event.altKey || event.metaKey,
+          repeat: event.repeat,
+          focus: focusKind(event.target),
+          inRequest: event.target instanceof Element && event.target.closest('[id^="request-"]') !== null,
+        },
+        {
+          ...keyState,
+          settingsOpen,
+          opening: opening.current !== null,
+          tabs: openSession ? sessionTabs(listOrder, openSession.session_id) : [],
+        },
+      );
+      if (prevent) event.preventDefault();
+      switch (action?.type) {
+        case 'blur':
+          if (event.target instanceof HTMLElement) event.target.blur();
+          break;
+        case 'close-settings':
+          setSettingsOpen(false);
+          break;
+        case 'answer': {
+          const act = requestKeys.current.get(action.id);
+          if (act) act(action.key);
+          else void openDetail(action.sessionId);
           break;
         }
-        case 'ArrowDown':
-        case 'ArrowUp': {
-          if (openSession) break;
-          event.preventDefault();
-          const step = event.key === 'ArrowDown' ? 1 : -1;
-          const next = index === -1 ? (step === 1 ? visible[0] : visible.at(-1)) : visible[index + step];
-          if (next) {
-            setSelectedId(next.session_id);
-            const firstRequest = firstRequestOf(queue, next.session_id);
-            if (firstRequest !== null) setChosenRequestId(firstRequest);
-          }
+        case 'open':
+          void openDetail(action.sessionId);
           break;
-        }
-        case 'Enter':
-          if (!openSession && selected && !(event.target instanceof HTMLButtonElement)) void openDetail(selected.session_id);
+        case 'prompt':
+          void openDetail(action.sessionId).then(() => focusPrompt(action.sessionId));
           break;
-        case 'ArrowLeft':
-        case 'Backspace':
-          if (openSession && !(event.target instanceof HTMLInputElement)) {
-            event.preventDefault();
-            closeDetail();
-          }
+        case 'select':
+          if (action.requestId !== null) setChosenRequestId(action.requestId);
+          if (action.sessionId !== null) setSelectedId(action.sessionId);
           break;
-        case '[':
-        case ']': {
-          const next = openSession && stepTab(sessionTabs(listOrder, openSession.session_id), openSession.session_id, event.key === ']' ? 1 : -1);
-          if (next) void openDetail(next);
+        case 'back':
+          closeDetail();
           break;
-        }
-        case 'a':
-          if (selected && canAcknowledge(selected)) run(acknowledge(selected.session_id));
+        case 'close-panel':
+          run(closePanel());
           break;
-        case 's':
-          if (selected && canSnooze(selected)) run(snooze(selected.session_id, 5));
+        case 'acknowledge':
+          run(acknowledge(action.sessionId));
           break;
-        case 'j': {
-          const jumpTarget = selected ? (selected.state !== 'ended' ? selected.session_id : null) : current?.session_id;
-          if (jumpTarget) jumpTo(jumpTarget);
+        case 'snooze':
+          run(snooze(action.sessionId, 5));
           break;
-        }
-        case 'x':
-          if (selected && pendingOf(selected.session_id).length === 0) crossOff(selected.session_id);
+        case 'jump':
+          jumpTo(action.sessionId);
           break;
-        case '/':
-          if (selected && promptPath(selected)) {
-            event.preventDefault();
-            void openDetail(selected.session_id).then(() => focusPrompt(selected.session_id));
-          }
-          break;
-        case 'Escape':
-          if (openSession || opening.current) closeDetail();
-          else run(closePanel());
+        case 'hide':
+          crossOff(action.sessionId);
           break;
       }
     };
@@ -507,7 +466,7 @@ export function App() {
         session={session}
         pending={pendingOf(session.session_id)}
         notices={notices.filter((notice) => notice.sessionId === session.session_id)}
-        currentId={current?.id ?? null}
+        currentId={target?.id ?? null}
         queueSize={queue.length}
         keys={crossedOffRow ? null : keys}
         selected={session.session_id === selectedId}
@@ -553,7 +512,7 @@ export function App() {
           sessions={listed}
           accountUsage={snapshot?.account_usage ?? null}
           snoozedUntil={snapshot?.snoozed_until_ms ?? null}
-          queue={current && queue.length > 1 ? { position: queue.indexOf(current) + 1, total: queue.length } : null}
+          queue={target && queue.length > 1 ? { position: queue.indexOf(target) + 1, total: queue.length } : null}
           soundsEnabled={ui.sounds_enabled}
           settingsOpen={settingsOpen}
           pinned={opened?.mode === 'pinned'}
