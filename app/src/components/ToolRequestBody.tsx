@@ -20,7 +20,7 @@ export function ToolRequestBody({ request, masked }: ToolRequestBodyProps) {
   };
   const path = field('file_path');
   const pathLine = path !== null && (
-    <p className="mt-1 font-mono text-secondary text-ink [overflow-wrap:anywhere]">{displayPath(path, request.cwd)}</p>
+    <p className="mt-1 font-mono text-secondary break-all text-ink">{displayPath(path, request.cwd)}</p>
   );
   const command = field('command');
   const url = field('url');
