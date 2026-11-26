@@ -61,34 +61,38 @@ export function ToolActions({ request, destructive, currentId, sending, keys, se
     );
   }
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-      <FilledButton danger={armed} disabled={sending} onClick={allow}>
-        {armed ? 'Press again to allow' : 'Allow'}
-        <KeyHint shortcut="A" />
-      </FilledButton>
-      {!destructive && (
-        <OutlineButton disabled={sending} onClick={() => setMode('rule')}>
-          Always allow…
+    <>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <FilledButton danger={armed} disabled={sending} onClick={allow}>
+          {armed ? 'Press again to allow' : 'Allow'}
+          <KeyHint shortcut="A" />
+        </FilledButton>
+        <OutlineButton disabled={sending} onClick={() => send({ type: 'deny' })}>
+          Deny
+          <KeyHint shortcut="D" />
         </OutlineButton>
-      )}
-      <OutlineButton disabled={sending} onClick={() => send({ type: 'deny' })}>
-        Deny
-        <KeyHint shortcut="D" />
-      </OutlineButton>
-      <OutlineButton disabled={sending} onClick={() => setMode('message')}>
-        Deny with message
-        <KeyHint shortcut="M" />
-      </OutlineButton>
-      {more ? (
-        <OutlineButton disabled={sending} onClick={() => send({ type: 'deny_and_stop' })}>
-          <span className="text-danger">Deny and stop Claude</span>
+        <OutlineButton disabled={sending} onClick={() => setMode('message')}>
+          Deny with message
+          <KeyHint shortcut="M" />
         </OutlineButton>
-      ) : (
-        <TextButton disabled={sending} onClick={() => setMore(true)}>
-          More
-        </TextButton>
-      )}
-      <JumpButton shortcut onJump={onJump} />
-    </div>
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-4">
+        {!destructive && (
+          <TextButton disabled={sending} onClick={() => setMode('rule')}>
+            Always allow…
+          </TextButton>
+        )}
+        {more ? (
+          <TextButton disabled={sending} onClick={() => send({ type: 'deny_and_stop' })}>
+            <span className="text-danger">Deny and stop Claude</span>
+          </TextButton>
+        ) : (
+          <TextButton disabled={sending} onClick={() => setMore(true)}>
+            More
+          </TextButton>
+        )}
+        <JumpButton quiet shortcut onJump={onJump} />
+      </div>
+    </>
   );
 }

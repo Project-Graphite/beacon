@@ -5,6 +5,7 @@ import { Collapse } from './Collapse';
 import { Icon } from './Icon';
 import { LineClamp } from './LineClamp';
 import { Markdown } from './Markdown';
+import { TextButton } from './TextButton';
 
 interface SessionDetailsProps {
   session: Session;
@@ -18,15 +19,10 @@ export function SessionDetails({ session, detail, open, onToggle }: SessionDetai
   if (!detail?.last_message && usage?.status !== 'ok' && usage?.status !== 'unrecognized') return null;
   return (
     <section>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={onToggle}
-        className="press flex items-center gap-1.5 rounded-field text-secondary text-faint hover:text-muted"
-      >
-        <Icon name="chevron" className={`size-3 transition-transform duration-200 ease-settle ${open ? 'rotate-90' : ''}`} />
+      <TextButton aria-expanded={open} onClick={onToggle}>
+        <Icon name="chevron" className={`mr-1.5 size-3 transition-transform duration-200 ease-settle ${open ? 'rotate-90' : ''}`} />
         More
-      </button>
+      </TextButton>
       <Collapse open={open}>
         <div className="space-y-4 pt-2.5">
           {detail?.last_message && (
