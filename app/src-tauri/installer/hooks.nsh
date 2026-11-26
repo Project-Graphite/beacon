@@ -70,7 +70,7 @@ FunctionEnd
     DeleteRegKey HKCU "Software\Classes\AppUserModelId\${BUNDLEID}"
     Delete "$LOCALAPPDATA\Beacon\autostart"
     ${If} $BeaconUnhookResult == 0
-      MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Also delete Beacon's data (settings, state, logs and hook backups) in $LOCALAPPDATA\Beacon?" /SD IDNO IDNO +3
+      MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Also delete Beacon's data (settings, state, logs and hook backups) in $LOCALAPPDATA\Beacon, and the panel's browser data in $LOCALAPPDATA\${BUNDLEID}?" /SD IDNO IDNO +3
       RMDir /r "$LOCALAPPDATA\Beacon"
       RMDir /r "$LOCALAPPDATA\${BUNDLEID}"
     ${EndIf}
