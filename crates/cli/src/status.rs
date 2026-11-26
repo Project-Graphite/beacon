@@ -1,7 +1,6 @@
 use crate::{Context, connect, platform};
 use beacon_cli::surface_label;
-use beacon_core::{Reply, Session, Snapshot, now_ms, one_line, redact};
-use serde_json::Value;
+use beacon_core::{Reply, Session, Snapshot, now_ms, one_line, redact, redact_json};
 use std::cmp::Reverse;
 use std::io::Write;
 use std::path::Path;
@@ -88,8 +87,8 @@ fn shown(mut snapshot: Snapshot, all: bool) -> Snapshot {
 fn to_json(snapshot: &Snapshot) -> Result<String, String> {
     let mut snapshot = snapshot.clone();
     for pending in &mut snapshot.pending {
-        redact_strings(&mut pending.tool_input);
-        redact_strings(&mut pending.permission_suggestions);
+        pending.tool_input = redact_json("", &pending.tool_input);
+        pending.permission_suggestions = redact_json("", &pending.permission_suggestions);
         pending.plan = pending.plan.as_deref().map(redact);
     }
     for prompt in snapshot
@@ -100,15 +99,6 @@ fn to_json(snapshot: &Snapshot) -> Result<String, String> {
         prompt.text = prompt.text.as_deref().map(redact);
     }
     serde_json::to_string(&snapshot).context("cannot encode the snapshot")
-}
-
-fn redact_strings(value: &mut Value) {
-    match value {
-        Value::String(text) => *text = redact(text),
-        Value::Array(items) => items.iter_mut().for_each(redact_strings),
-        Value::Object(fields) => fields.values_mut().for_each(redact_strings),
-        _ => {}
-    }
 }
 
 pub fn render(snapshot: &Snapshot, now: u64) -> String {
