@@ -27,7 +27,7 @@ export function SegmentedControl<T extends string | number>({
       {choices.map((choice) => (
         <label
           key={choice.value}
-          className={`relative flex items-center rounded-mark px-2.5 text-secondary text-muted transition-[color,background-color,box-shadow] duration-200 ease-settle has-checked:bg-raised has-checked:text-ink has-checked:shadow-card has-focus-visible:outline-2 has-focus-visible:outline-ink ${disabled ? '' : 'cursor-pointer hover:text-ink'}`}
+          className={`relative flex items-center rounded-mark px-2.5 text-secondary text-muted transition-[color,background-color,box-shadow] duration-200 ease-settle has-checked:bg-segment has-checked:text-ink has-checked:shadow-card has-focus-visible:outline-2 has-focus-visible:outline-ink ${disabled ? '' : 'cursor-pointer hover:text-ink'}`}
         >
           <input
             type="radio"

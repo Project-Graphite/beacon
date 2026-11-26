@@ -15,6 +15,7 @@
   --color-dormant: #6e6e78;
   --color-highlight: #d7b24a;
   --color-raised: #1d1d22;
+  --color-segment: #68686f;
   --color-overlay: color-mix(in srgb, var(--color-surface) 92%, transparent);
   --color-sheen: rgb(255 255 255 / 0.05);
   --font-sans: 'Segoe UI Variable Text', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
@@ -192,6 +193,7 @@
     --color-highlight: #7a5c0c;
     --color-dormant: #a0a0a8;
     --color-raised: #ffffff;
+    --color-segment: #ffffff;
     --color-sheen: rgb(255 255 255 / 0.7);
     --shadow-popover: 0 16px 36px -14px rgb(24 24 27 / 0.28), 0 2px 6px -2px rgb(24 24 27 / 0.12);
     --shadow-card: 0 1px 2px rgb(24 24 27 / 0.08);
