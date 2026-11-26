@@ -179,12 +179,12 @@ export function startupSummary(ui: UiSettings): string {
 
 export function behaviourSummary(ui: UiSettings, config: LiveConfig | null): string {
   return [
-    config && `Headless runs ${config.answer_unattended ? 'answered here' : 'pass through'}`,
-    config && `stalled after ${config.stall_minutes} min`,
+    config?.answer_unattended && 'headless answered',
+    config && `stalled ${config.stall_minutes} min`,
     config &&
       (config.clear_finished_minutes === 0
-        ? 'finished kept'
-        : `finished cleared after ${spanLabel(config.clear_finished_minutes * 60, '')}`),
+        ? 'never cleared'
+        : `cleared ${spanLabel(config.clear_finished_minutes * 60, '')}`),
     ui.hotkey,
   ]
     .filter(Boolean)

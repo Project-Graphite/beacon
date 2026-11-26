@@ -209,11 +209,11 @@ test('closed sections sum up their current values on one line', () => {
   assert.equal(startupSummary({ ...UI_DEFAULTS, start_mode: 'login' }), 'When I sign in to Windows');
   assert.equal(
     behaviourSummary(UI_DEFAULTS, { stall_minutes: 10, answer_unattended: false, clear_finished_minutes: 10 }),
-    'Headless runs pass through · stalled after 10 min · finished cleared after 10 min · Ctrl+Alt+Space',
+    'stalled 10 min · cleared 10 min · Ctrl+Alt+Space',
   );
   assert.equal(
     behaviourSummary({ ...UI_DEFAULTS, hotkey: 'Ctrl+Shift+B' }, { stall_minutes: 3, answer_unattended: true, clear_finished_minutes: 0 }),
-    'Headless runs answered here · stalled after 3 min · finished kept · Ctrl+Shift+B',
+    'headless answered · stalled 3 min · never cleared · Ctrl+Shift+B',
   );
   assert.equal(behaviourSummary(UI_DEFAULTS, null), 'Ctrl+Alt+Space');
 });
@@ -253,6 +253,6 @@ test('finished sessions clear after never, 5, 10 or 30 minutes or an hour', () =
   );
   assert.equal(
     behaviourSummary(UI_DEFAULTS, { stall_minutes: 10, answer_unattended: false, clear_finished_minutes: 60 }),
-    'Headless runs pass through · stalled after 10 min · finished cleared after 1 hour · Ctrl+Alt+Space',
+    'stalled 10 min · cleared 1 hour · Ctrl+Alt+Space',
   );
 });
