@@ -2,7 +2,10 @@
 name = "beacon-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+description = "Beacon core: session registry, state machine, decision broker and pipe server"
 license.workspace = true
+repository.workspace = true
 publish.workspace = true
 
 [dependencies]

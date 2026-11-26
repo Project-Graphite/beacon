@@ -2,7 +2,10 @@
 name = "beacon-app"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+description = "Beacon tray app, overlay and panel window"
 license.workspace = true
+repository.workspace = true
 publish.workspace = true
 
 [build-dependencies]

@@ -5,7 +5,9 @@ members = ["crates/protocol", "crates/hook", "crates/core", "crates/cli", "app/s
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
+rust-version = "1.100"
 license = "MIT"
+repository = "https://github.com/Project-Graphite/beacon"
 publish = false
 
 [workspace.dependencies]

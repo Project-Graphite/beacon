@@ -2,5 +2,8 @@
 name = "beacon-protocol"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+description = "Wire format shared by the Beacon hook helper, core and clients"
 license.workspace = true
+repository.workspace = true
 publish.workspace = true

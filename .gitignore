@@ -5,3 +5,5 @@ target/
 .env.local
 spikes/out/
 .claude/worktrees/
+.impeccable/*.local.json
+.impeccable/hook.*.json
