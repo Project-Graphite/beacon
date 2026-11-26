@@ -196,7 +196,21 @@ impl Engine {
     }
 
     pub fn load_sessions(bytes: &[u8]) -> io::Result<Vec<Session>> {
-        Ok(serde_json::from_slice::<PersistedState>(bytes)?.sessions)
+        Ok(serde_json::from_slice::<PersistedState>(bytes)?
+            .sessions
+            .into_iter()
+            .map(|session| Session {
+                title: session.title.as_deref().map(title_line),
+                listed_name: session.listed_name.as_deref().map(title_line),
+                last_message_preview: session.last_message_preview.as_deref().map(redact),
+                last_error: session.last_error.as_deref().map(redact),
+                mcp_request: session.mcp_request.map(|request| McpRequest {
+                    message: redact(&request.message),
+                    ..request
+                }),
+                ..session
+            })
+            .collect())
     }
 
     pub fn load_global_snooze(bytes: &[u8]) -> io::Result<Option<u64>> {

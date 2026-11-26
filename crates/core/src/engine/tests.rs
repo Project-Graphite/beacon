@@ -3197,6 +3197,46 @@ fn a_state_file_without_creation_times_adopts_the_current_one() {
 }
 
 #[test]
+fn a_restored_state_file_has_its_secrets_masked_and_its_titles_cut() {
+    let secret = "GITHUB_TOKEN=abc123";
+    let persisted = serde_json::to_vec(&json!({"sessions": [Session {
+        title: Some(format!("Deploy\n{secret} {}", "x".repeat(200))),
+        listed_name: Some(format!("listed {secret}")),
+        last_message_preview: Some(format!("preview {secret}")),
+        last_error: Some(format!("error {secret}")),
+        mcp_request: Some(McpRequest {
+            server: "github".to_string(),
+            message: format!("message {secret}"),
+        }),
+        ..persisted(SESSION, SessionState::NeedsMcpInput, now_ms())
+    }]}))
+    .unwrap();
+    let restored = &Engine::load_sessions(&persisted).unwrap()[0];
+    let title = restored.title.as_deref().unwrap();
+    assert!(title.starts_with("Deploy GITHUB_TOKEN=*** xxx"), "{title}");
+    assert_eq!(title.chars().count(), 80);
+    assert_eq!(
+        restored.listed_name.as_deref(),
+        Some("listed GITHUB_TOKEN=***")
+    );
+    assert_eq!(
+        restored.last_message_preview.as_deref(),
+        Some("preview GITHUB_TOKEN=***")
+    );
+    assert_eq!(
+        restored.last_error.as_deref(),
+        Some("error GITHUB_TOKEN=***")
+    );
+    assert_eq!(
+        restored.mcp_request,
+        Some(McpRequest {
+            server: "github".to_string(),
+            message: "message GITHUB_TOKEN=***".to_string(),
+        })
+    );
+}
+
+#[test]
 fn a_pid_with_a_changed_creation_time_no_longer_keeps_a_session_alive() {
     let own_created = crate::platform::process_created(std::process::id()).unwrap();
     let mut fixture = fixture_with(Config::default(), vec![running_session(Some(own_created))]);
