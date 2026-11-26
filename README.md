@@ -11,8 +11,7 @@
 </p>
 
 <p align="center">
-  <img src=".images/panel-dark.png" width="380" alt="The Beacon panel in the dark theme">
-  <img src=".images/panel-light.png" width="380" alt="The Beacon panel in the light theme">
+  <img src=".images/beacon-demo.webp" width="800" alt="The Beacon panel beside its overlay pill listing six sessions, as a pointer allows a permission request, answers a question and sends a finished session a prompt that wakes it.">
 </p>
 
 ## What it does
@@ -89,6 +88,11 @@ Open it from the edge tab, the pill's arrow, the tray icon or the shortcut, `Ctr
 default (change it under Settings › Behaviour › Shortcut). Sessions are grouped by state, each with
 its title, its progress and its current step. Open one to see its plan, recent activity, the command
 it is running, its last message and usage, and a box to send it a prompt.
+
+<p align="center">
+  <img src=".images/panel-dark.png" width="380" alt="The panel in the dark theme, listing sessions grouped by state: a permission request and a question that need you, a finished session, two working sessions with their progress, an idle one and the collapsed Ended group">
+  <img src=".images/panel-light.png" width="380" alt="A session opened in the light theme, showing a Bash permission request card with its command and the Allow, Deny and Deny with message buttons">
+</p>
 
 With **Pin panel while Claude is active** (off by default) the panel opens by itself without taking
 focus while a session is starting, working, stalled or needs you, closes 5 s after Claude is done,
@@ -273,6 +277,8 @@ npm --prefix app test
 ```
 
 `npm --prefix app run preview:panel` opens the panel in a browser with sample sessions.
+The scripted walkthrough the demo above was recorded from is the preview's demo page,
+`app/preview/demo.html`, served at `http://localhost:5174/preview/demo.html`.
 
 `scripts\release.ps1` refuses a working tree with uncommitted or untracked changes, takes the version
 from the workspace `Cargo.toml`, and builds the installer, the zip and `SHA256SUMS.txt` into `dist\`.
