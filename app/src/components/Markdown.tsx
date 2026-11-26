@@ -46,7 +46,7 @@ function blockNode(block: Block, key: number): ReactNode {
       );
     case 'code':
       return (
-        <pre key={key} className="rounded-field bg-surface px-2 py-1.5 font-mono text-micro whitespace-pre-wrap [overflow-wrap:anywhere]">
+        <pre key={key} className="rounded-field bg-ink/8 px-2 py-1.5 font-mono text-micro whitespace-pre-wrap [overflow-wrap:anywhere]">
           {block.text}
         </pre>
       );
