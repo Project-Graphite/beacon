@@ -15,7 +15,7 @@ export function SessionTabs({ tabs, currentId, onSwitch }: SessionTabsProps) {
     strip.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [currentId]);
   return (
-    <div ref={strip} role="tablist" aria-label="Sessions" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-0.5">
+    <div ref={strip} role="tablist" aria-label="Sessions" className="flex min-w-0 flex-1 items-center gap-0.5 scroll-px-1 overflow-x-auto p-1">
       {tabs.map((tab) => (
         <button
           key={tab.session_id}
