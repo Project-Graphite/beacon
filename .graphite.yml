@@ -9,7 +9,7 @@ projects:
     owner: amrmscll
     authors: [AmrMsCLL]
     status: wip
-    listed: false
+    listed: true
     releases: manual
     deploy:
       kind: none
