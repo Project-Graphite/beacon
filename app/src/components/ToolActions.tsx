@@ -62,7 +62,7 @@ export function ToolActions({ request, destructive, currentId, sending, keys, se
   }
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-      <FilledButton disabled={sending} onClick={allow}>
+      <FilledButton danger={armed} disabled={sending} onClick={allow}>
         {armed ? 'Press again to allow' : 'Allow'}
         <KeyHint shortcut="A" />
       </FilledButton>

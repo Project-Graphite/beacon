@@ -58,7 +58,7 @@ export function RequestRow({ request, marked, currentId, keys, onOpen }: Request
         >
           {request.kind === 'tool' ? (
             <>
-              <FilledButton compact onClick={allow}>
+              <FilledButton compact danger={armed} onClick={allow}>
                 {armed ? 'Press again' : 'Allow'}
               </FilledButton>
               <OutlineButton compact onClick={() => send({ type: 'deny' })}>
