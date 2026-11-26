@@ -11,7 +11,7 @@ export function DiffBlock({ lines }: { lines: DiffLine[] }) {
   return (
     <LineClamp lines={lines}>
       {(shown) => (
-        <div className="mt-1 rounded-field bg-surface py-1 font-mono text-secondary">
+        <div className="mt-1 overflow-hidden rounded-field bg-surface py-1 font-mono text-secondary">
           {shown.map((line, index) => (
             <div key={index} className={`flex pr-2 ${LINE_STYLES[line.kind].line}`}>
               <span aria-hidden="true" className={`w-5 shrink-0 text-center select-none ${LINE_STYLES[line.kind].markColour}`}>
