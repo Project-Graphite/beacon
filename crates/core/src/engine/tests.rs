@@ -2908,6 +2908,16 @@ fn a_late_prompt_event_expires_only_the_decisions_asked_before_it_was_sent() {
     std::thread::sleep(std::time::Duration::from_millis(5));
     let sent_ms = now_ms();
     let (live, mut live_receiver) = fixture.ask(PERMISSION_REQUEST);
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let HookOutcome::Wait(delayed, mut delayed_receiver) = fixture.engine.handle_hook(
+        json!({"v": 1, "event": "PermissionRequest", "pid": 1, "t_ms": sent_ms - 1, "env": {}})
+            .to_string()
+            .as_bytes(),
+        PERMISSION_REQUEST,
+    ) else {
+        panic!("expected a pending decision");
+    };
+    assert!(fixture.engine.snapshot().pending[2].created_ms > sent_ms);
     fixture.engine.handle_hook(
         json!({"v": 1, "event": "UserPromptSubmit", "pid": 1, "t_ms": sent_ms, "env": {}})
             .to_string()
@@ -2924,6 +2934,9 @@ fn a_late_prompt_event_expires_only_the_decisions_asked_before_it_was_sent() {
     assert_eq!(snapshot.pending[0].id, live);
     assert_eq!(snapshot.resolved[0].id, stale);
     assert_eq!(snapshot.resolved[0].resolution, Resolution::Expired);
+    assert_eq!(delayed_receiver.try_recv(), RELEASED);
+    assert_eq!(snapshot.resolved[1].id, delayed);
+    assert_eq!(snapshot.resolved[1].resolution, Resolution::Expired);
 }
 
 #[test]

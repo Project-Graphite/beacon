@@ -53,6 +53,7 @@ pub enum HookOutcome {
 struct Pending {
     view: PendingDecision,
     reply: oneshot::Sender<HookReply>,
+    sent_ms: u64,
 }
 
 pub struct PromptDelivery {
@@ -1065,7 +1066,18 @@ impl Engine {
         ));
         let (id, kind, session_id) = (view.id, view.kind, view.session_id.clone());
         let (reply, receiver) = oneshot::channel();
-        self.pending.insert(id, Pending { view, reply });
+        self.pending.insert(
+            id,
+            Pending {
+                sent_ms: if meta.t_ms == 0 {
+                    view.created_ms
+                } else {
+                    meta.t_ms
+                },
+                view,
+                reply,
+            },
+        );
         self.apply(&session_id, Input::PermissionRequested(kind));
         HookOutcome::Wait(id, receiver)
     }
@@ -1163,12 +1175,12 @@ impl Engine {
         Ok(())
     }
 
-    fn expire_pending(&mut self, session_id: &str, created_before_ms: u64) {
+    fn expire_pending(&mut self, session_id: &str, sent_before_ms: u64) {
         let stale: Vec<u64> = self
             .pending
             .iter()
             .filter(|(_, pending)| {
-                pending.view.session_id == session_id && pending.view.created_ms < created_before_ms
+                pending.view.session_id == session_id && pending.sent_ms < sent_before_ms
             })
             .map(|(id, _)| *id)
             .collect();
