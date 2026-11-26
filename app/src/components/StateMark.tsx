@@ -9,18 +9,7 @@ function shape(state: SessionState) {
     case 'starting':
       return <circle cx="8" cy="8" r="2" className="fill-dormant" />;
     case 'working':
-      return (
-        <>
-          <path
-            d="M12 8A4 4 0 1 1 8 4"
-            fill="none"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            className="stroke-ink motion-reduce:hidden"
-          />
-          <circle {...RING} r="4" strokeWidth="1.5" className="hidden stroke-ink motion-reduce:inline" />
-        </>
-      );
+      return <path d="M12 8A4 4 0 1 1 8 4" fill="none" strokeWidth="1.5" strokeLinecap="round" className="stroke-ink" />;
     case 'needs_permission':
     case 'needs_answer':
     case 'needs_plan_approval':
