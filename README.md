@@ -129,12 +129,13 @@ or **Show** brings it back. Hiding never closes the session itself.
 | The list | `↑` `↓` select · `Enter` open · `A` acknowledge (no request waiting) · `S` snooze 5 min · `J` jump · `X` hide (no request waiting) · `/` prompt · `Esc` close the panel |
 | A session | `Esc` `←` `Backspace` back · `[` `]` previous or next session · `A` acknowledge · `S` snooze 5 min · `J` jump · `X` hide · `/` prompt |
 
-The marked request, with an amber bar on its left, is the one the keys act on. In the list, `M`,
-and any of the three on a question or plan, open the session instead, since they need the full
-card. Letters work in either case and held keys are ignored. A key acts only on a request that is
-fully in view (the first press scrolls it into view), and is ignored for 0.4 s after the marked
-request changes, so an answer cannot land on a request that just took another's place. With fewer
-than two requests waiting, or with focus on a control outside a request, `Tab` moves focus as usual.
+The marked request is the one the keys act on: its line is heavier in the list and its card is
+outlined in a session. In the list, `M`, and any of the three on a question or plan, open the
+session instead, since they need the full card. Letters work in either case and held keys are
+ignored. A key acts only on a request that is in view (the first press scrolls it into view). Keys
+and request buttons are ignored for 0.4 s after the marked request changes or a request moves on
+screen, so an answer cannot land on a request that just took another's place. With fewer than two
+requests waiting, or with focus on a control outside a request, `Tab` moves focus as usual.
 
 ## Settings
 

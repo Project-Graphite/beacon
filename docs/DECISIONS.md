@@ -24,17 +24,21 @@ follow at the end.
   waiting in the panel.
 - **A late prompt event expires only the requests asked before it was sent.** A prompt, stop or
   session-end event used to expire every pending request of its session, so one that arrived late
-  could expire the new turn's request. The core now compares each request with the time the helper
-  stamped on the event. Limit: the helper stamps it after connecting to the core, so a request asked
-  while that helper was connecting still counts as older.
+  could expire the new turn's request. The core now compares the time each request's helper stamped
+  on it with the time the event's helper stamped on the event, so a request whose helper reached the
+  core late is still judged by when it was sent. Limit: each helper stamps after it connects to the
+  core, so a request whose helper connected while the event's helper was still connecting still
+  counts as older; a request without a stamp is judged by when the core received it.
 - **A `gitdir:` pointer to a network share is not followed**, so reading a session's branch never
   opens a `\\server` or `//server` path.
 - **Titles from hooks and names from `claude agents` are cut to one redacted line of 80 characters**,
-  like the other titles.
+  like the other titles. Sessions restored from a `state.json` that 0.2.0 wrote get the same
+  redaction and title cut when they are loaded.
 - **Install and uninstall are safer with the settings file.** Install writes a `before-install` copy
-  before it repairs a file that has no restore point, backups are kept ten per kind, a relative
-  `--settings` path is stored and compared as an absolute one, and the staged file is flushed to
-  disk before it replaces the original. An always rule that starts with a dash is refused instead of
+  before it repairs a file without writing a new restore point, backups are kept ten per kind, and
+  the staged file is flushed to disk before it replaces the original. A relative `--settings` path
+  is stored as an absolute one, and the path an existing `install.json` records is made absolute
+  before it is compared, so a record 0.2.0 wrote from a relative or forward-slash path still matches. An always rule that starts with a dash is refused instead of
   being read as a flag.
 - **The uninstaller keeps the data when it cannot remove the hooks.** It warns that the hooks are
   still in the settings file and keeps `%LOCALAPPDATA%\Beacon`, so the helper they point to and the
@@ -50,17 +54,22 @@ follow at the end.
 - **The pinned panel holds only while a session is starting, working, stalled or needs you.** In
   0.2.0 an unseen finished or failed session also held it, so it did not close after Claude was done.
   It also closes when a fullscreen window takes the foreground and opens again after.
-- **Only the installed build applies the start mode**, so a development build run from `target\`
-  no longer takes over starting with Claude or the sign-in entry.
+- **Only the installed build applies the start mode**, at start-up or when it is changed in the
+  panel, so a development build run from `target\` no longer takes over starting with Claude or the
+  sign-in entry.
 - **Every `ui.json` field is read leniently**: one mistyped value falls back to its default alone
-  instead of resetting the file.
+  instead of resetting the file, and a malformed entry in a position map or the avoided-display list
+  is dropped alone, keeping the other entries.
 - **The overlay palette matches the panel's dark tokens.** The light theme's accents stay at the
   stronger mark grade, so they read on a white capsule.
 - **The keys act on one current request.** The marked request is the one `A`, `D` and `M` act on,
   decided in one pure function (`decideKey` in `app/src/lib/keys.ts`) with its own tests. A key acts
-  only on a request that is fully in view (the first press scrolls it there) and only once the
-  marked request has been in place for 0.4 s, so an answer cannot land on a request that just took
-  another's place; request buttons ignore clicks for the same 0.4 s. `Tab` is left to the browser
+  only on a request that is in view (the first press scrolls it there; a card taller than the list
+  counts once it fills the list) and only once the marked request has been the target for 0.4 s, so
+  an answer cannot land on a request that just took another's place. A request's buttons, and the
+  keys with them, are ignored for 0.4 s after that request appears or moves on screen, with no
+  visible sign. The marked request is shown by weight in the list and an outline on its card, not
+  by a coloured bar. `Tab` is left to the browser
   unless two or more requests wait and focus is on the page or inside a request.
 - **Masking covers plans and questions too.** Plan text, question text and options are masked like
   tool input, each card with its own "Show unmasked". Masking walks the value tree, so a secret
@@ -92,6 +101,11 @@ follow at the end.
   loses it without a trace.
 - (j) With two or more requests waiting, `Tab` steps through the requests, so the controls inside a
   card are reached by pointer or by the letter keys.
+- (k) Masking by name matches any argument whose name contains key, token, secret or password, so
+  ordinary values such as `max_tokens` or `keyword` are masked too, and `beacon status --json`
+  prints them as `"***"`. "Show unmasked" reveals them in the panel.
+- (l) Four helper tests bound wall-clock time that includes starting a process, so they may fail
+  on a slow or busy machine.
 
 ## 0.2.0: refined Graphite, light and dark, an installer (2026-11-24)
 

@@ -104,8 +104,8 @@ Avatars round at a quarter of their size. Depth comes from a soft offset shadow 
   border and a second-press Allow, filled with `danger` while it waits for the second press. A tool
   request's actions sit in two rows: Allow, Deny and Deny with message as buttons, then Always
   allow…, More and Jump as quieter text buttons.
-- Commands and paths wrap at the box edge, never after a hyphen, so a flag is not split into what
-  reads as two words.
+- Commands wrap between words, never after a hyphen, so a flag is not split into what reads as two
+  words. A single word or path breaks only when it is wider than the box, at the box edge.
 
 ## Motion
 
