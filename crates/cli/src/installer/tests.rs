@@ -544,6 +544,40 @@ fn uninstall_refuses_a_record_for_another_settings_file() {
 }
 
 #[test]
+fn a_record_spelling_the_same_settings_file_differently_is_matched_by_install_and_uninstall() {
+    for spelling in [
+        |settings: &str| settings.replace('\\', "/"),
+        |settings: &str| settings.replace(r"\settings.json", r"\.\settings.json"),
+    ] {
+        let case = case("realistic");
+        case.install();
+        let record = read_record(&case.paths).unwrap().unwrap();
+        let settings = case.paths.settings.to_str().unwrap();
+        let settings_path = PathBuf::from(spelling(settings));
+        assert_ne!(settings_path.to_str(), Some(settings));
+        let respelled = serde_json::to_vec_pretty(&InstallRecord {
+            settings_path,
+            ..record.clone()
+        })
+        .unwrap();
+        std::fs::write(case.paths.record(), &respelled).unwrap();
+        case.install();
+        let reinstalled = read_record(&case.paths).unwrap().unwrap();
+        assert_eq!(
+            InstallRecord {
+                installed_at: record.installed_at.clone(),
+                ..reinstalled
+            },
+            record
+        );
+        std::fs::write(case.paths.record(), &respelled).unwrap();
+        case.uninstall();
+        assert_eq!(case.settings(), case.input);
+        assert!(!case.paths.record().exists());
+    }
+}
+
+#[test]
 fn a_relative_settings_path_is_resolved_to_an_absolute_one() {
     assert_eq!(
         Paths::resolve(Some(PathBuf::from(r"claude\settings.json")))

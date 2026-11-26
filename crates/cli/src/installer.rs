@@ -453,8 +453,11 @@ fn remove_if_present(path: &Path) -> Result<(), String> {
     }
 }
 
-fn same_path(left: &Path, right: &Path) -> bool {
-    left.as_os_str().eq_ignore_ascii_case(right.as_os_str())
+fn same_path(recorded: &Path, settings: &Path) -> bool {
+    std::path::absolute(recorded)
+        .unwrap_or_else(|_| recorded.to_path_buf())
+        .as_os_str()
+        .eq_ignore_ascii_case(settings.as_os_str())
 }
 
 fn unused_backup(directory: &Path, kind: &str) -> PathBuf {
