@@ -85,6 +85,9 @@ export function SessionView({
   const reserved = detail ? 0 : reservedDetailHeight(session);
   const meta = metaItems(session);
   const facts = [
+    <span key="state" className={TONE_CLASSES[phrase.tone]}>
+      {phrase.text}
+    </span>,
     session.project && <span key="project">{session.project}</span>,
     session.branch && (
       <span key="branch" title="Branch" className="font-mono">
@@ -92,9 +95,6 @@ export function SessionView({
       </span>
     ),
     <span key="surface">{surface(session).label}</span>,
-    <span key="state" className={TONE_CLASSES[phrase.tone]}>
-      {phrase.text}
-    </span>,
   ].filter(Boolean);
 
   return (
@@ -109,7 +109,9 @@ export function SessionView({
           <div className="flex items-center gap-3">
             <Avatar session={session} size="header" />
             <div className="min-w-0 flex-1">
-              <h2 className="truncate text-title font-semibold text-ink">{sessionTitle(session)}</h2>
+              <h2 title={sessionTitle(session)} className="line-clamp-2 text-title font-semibold text-balance text-ink">
+                {sessionTitle(session)}
+              </h2>
               <p className="truncate text-secondary text-muted">
                 {facts.map((fact, index) => (
                   <span key={index}>
