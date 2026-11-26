@@ -16,7 +16,6 @@
   --color-highlight: #d7b24a;
   --color-raised: #1d1d22;
   --color-segment: #68686f;
-  --color-overlay: color-mix(in srgb, var(--color-surface) 92%, transparent);
   --color-sheen: rgb(255 255 255 / 0.05);
   --font-sans: 'Segoe UI Variable Text', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Cascadia Mono', ui-monospace, 'JetBrains Mono', Consolas, monospace;
