@@ -39,7 +39,7 @@ export function RequestRow({ request, marked, currentId, keys, onOpen }: Request
     <div
       id={keys ? requestId(request.id) : undefined}
       data-motion={`request:${request.id}`}
-      className="flex min-h-9 scroll-my-2 items-center gap-2.5 pr-3 pb-2.5 pl-[56px]"
+      className="flex min-h-9 scroll-my-2 items-center gap-2.5 pr-2.5 pb-2.5 pl-[56px]"
     >
       {destructive && (
         <span role="img" aria-label={`Looks destructive: ${destructive}`} title={`Looks destructive: ${destructive}`} className="size-2 shrink-0 rounded-full bg-danger" />
