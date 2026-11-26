@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { decide, type Decision, type PendingDecision } from '../beacon';
+import type { PendingDecision } from '../beacon';
+import { useDecision } from '../hooks/useDecision.ts';
 import { useNow } from '../hooks/useNow.ts';
-import { errorText } from '../lib/format.ts';
 import { destructiveReason } from '../lib/destructive.ts';
 import { requestId } from '../lib/queue.ts';
 import { redactJson } from '../lib/redact.ts';
-import { decisionMark, mcpTool, requestMeta } from '../lib/requests.ts';
+import { mcpTool, requestMeta } from '../lib/requests.ts';
 import { DecisionMark } from './DecisionMark';
 import { PlanRequest } from './PlanRequest';
 import { QuestionRequest } from './QuestionRequest';
@@ -23,19 +23,10 @@ interface RequestCardProps {
 
 export function RequestCard({ request, marked, currentId, keys, onJump }: RequestCardProps) {
   const now = useNow(true);
-  const [outcome, setOutcome] = useState<'check' | 'cross' | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  const { outcome, failure, send } = useDecision(request);
   const [unmasked, setUnmasked] = useState(false);
   const destructive = request.kind === 'tool' ? destructiveReason(request.tool_name, request.tool_input, request.cwd) : null;
   const sending = outcome !== null;
-  const send = (decision: Decision) => {
-    setOutcome(decisionMark(decision));
-    setFailure(null);
-    decide(request.id, decision).catch((error) => {
-      setOutcome(null);
-      setFailure(errorText(error));
-    });
-  };
   const title =
     request.kind === 'question' ? 'Question' : request.kind === 'plan' ? 'Plan' : mcpTool(request.tool_name) ? 'MCP tool' : request.tool_name;
 

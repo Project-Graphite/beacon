@@ -1,24 +1,24 @@
 import { useEffect, useState } from 'react';
+import { useSettled } from './useSettled.ts';
 
 const ARMED_MS = 4000;
-const SECOND_PRESS_GAP_MS = 400;
 
-export function useArmed(currentId: number | null) {
+export function useArmed(currentId: number | null, destructive: boolean, allow: () => void) {
   const [armed, setArmed] = useState(false);
-  const [ready, setReady] = useState(false);
+  const settled = useSettled(armed);
 
   useEffect(() => {
-    setReady(false);
     if (!armed) return;
-    const settle = window.setTimeout(() => setReady(true), SECOND_PRESS_GAP_MS);
     const expire = window.setTimeout(() => setArmed(false), ARMED_MS);
-    return () => {
-      window.clearTimeout(settle);
-      window.clearTimeout(expire);
-    };
+    return () => window.clearTimeout(expire);
   }, [armed]);
 
   useEffect(() => setArmed(false), [currentId]);
 
-  return [armed, setArmed, ready] as const;
+  const press = () => {
+    if (destructive && !armed) setArmed(true);
+    else if (!destructive || settled()) allow();
+  };
+
+  return [armed, press] as const;
 }

@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
-import { decide, type Decision, type PendingDecision } from '../beacon';
-import { errorText } from '../lib/format.ts';
+import { useEffect } from 'react';
+import type { PendingDecision } from '../beacon';
 import { useArmed } from '../hooks/useArmed.ts';
+import { useDecision } from '../hooks/useDecision.ts';
 import { destructiveReason } from '../lib/destructive.ts';
 import { requestId } from '../lib/queue.ts';
 import { redact } from '../lib/redact.ts';
-import { decisionMark, requestLine } from '../lib/requests.ts';
+import { requestLine } from '../lib/requests.ts';
 import { DecisionMark } from './DecisionMark';
 import { FilledButton } from './FilledButton';
 import { OutlineButton } from './OutlineButton';
@@ -19,23 +19,10 @@ interface RequestRowProps {
 }
 
 export function RequestRow({ request, marked, currentId, keys, onOpen }: RequestRowProps) {
-  const [outcome, setOutcome] = useState<'check' | 'cross' | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
-  const [armed, setArmed, ready] = useArmed(currentId);
+  const { outcome, failure, send } = useDecision(request);
   const destructive = request.kind === 'tool' ? destructiveReason(request.tool_name, request.tool_input, request.cwd) : null;
+  const [armed, allow] = useArmed(currentId, destructive !== null, () => send({ type: 'allow' }));
   const line = failure ?? redact(requestLine(request));
-  const send = (decision: Decision) => {
-    setOutcome(decisionMark(decision));
-    setFailure(null);
-    decide(request.id, decision).catch((error) => {
-      setOutcome(null);
-      setFailure(errorText(error));
-    });
-  };
-  const allow = () => {
-    if (destructive && !armed) setArmed(true);
-    else if (!destructive || ready) send({ type: 'allow' });
-  };
 
   useEffect(() => {
     if (!keys) return;

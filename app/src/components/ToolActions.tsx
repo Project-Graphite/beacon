@@ -22,13 +22,8 @@ interface ToolActionsProps {
 
 export function ToolActions({ request, destructive, currentId, sending, keys, send, onJump }: ToolActionsProps) {
   const [mode, setMode] = useState<'buttons' | 'rule' | 'message'>('buttons');
-  const [armed, setArmed, ready] = useArmed(currentId);
+  const [armed, allow] = useArmed(currentId, destructive, () => send({ type: 'allow' }));
   const [more, setMore] = useState(false);
-
-  const allow = () => {
-    if (destructive && !armed) setArmed(true);
-    else if (!destructive || ready) send({ type: 'allow' });
-  };
 
   useEffect(() => {
     if (!keys) return;
